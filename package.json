@@ -1,0 +1,29 @@
+{
+  "name": "contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "server",
+    "packages/*",
+    "agents/*",
+    "mapper",
+    "dashboard"
+  ],
+  "scripts": {
+    "mapper": "npm run start -w @contract/mapper --",
+    "worker": "npm run start -w @contract/worker --",
+    "coordinator": "npm run start -w @contract/coordinator --",
+    "dashboard": "npm run dev -w @contract/dashboard",
+    "demo": "tsx scripts/run-demo.ts",
+    "reset": "tsx scripts/reset.ts",
+    "seed": "tsx scripts/seed.ts",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "dotenv": "^18.0.9",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3"
+  }
+}

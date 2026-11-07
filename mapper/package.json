@@ -1,0 +1,9 @@
+{
+  "name": "@contract/mapper",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
+  "dependencies": { "@contract/client": "*", "ts-morph": "^28.0.0", "chokidar": "^6.0.0", "dotenv": "^18.0.9" }
+}

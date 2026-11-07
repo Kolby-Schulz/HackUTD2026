@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+# worker agents' git worktrees of demo-repo
+.worktrees/
+# SpacetimeDB build output
+server/target/
