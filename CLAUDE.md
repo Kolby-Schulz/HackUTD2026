@@ -22,11 +22,25 @@ The full build spec is in `docs/SPEC.md`. Read the sections for your part before
   if unsure, check the docs or ask.
 - Reducers have no network or filesystem access. Anything calling Nemotron or reading
   files runs in a Node process (agents, coordinator, mapper).
-- Every Nemotron call goes through packages/llm so tokens are always logged.
+- Every model call goes through packages/llm so tokens are always logged.
 - Build the MVP first (section 16). No stretch features until the MVP checklist passes.
 - Prefer simple, readable code over abstractions. This is a 24-hour hackathon.
 - Keep secrets in .env; never commit API keys. The repo will be public.
 - After each change, run the part's tests and the end-to-end script if it exists.
+
+## Model backend (temporary change from the spec)
+
+For now, workers and the coordinator run on the **local Claude Code CLI** instead of
+Nemotron (`LLM_BACKEND=claude-code`, see `packages/llm`). Where the spec says
+"Nemotron", read "the model behind `packages/llm`". Consequences:
+
+- A worker's coding step is one `llm.runAgent(...)` call: Claude Code edits files and
+  runs tests itself in the worker's worktree. There is no custom read_file/write_file
+  tool loop; Contract tools reach it later through MCP or Claude Code hooks.
+- Plans and coordinator decisions use `llm.chat(..., { jsonSchema })` with tools off.
+- Early stop: pass an `AbortSignal`; aborting kills the `claude` process.
+- Token usage comes from the CLI's JSON result and goes to `onUsage` -> `logTokens`.
+- The Nemotron backend can be added later behind the same `LLM` interface.
 
 ## Conventions
 

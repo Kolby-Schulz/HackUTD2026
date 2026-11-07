@@ -1,43 +1,22 @@
-// Shared Nemotron wrapper (spec sections 4, 11, 15). Shared by agents + coordinator.
-// DRAFT interface — agree on it as a team in milestone 1, then implement.
-// Every Nemotron call in the repo goes through here so tokens are always logged.
+// Shared LLM wrapper. Backend chosen by LLM_BACKEND (default: claude-code).
+//   claude-code: the local Claude Code CLI, headless (`claude -p`), using this machine's login
+//   nemotron:    NVIDIA hosted Nemotron (spec section 4), not implemented yet
+import { ClaudeCodeLLM } from './claude-code.ts';
+import type { LLM } from './types.ts';
 
-export type Purpose = 'plan' | 'code' | 'context' | 'test_fix' | 'merge_fix' | 'coordination';
+export * from './types.ts';
+export { ClaudeCodeLLM } from './claude-code.ts';
 
-export interface Usage {
-  prompt_tokens: number;
-  completion_tokens: number;
-}
+export type Role = 'worker' | 'coordinator';
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  tool_call_id?: string;
-  tool_calls?: unknown[];
-}
-
-export interface ToolDef {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>; // JSON Schema
-  run: (args: any) => Promise<string>;
-}
-
-export interface CallOptions {
-  model: string;
-  purpose: Purpose;
-  temperature?: number; // default 0 for demo determinism
-  signal?: AbortSignal; // worker aborts on pause (early stop)
-  onUsage: (usage: Usage, purpose: Purpose) => void | Promise<void>; // -> contract.logTokens
-}
-
-export interface LLM {
-  /** One completion, no tools. */
-  chat(messages: ChatMessage[], opts: CallOptions): Promise<{ content: string; usage: Usage }>;
-  /** Tool-calling loop: runs tools until the model stops calling them or maxSteps is hit. */
-  runTools(
-    messages: ChatMessage[],
-    tools: ToolDef[],
-    opts: CallOptions & { maxSteps?: number },
-  ): Promise<{ messages: ChatMessage[]; usage: Usage }>;
+export function createLLM(role: Role = 'worker'): LLM {
+  const backend = process.env.LLM_BACKEND ?? 'claude-code';
+  if (backend === 'claude-code') {
+    const model =
+      role === 'coordinator'
+        ? (process.env.COORDINATOR_MODEL ?? 'claude-opus-5-5')
+        : (process.env.WORKER_MODEL ?? 'claude-sonnet-5-5');
+    return new ClaudeCodeLLM(model);
+  }
+  throw new Error(`LLM_BACKEND=${backend} is not implemented yet (use claude-code)`);
 }
