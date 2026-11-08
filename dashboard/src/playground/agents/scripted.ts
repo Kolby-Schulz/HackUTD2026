@@ -17,7 +17,7 @@ export type ScriptedContext = AgentContext & { choreo: Choreographer };
 
 // ---- slot grid: each build gets a cell on the board ----
 export const COLS = 5, CELL_W = 500, CELL_H = 620, MAX_SLOTS = 30;
-export interface Slots { claim(): number; clear(): void }
+export interface Slots { claim(): number; clear(): void; /** Give a cell back (the coordinator moves an agent elsewhere). */ release?(k: number): void }
 export function createSlots(max = MAX_SLOTS): Slots {
   const used = new Set<number>();
   return {
@@ -29,6 +29,7 @@ export function createSlots(max = MAX_SLOTS): Slots {
       return k;
     },
     clear() { used.clear(); },
+    release(k) { used.delete(k); },
   };
 }
 /** World position of a template frame centred in its slot cell. */

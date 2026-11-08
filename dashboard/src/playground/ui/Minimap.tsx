@@ -1,6 +1,6 @@
 // Minimap (CANVAS-24, MULTI-11): a 180x120 canvas of the top-level shapes, other actors' viewports and cursor dots, plus the
 // draggable local viewport. Drawn from a scheduler frame (never a React render per frame): camera and presence wake it, the
-// shape list is rebuilt at most every 100 ms after a document change. Shift+M toggles (prefs.flags.minimap, default on).
+// shape list is rebuilt at most every 100 ms after a document change. Shift+M (action view.minimap) toggles prefs.flags.minimap, default on.
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { SlotProps } from './slotProps';
 import type { Pt, Rect, Shape } from '../core/types';
@@ -58,19 +58,6 @@ export function Minimap({ board, cursors }: SlotProps) {
   const cvs = useRef<HTMLCanvasElement>(null);
   const cursorsRef = useRef(cursors);
   cursorsRef.current = cursors;
-
-  // Shift+M toggle. Ignored while typing or with other modifiers.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'KeyM' || !e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-      e.preventDefault();
-      prefs.set({ flags: { ...prefs.get().flags, minimap: prefs.get().flags.minimap === false } });
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
 
   useEffect(() => {
     const canvas = cvs.current, box = wrap.current;

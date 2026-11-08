@@ -7,6 +7,8 @@ import { createChoreographer } from '../agents/choreographer';
 import type { Choreographer } from '../agents/choreographer';
 import { startAgents } from '../agents/runtime';
 import type { AgentRuntime } from '../agents/runtime';
+import { startCoordinator } from '../agents/coordinator';
+import { writeMeasuredSize } from './text/autosize';
 import type { BoardKit } from '../core/commands';
 import { installDevtools } from '../core/devtools';
 import { camera } from '../core/camera';
@@ -54,6 +56,18 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text), ...agentChatHooks(sink.chat) });
     rtRef.current = r;
     setRt(r);
+    // Claim contention rulings (WP-68). Started here, stopped in cleanup (StrictMode runs this effect twice).
+    const offCoord = startCoordinator({
+      board, chat: sink.chat,
+      pickSlot: r.pickSlot, freeSlot: r.freeSlot,
+      onRedirect: (agent) => r.redirect(agent),
+    });
+    // The agent host (this peer) writes the measured size of agent text after it is created or changed (WP-60).
+    // Viewers never do; writeMeasuredSize itself only accepts agent-made text. Its own write comes from system-measure, so it cannot loop.
+    const offMeasure = HOST_AGENTS ? board.subscribe({ kinds: ['shape.created', 'shape.updated'] }, (e) => {
+      if (!e.actor.startsWith('agent-') || !('ids' in e)) return;
+      for (const id of e.ids) writeMeasuredSize(board, id, { role: 'host' }, true);
+    }) : () => {};
     // a restored board: agents build in cells that saved work does not touch
     if (restored) r.occupy(board.doc.getState());
     for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
@@ -76,7 +90,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     return () => {
       persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
       sink.persistence = null; sink.ui.set({ persistence: null });
-      offUrl(); offKeys(); offView(); offDev();
+      offCoord(); offMeasure(); offUrl(); offKeys(); offView(); offDev();
       for (const id of r.agentIds()) board.presence.remove(id);
       r.reset();
       rtRef.current = null;

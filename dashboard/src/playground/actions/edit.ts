@@ -28,16 +28,30 @@ function followHistory(b: BoardKit, before: Set<ShapeId>) {
 
 export function undoMine(b: BoardKit): boolean {
   const before = liveSet(b);
+  const n0 = b.undoManager.last()?.n;
   const ok = b.undo(b.me);
-  if (!ok) { toast('Nothing to undo', { key: 'edit.undo', onceMs: 1500 }); return false; }
+  if (!ok) {
+    // an entry was tried but its fields were superseded: not "nothing" (the history UI reports the skip)
+    const ev = b.undoManager.last();
+    if (ev && ev.n !== n0 && ev.outcome.skipped.length) return false;
+    toast('Nothing to undo', { key: 'edit.undo', onceMs: 1500 });
+    return false;
+  }
   followHistory(b, before);
   return true;
 }
 
 export function redoMine(b: BoardKit): boolean {
   const before = liveSet(b);
+  const n0 = b.undoManager.last()?.n;
   const ok = b.redo(b.me);
-  if (!ok) { toast('Nothing to redo', { key: 'edit.redo', onceMs: 1500 }); return false; }
+  if (!ok) {
+    // an entry was tried but its fields were superseded: not "nothing" (the history UI reports the skip)
+    const ev = b.undoManager.last();
+    if (ev && ev.n !== n0 && ev.outcome.skipped.length) return false;
+    toast('Nothing to redo', { key: 'edit.redo', onceMs: 1500 });
+    return false;
+  }
   followHistory(b, before);
   return true;
 }

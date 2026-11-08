@@ -361,3 +361,23 @@ describe('abort, takeover, speed', () => {
     expect(rt.getSpeed()).toBe(0);
   });
 });
+
+describe('llm driver (WP-83)', () => {
+  it('with no bridge URL the llm driver fails closed: it says bridge offline instead of throwing', async () => {
+    const board = createBoard();
+    const said: string[] = [];
+    const rt = createRuntime({ board, clock: fakeClock(), seed: 3, frameMs: 50, onSay: (_a, t) => said.push(t) });
+    const id = rt.spawn({ driver: 'llm' });
+    await rt.request(id, { text: 'draw a button' });
+    await until(() => said.some((t) => /bridge offline/i.test(t)));
+    expect(said.some((t) => /bridge offline/i.test(t))).toBe(true);
+    rt.reset();
+  });
+  it('slot seams: pickSlot claims a cell and freeSlot gives it back', () => {
+    const rt = createRuntime({ board: createBoard(), clock: fakeClock() });
+    const a = rt.pickSlot(), b = rt.pickSlot();
+    expect(b).toBe(a + 1);
+    rt.freeSlot(a);
+    expect(rt.pickSlot()).toBe(a);
+  });
+});
