@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cloneCommand, machineId, normalizeRepo, Registry, toCommand } from '../control.ts';
+import { childEnv, cloneCommand, gitAccessHint, machineId, normalizeRepo, Registry, toCommand } from '../control.ts';
 
 describe('toCommand', () => {
   it('maps each action to its script', () => {
@@ -132,4 +132,30 @@ describe('switching repos safely', () => {
     expect(reg.needsSession()).toBe(true);
   });
 
+});
+
+describe('private repos', () => {
+  it('never lets git prompt, and keeps a GIT_SSH_COMMAND the user set', () => {
+    expect(childEnv({}, 'x')).toMatchObject({ CONTRACT_TARGET: 'x', GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' });
+    expect(childEnv({ GIT_SSH_COMMAND: 'ssh -i key' }, '').GIT_SSH_COMMAND).toBe('ssh -i key');
+  });
+
+  it('explains an auth failure with a fix for that kind of URL', () => {
+    const https = 'https://github.com/acme/secret.git';
+    expect(gitAccessHint(["fatal: could not read Username for 'https://github.com': terminal prompts disabled"], https)).toMatch(/can't access .*gh auth setup-git/);
+    expect(gitAccessHint(['git@github.com: Permission denied (publickey).'], 'git@github.com:acme/secret.git')).toMatch(/SSH key/);
+    expect(gitAccessHint(['fatal: destination path exists and is not empty'], https)).toBeUndefined();
+  });
+
+  it('adds the hint as the last line when the clone fails', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'control-'));
+    const { fn } = fakeSpawn();
+    const reg = new Registry(fn, 'tsx', root);
+    const { clone } = reg.setRepo('acme/secret');
+    clone!.log.push('remote: Repository not found.');
+    clone!.child!.emit('exit', 128);
+    await clone!.exited;
+    expect(clone!.log.at(-1)).toMatch(/can't access https:\/\/github.com\/acme\/secret.git/);
+    expect(() => reg.start(toCommand({ action: 'coordinator' }))).toThrow(/gh auth setup-git/);
+  });
 });

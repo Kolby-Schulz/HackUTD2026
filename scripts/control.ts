@@ -84,6 +84,36 @@ export function cloneCommand(repo: string, root = REPO): Command | undefined {
   return { key: 'clone', label: 'Clone repository', bin: 'git', args: ['clone', repo, dir], long: false };
 }
 
+/** git output that means "this laptop can't log in to that repo" (private repo, no credentials). */
+const GIT_AUTH_ERROR = /could not read Username|terminal prompts disabled|Authentication failed|Repository not found|Permission denied \(publickey\)|Host key verification failed|returned error: 40[13]/i;
+
+/**
+ * When a clone or pull failed because git couldn't authenticate, the line to show the user.
+ * Git runs with this laptop's own credentials (nothing goes through the dashboard), so the fix
+ * is always on this laptop.
+ */
+export function gitAccessHint(log: string[], repo: string): string | undefined {
+  if (!log.some((l) => GIT_AUTH_ERROR.test(l))) return undefined;
+  const fix = repo.startsWith('https://')
+    ? 'run `gh auth setup-git` (or set up a git credential helper) on this laptop, or use the SSH URL'
+    : 'add an SSH key for this repo to your GitHub account (check with `ssh -T git@github.com`), or use the https URL with `gh auth setup-git`';
+  return `[control] this laptop can't access ${repo}: it may be private or misspelled. To fix: ${fix}, then set the repository again.`;
+}
+
+/**
+ * Environment for every process the daemon starts. Git must fail instead of prompting: no one
+ * can type into these processes, so a private repo without credentials would hang forever.
+ */
+export function childEnv(base: NodeJS.ProcessEnv, repo: string): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    CONTRACT_TARGET: repo,
+    FORCE_COLOR: '0',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_SSH_COMMAND: base.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes',
+  };
+}
+
 const LANGS: [RegExp, string][] = [
   [/\.(ts|tsx|mts|cts)$/, 'TypeScript'], [/\.(js|jsx|mjs|cjs)$/, 'JavaScript'], [/\.py$/, 'Python'], [/\.go$/, 'Go'],
   [/\.java$/, 'Java'], [/\.rs$/, 'Rust'], [/\.rb$/, 'Ruby'], [/\.php$/, 'PHP'], [/\.cs$/, 'C#'],
@@ -258,8 +288,8 @@ export class Registry {
     if (cmd.key !== 'clone' && this.procs.get('clone')?.status === 'exited' && this.procs.get('clone')?.code !== 0) {
       throw new Error(`couldn't get the repository: ${this.procs.get('clone')?.log.at(-1) ?? 'git failed'}. Fix it and set the repository again`);
     }
+    const repo = this.repo;
     if (cmd.key === 'session-start') {
-      const repo = this.repo;
       const inner = onExit;
       onExit = (p) => { if (p.code === 0) { this.sessionRepo = repo; this.save(); } inner?.(p); };
     }
@@ -267,7 +297,7 @@ export class Registry {
       cwd: this.cwd,
       // Always set, so a CONTRACT_TARGET in .env can't override the dashboard's choice (dotenv
       // never overwrites a variable that exists).
-      env: { ...process.env, CONTRACT_TARGET: this.repo, FORCE_COLOR: '0' },
+      env: childEnv(process.env, this.repo),
       detached: true, // own process group, so stop() also ends the Claude Code runs it started
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -286,6 +316,9 @@ export class Registry {
         p.code = code;
         p.endedAt = Date.now();
         p.child = undefined;
+        // Last line, so "couldn't get the repository: ..." in start() shows the fix.
+        const hint = cmd.key === 'clone' && code !== 0 ? gitAccessHint(p.log, repo) : undefined;
+        if (hint) p.log.push(hint);
         resolveExit(code);
         onExit?.(p);
       };
