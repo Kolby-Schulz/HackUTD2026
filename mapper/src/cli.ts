@@ -10,7 +10,8 @@
 // Connects to SPACETIME_HOST / SPACETIME_DB_NAME from the monorepo's .env.
 //
 // TS/JS: .ts/.tsx/.js/.jsx/.mjs/.cjs files are mapped (ES module exports; CommonJS
-// module.exports is not), and tsconfig `paths` aliases resolve, from the root
+// module.exports is not; a JS file with no exports at all, such as a browser script or an
+// entry module, maps its top-level declarations), and tsconfig `paths` aliases resolve, from the root
 // tsconfig.json or, in a monorepo without one, from the packages' own tsconfig.json files.
 // Python, Go, Java, Rust, Ruby, PHP, C# and C/C++ are mapped with tree-sitter
 // (src/polyglot.ts); their edges are name-based and approximate.

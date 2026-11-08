@@ -9,7 +9,7 @@
 //
 // - A local path may be a whole git repo or a folder inside one (like demo-repo/ inside
 //   this monorepo). Workers get a git worktree of that repo and work in the same folder.
-// - A git URL is cloned once into .contract/repos/<name> and fetched on later runs.
+// - A git URL is cloned once into .contract/repos/<owner>/<name> and fetched on later runs.
 // - Optional <target>/contract.json: { "checks": { "unit tests": "npm test", ... },
 //   "base": "origin/main", "install": "make deps" | false,
 //   "map": { "include": ["scripts"], "exclude": ["demo-repo"] } }. Checks are the commands the
@@ -21,7 +21,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
 export interface Check {
   name: string;
@@ -61,10 +61,18 @@ function git(args: string[], cwd: string): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
-/** `.contract/repos/<name>` for a git URL: "https://github.com/a/b.git" -> "b". */
+/**
+ * `.contract/repos/<owner>/<name>` for a git URL: "https://github.com/a/b.git" -> "a/b". Keyed by
+ * owner too, so two forks with the same name (a/b and c/b) get their own checkouts instead of
+ * one pulling the other's. The last folder stays the repo name, which is the target's label.
+ */
 export function cloneDirFor(monorepo: string, url: string): string {
-  const name = basename(url.replace(/\/+$/, '')).replace(/\.git$/, '').replace(/[^\w.-]/g, '_') || 'repo';
-  return join(monorepo, '.contract', 'repos', name);
+  const parts = url.replace(/\/+$/, '').replace(/\.git$/, '').split(/[/:]/)
+    .map((s) => s.replace(/[^\w.-]/g, '_'))
+    .filter((s) => s && s !== '.' && s !== '..');
+  const name = parts.at(-1) ?? 'repo';
+  const owner = parts.length > 1 ? parts.at(-2)! : '';
+  return owner ? join(monorepo, '.contract', 'repos', owner, name) : join(monorepo, '.contract', 'repos', name);
 }
 
 /**
@@ -83,7 +91,7 @@ export function resolveTarget(monorepo: string, spec?: string, opts: { clone?: b
     dir = cloneDirFor(monorepo, raw);
     if (opts.clone !== false) {
       if (!existsSync(join(dir, '.git'))) {
-        mkdirSync(join(monorepo, '.contract', 'repos'), { recursive: true });
+        mkdirSync(dirname(dir), { recursive: true });
         execFileSync('git', ['clone', raw, dir], { stdio: 'inherit' });
       }
     }

@@ -3,7 +3,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { Registry } from '../control.ts';
-import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, type MachineCommand, type MachinePort } from '../daemon.ts';
+import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, type MachineCommand, type MachinePort, type ProcessRow } from '../daemon.ts';
 
 function fakeSpawn() {
   const calls: string[][] = [];
@@ -73,6 +73,25 @@ describe('Daemon', () => {
     daemon.touch();
     await daemon.sync();
     expect(log.updates).toBe(updates + 1); // heartbeat
+  });
+
+  it('marks processes an earlier daemon left running as stopped, and keeps its own', async () => {
+    const { daemon, log, now } = setup();
+    await daemon.handle(cmd(1, 'judge'));
+    const row = (procKey: string, status: string): ProcessRow => ({ procKey, label: procKey, long: true, status, startedAtMs: 1, log: 'last line' });
+    const rows: ProcessRow[] = [];
+    daemon['port'].putProcess = async (p) => { rows.push(p); log.procs.push(`${p.procKey}:${p.status}`); };
+    await daemon.adopt([row('judge', 'running'), row('coordinator', 'running'), row('worker:agent-a', 'exited')]);
+    expect(log.procs).toEqual(['judge:running', 'coordinator:stopped']); // judge is ours; agent-a is finished history
+    expect(rows[0].endedAtMs).toBe(now);
+    expect(rows[0].log.split('\n')).toEqual(['last line', expect.stringContaining('earlier npm run control')]);
+  });
+
+  it('reports stopped processes on shutdown', async () => {
+    const { daemon, log } = setup();
+    await daemon.handle(cmd(1, 'coordinator'));
+    await daemon.shutdown();
+    expect(log.procs).toEqual(['coordinator:running', 'coordinator:stopped']);
   });
 
   it('refuses chat when the assistant is off', async () => {

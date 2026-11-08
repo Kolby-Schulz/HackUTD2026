@@ -1,7 +1,7 @@
 // End-to-end walk through the planted "changed behavior" conflict (spec sections 3 and 14):
 // A changes calculateFee to round half-up; B is mid-way through checkout, which calls it.
 import { describe, it, expect } from 'vitest';
-import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, FEES, CHECKOUT, INVOICE, asOperator } from './helpers';
+import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, AGENT_OF, FEES, CHECKOUT, INVOICE, asOperator } from './helpers';
 
 describe('spec section 14: changed behavior, with Contract', () => {
   it('detects, pauses B, coordinator resolves, B resumes with instructions', () => {
@@ -19,7 +19,7 @@ describe('spec section 14: changed behavior, with Contract', () => {
     }
     const [taskA, taskB] = all(t.db.task.iter());
     for (const tk of [taskA, taskB]) {
-      t.as('outsider', (ctx) => mod.set_task_status(ctx, { task_id: tk.id, status: 'in_progress' }));
+      t.as(AGENT_OF[tk.agent_id], (ctx) => mod.set_task_status(ctx, { task_id: tk.id, status: 'in_progress' }));
     }
     plan(t, 'agent-a', [
       { symbol_id: FEES, intent: 'modify' },
@@ -88,7 +88,7 @@ describe('spec section 14: changed behavior, with Contract', () => {
           cost_usd: 0.05,
         }),
       );
-      t.as('outsider', (ctx) => mod.set_task_status(ctx, { task_id: tk.id, status: 'done' }));
+      t.as(AGENT_OF[tk.agent_id], (ctx) => mod.set_task_status(ctx, { task_id: tk.id, status: 'done' }));
     }
     t.as('worker-a', (ctx) => mod.release_claim(ctx, { agent_id: 'agent-a', symbol_id: FEES }));
     asOperator(t, (ctx) => mod.end_run(ctx, { run_id: runId }));
