@@ -49,14 +49,26 @@ function priorBlock(c: ConflictContext): string {
   );
 }
 
+/** Per-kind guidance. Without it every Nemotron model (and the question "who owns
+ *  <B's symbol>") handed duplicates to agent B; the server puts the earlier one in agent A. */
+function kindHint(c: ConflictContext): string {
+  if (c.kind === 'duplicate')
+    return (
+      `${c.agentA}'s function came first. Unless it is clearly unsuitable, ${c.agentA} is the owner and ` +
+      `${c.agentB} reuses ${c.agentA}'s function instead of writing its own ${c.symbolId}.\n`
+    );
+  return '';
+}
+
 export function buildPrompt(c: ConflictContext): string {
   return `You coordinate AI coding agents on one repo. Two agents have a conflict.
 Conflict: ${c.kind} on ${c.symbolId}
 Agent A (${c.agentA}) plan: ${c.planA}
 Agent B (${c.agentB}) plan: ${c.planB}
 Change: ${c.oldSignature ?? '(none)'} -> ${c.newSignature ?? '(none)'}; ${c.description ?? ''}
-${priorBlock(c)}Decide who owns ${c.symbolId} and give each agent one short, concrete instruction
+${priorBlock(c)}${kindHint(c)}Decide who owns ${c.symbolId} and give each agent one short, concrete instruction
 that lets both tasks finish without duplicate or conflicting code.
+Say what each agent should do, not how: no code, formulas or snippets (the agents write the code).
 Prefer: reuse over new code, the smallest change, and keeping the change already made.
 Reply with JSON only.`;
 }
