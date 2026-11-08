@@ -25,7 +25,7 @@ import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingToo
 import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
 import { browserCommand, Daemon, Pairer, type MachinePort } from './daemon.ts';
-import { machineId, machineTokenKey, REPO, savedToken, saveToken, TSX } from './lib.ts';
+import { machineId, machineTokenKey, REPO, savedToken, saveToken, TSX, TSX_CLI } from './lib.ts';
 
 const LOG_LINES = 300;
 
@@ -210,6 +210,8 @@ export class Registry {
   /** Where repo + sessionRepo are saved so a restart keeps them (unset in tests). */
   stateFile?: string;
   constructor(private spawnFn: typeof spawn = spawn, private bin = TSX, private cwd = REPO) {}
+  /** The default bin is node, which needs tsx's entry first (see TSX in lib.ts); a test's stand-in doesn't. */
+  private get binArgs(): string[] { return this.bin === TSX ? [TSX_CLI] : []; }
 
   /** Loads the saved repo choice; returns the saved repo, if any. */
   load(): string | undefined {
@@ -292,12 +294,13 @@ export class Registry {
       const inner = onExit;
       onExit = (p) => { if (p.code === 0) { this.sessionRepo = repo; this.save(); } inner?.(p); };
     }
-    const child = this.spawnFn(cmd.bin ?? this.bin, cmd.args, {
+    const child = this.spawnFn(cmd.bin ?? this.bin, cmd.bin ? cmd.args : [...this.binArgs, ...cmd.args], {
       cwd: this.cwd,
       // Always set, so a CONTRACT_TARGET in .env can't override the dashboard's choice (dotenv
       // never overwrites a variable that exists).
       env: childEnv(process.env, this.repo),
       detached: true, // own process group, so stop() also ends the Claude Code runs it started
+      windowsHide: true, // on Windows, detached would otherwise open an empty console window per process
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const p: Proc = { key: cmd.key, label: cmd.label, long: cmd.long, status: 'running', code: null, startedAt: Date.now(), log: [], child };
@@ -331,6 +334,11 @@ export class Registry {
     const p = this.procs.get(key);
     if (!p || p.status !== 'running' || !p.child?.pid) throw new Error(`${key} is not running`);
     p.status = 'stopped';
+    // Windows has no process groups (kill(-pid) throws), so taskkill /T ends the whole tree there.
+    if (process.platform === 'win32') {
+      try { execFileSync('taskkill', ['/pid', String(p.child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch { p.child.kill(); }
+      return;
+    }
     try { process.kill(-p.child.pid, 'SIGTERM'); } catch { p.child.kill('SIGTERM'); }
   }
 

@@ -14,7 +14,11 @@ export const DEMO_REPO = join(REPO, 'demo-repo');
 export const WORKTREES = join(REPO, '.worktrees');
 export const STATE_DIR = join(REPO, '.contract'); // gitignored; reset keeps it
 export const RESULTS_DIR = join(STATE_DIR, 'runs');
-export const TSX = join(REPO, 'node_modules/.bin/tsx');
+/** Start tsx as `TSX` with `TSX_CLI` as the first argument. node_modules/.bin/tsx is a shell script
+ *  on macOS/Linux and tsx.cmd on Windows, which spawn() can't start without a shell; running tsx's
+ *  own entry with this node binary works the same on every OS. */
+export const TSX = process.execPath;
+export const TSX_CLI = join(REPO, 'node_modules/tsx/dist/cli.mjs');
 
 /** The two demo agents and the TASKS key each one runs (spec section 14). */
 export const AGENTS = [

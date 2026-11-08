@@ -25,7 +25,7 @@ import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { resolveTarget, runInstall, stageAll, subdirPrefix, worktreeDir, type DbConnection } from '@contract/client';
 import { conflictMarkers, merge, mergeFix, run, runChecks, warnIfNoCoordinator } from './merge.ts';
-import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, waitFor } from './lib.ts';
+import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, TSX_CLI, waitFor } from './lib.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -76,7 +76,7 @@ async function start() {
         log('session', `WARNING: could not fetch ${target.base} to compare ${target.label}`);
       }
     }
-    const r = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts'), '--repo', target.dir], REPO, 5 * 60_000);
+    const r = await run('mapper', TSX, [TSX_CLI, join(REPO, 'mapper/src/cli.ts'), '--repo', target.dir], REPO, 5 * 60_000);
     if (r.exitCode !== 0) throw new Error('mapper failed; is the server reachable?');
   }
 

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type * as R from '@bindings/types.ts';
 import { StatusLabel } from './ui.tsx';
 import { MachinePicker, useMachine, type ChatMessage, type Proc, type Status } from './machine.tsx';
+import { controlSteps, envCopy, OS_LABEL, saveOS, savedOS, terminalName, type OS } from './os.ts';
 
 export type { ChatMessage } from './machine.tsx';
 
@@ -402,13 +403,22 @@ function NotPaired({ chat }: { chat: boolean }) {
   const { mine, unpaired, pair, pairing } = useMachine();
   const [machine, setMachine] = useState('');
   const [code, setCode] = useState('');
+  const [os, setOs] = useState<OS>(savedOS);
   const target = machine || unpaired[0] || '';
   const working = pairing?.state === 'working';
   return (
     <section className="card pad control-off">
       <h2 style={{ fontSize: 16 }}>{working ? `Pairing with ${pairing.machine}…` : 'Connect a laptop'}</h2>
-      <p className="muted">Agents run on your own laptop. Start the daemon in a terminal in the repo, then click the pairing link it prints (or type its code below). After that you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and InSync starts the coordinator, a session and the agents for you.</p>
-      <pre className="mono">npm run control</pre>
+      <p className="muted">Agents run on your own laptop. Open {terminalName(os)}, go to the root of your Contract clone (the folder with <span className="mono">package.json</span>) and run these one at a time:</p>
+      <div className="row" role="group" aria-label="Laptop's operating system" style={{ gap: 6, marginBottom: 6 }}>
+        {(Object.keys(OS_LABEL) as OS[]).map((o) => (
+          <button key={o} type="button" className={`btn small${o === os ? '' : ' ghost'}`} aria-pressed={o === os} onClick={() => { setOs(o); saveOS(o); }}>{OS_LABEL[o]}</button>
+        ))}
+      </div>
+      <pre className="mono" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{controlSteps(os)}</pre>
+      <p className="muted">First time only, before <span className="mono">npm run control</span>: run <span className="mono">{envCopy(os)}</span>, then set <span className="mono">SPACETIME_HOST</span> and <span className="mono">SPACETIME_DB_NAME</span> in <span className="mono">.env</span>.</p>
+      <p className="muted">Then click the pairing link it prints (or type its code below). After that you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and InSync starts the coordinator, a session and the agents for you.</p>
+      <p className="muted" style={{ fontSize: 12 }}>Seeing <span className="mono">npm error Missing script: "control"</span>? That checkout is on an old branch (or you're in the wrong folder). In the repo root run <span className="mono">git checkout main</span>, <span className="mono">git pull</span> and <span className="mono">npm install</span>, then try again.</p>
       {pairing?.state === 'failed' && <div className="banner" role="alert">Couldn't pair with {pairing.machine}: {pairing.error}</div>}
       {unpaired.length > 0 && (
         <form className="row repo-form" onSubmit={(e) => { e.preventDefault(); if (target && code.trim()) void pair(target, code).then(() => setCode('')).catch(() => undefined); }}>

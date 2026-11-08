@@ -17,11 +17,24 @@ Built at HackUTD 2026. Full spec: [docs/SPEC.md](docs/SPEC.md).
 
 One laptop, the built-in demo repo, driven from the dashboard:
 
+From the repo root (the folder with `package.json`), on an up-to-date `main` (`npm run control`
+only exists there). First time only, copy `.env.example` to `.env` (`cp` on macOS/Linux/PowerShell,
+`copy` in Windows cmd) and set `SPACETIME_HOST=wss://maincloud.spacetimedb.com` and
+`SPACETIME_DB_NAME=contract-hackutd26`. Then:
+
 ```bash
+git checkout main
+git pull
 npm install
-cp .env.example .env     # set SPACETIME_HOST=wss://maincloud.spacetimedb.com, SPACETIME_DB_NAME=contract-hackutd26
-npm run control          # opens the dashboard, paired to this laptop
+npm run control
 ```
+
+`npm run control` opens the dashboard, already paired to this laptop.
+
+`npm error Missing script: "control"` means you're in the wrong folder or on an old branch:
+`cd` to the repo root and run `git checkout main`, `git pull`, then `npm install`.
+These commands work the same on macOS, Linux and Windows; run them one per line (Windows
+PowerShell 5.1 doesn't accept `&&`).
 
 In the dashboard's **Chat** tab, type what you want built, the way you'd prompt a coding agent:
 
@@ -191,9 +204,16 @@ the checks when they all finish. While agents work, follow-ups ("make it round h
 them as messages. It needs one daemon running on the laptop
 that does the work:
 
+In the repo root (older branches have no control script):
+
 ```bash
-npm run control     # first run: opens the dashboard in your browser, already linked to this laptop
+git checkout main
+git pull
+npm install
+npm run control
 ```
+
+On the first run it opens the dashboard in your browser, already linked to this laptop.
 
 The daemon connects out to SpacetimeDB as this laptop's `machine` row; nothing listens on a port,
 so the hosted dashboard drives it the same as a local one. Set `CONTRACT_DASHBOARD_URL` to your
