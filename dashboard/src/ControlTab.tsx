@@ -298,6 +298,9 @@ export function useAssistant(onChange?: () => void) {
   // Show what you typed until the daemon's copy of it arrives.
   const echoed = !sent.length || chat.messages.some((m) => m.role === 'user' && m.text === sent[0].text && m.at >= sent[0].at - 5000);
   const messages = echoed ? chat.messages : [...chat.messages, ...sent];
+  // Drop the echo once the daemon has it; a repo switch hides the daemon's copy, and a kept echo
+  // would then reappear as an unanswered message.
+  useEffect(() => { if (sent.length && echoed) setSent([]); }, [sent, echoed]);
   async function send(text: string) {
     setSent([{ id: -Date.now(), role: 'user', text, at: Date.now() }]);
     try {

@@ -47,8 +47,10 @@ function Diff({ diff }: { diff: string }) {
   );
 }
 
-export function ChangesView({ edits, agents, symbol, symbolName, onPickSymbol, onClearSymbol }: {
+export function ChangesView({ edits, agents, symbol, symbolName, onPickSymbol, onClearSymbol, otherRepoRun, repoLabel }: {
   edits: EditView[]; agents: AgentCard[]; symbol?: string; symbolName?: string;
+  /** Set when the latest run was made in another repo than the one picked now: its edits are hidden. */
+  otherRepoRun?: bigint; repoLabel?: string;
   onPickSymbol: (id: string) => void; onClearSymbol: () => void;
 }) {
   const [who, setWho] = useState<string>();
@@ -86,7 +88,8 @@ export function ChangesView({ edits, agents, symbol, symbolName, onPickSymbol, o
         <span className="muted" style={{ fontSize: 12 }}>{shown.length} edit{shown.length === 1 ? '' : 's'}</span>
       </div>
       <div className="changes-list">
-        {!edits.length && <div className="empty">No code yet. Each agent's edits show up here within a second, as a diff.</div>}
+        {otherRepoRun !== undefined && <div className="empty">No changes in {repoLabel ?? 'this repository'} yet. Run {String(otherRepoRun)}'s changes were made in another repository; they show again when you switch back to it, or when you pick that run in the title bar.</div>}
+        {otherRepoRun === undefined && !edits.length && <div className="empty">No code yet. Each agent's edits show up here within a second, as a diff.</div>}
         {edits.length > 0 && !shown.length && <div className="empty">No edits match. {symbol ? 'Nothing in this run touched that symbol yet.' : ''}</div>}
         {shown.slice(0, 80).map((e, i) => {
           const on = isOpen(e, i);

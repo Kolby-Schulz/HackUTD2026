@@ -35,7 +35,12 @@ export function App() {
   const dock = useDock();
   const { repoLabel, machine } = useControlInfo();
   // A pairing link (#/pair?…) opens the Control tab, where its progress shows.
-  const pairingWith = useMachine().pairing?.machine;
+  const machineState = useMachine();
+  const pairingWith = machineState.pairing?.machine;
+  // Runs don't record their repo, but the paired laptop knows when its last session was for a
+  // different repo than the one picked now (needs_session). Then the latest run's changes belong
+  // to that other repo, so the Changes tab and the chat hide them; switching back shows them again.
+  const otherRepoRun = runPick === 'latest' && run && machineState.status?.needsSession ? run : undefined;
   const openView = dock.open;
   useEffect(() => { if (pairingWith) openView('control'); }, [pairingWith, openView]);
 
@@ -130,7 +135,7 @@ export function App() {
               changes: { title: 'Changes', icon: ICON.changes, hint: "The code each agent wrote, as diffs · drag to move or split", render: () => (
                 <div className="view">
                   <Boundary name="Changes">
-                    <ChangesView edits={view.edits} agents={view.agents} symbol={selected} symbolName={node?.name}
+                    <ChangesView edits={otherRepoRun ? [] : view.edits} otherRepoRun={otherRepoRun?.id} repoLabel={repoLabel} agents={view.agents} symbol={selected} symbolName={node?.name}
                       onPickSymbol={(id) => { setPicked(id); if (!dock.isOpen('map')) dock.open('map'); }} onClearSymbol={() => setPicked(undefined)} />
                   </Boundary>
                 </div>
@@ -141,7 +146,7 @@ export function App() {
               chat: { title: 'Chat', icon: ICON.chat, render: () => (
                 <div className="view chat-view">
                   <Boundary name="Chat">
-                    <ChatView events={view.events} agents={view.agents.filter((a) => view.called.has(a.id) || !a.offline)} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
+                    <ChatView events={otherRepoRun ? view.events.filter((e) => e.kind !== 'edit') : view.events} agents={view.agents.filter((a) => view.called.has(a.id) || !a.offline)} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
                   </Boundary>
                 </div>
               ) },

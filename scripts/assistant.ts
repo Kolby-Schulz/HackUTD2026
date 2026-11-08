@@ -128,6 +128,9 @@ export function cleanPlan(raw: unknown): Plan {
   return { reply: str(r.reply) || 'OK.', action, tasks, messages };
 }
 
+/** Starts the event line the daemon posts when the repository changes; the dashboard hides chat above it. */
+export const NEW_CONVERSATION = 'New conversation';
+
 export class Assistant {
   messages: ChatMessage[] = [];
   busy = false;
@@ -141,6 +144,12 @@ export class Assistant {
   say(role: ChatMessage['role'], text: string) {
     this.messages.push({ id: this.nextId++, role, text, at: Date.now() });
     if (this.messages.length > 200) this.messages.splice(0, this.messages.length - 200);
+  }
+
+  /** Forgets the conversation (a new repository is a new chat) and posts a marker line. */
+  reset(repoLabel: string) {
+    this.messages = [];
+    this.say('event', `${NEW_CONVERSATION} · ${repoLabel}`);
   }
 
   view(after = 0) {

@@ -69,7 +69,10 @@ export class Daemon {
     const str = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : '');
     switch (action) {
       case 'repo': {
+        if (this.assistant?.busy) throw new Error('InSync is still answering; switch repositories when it finishes');
+        const before = this.reg.repo;
         const { repo, clone } = this.reg.setRepo(str('repo'));
+        if (repo !== before) this.assistant?.reset(this.reg.repoLabel()); // chat history belongs to one repo
         console.log(`[control] repository: ${repo || 'demo-repo'}${clone ? ' (cloning)' : ''}`);
         return;
       }
