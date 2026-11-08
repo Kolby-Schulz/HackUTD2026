@@ -373,7 +373,8 @@ prompt_tokens: u32, completion_tokens: u32,
 
 Contract: Build Handoff and Technical Spec
 
-wasted: bool, created_at }
+wasted: bool, created_at, cache_read_tokens: u32 = 0, cost_usd: f64 = 0 }
+(cache_read_tokens/cost_usd added after the PDF; see TASKS.md "Scoreboard units".)
 token_saving { id: u64 PK autoInc, run_id, agent_id,
 kind: 'early_stop'|'reuse'|'context_slice'|'cache_hit',
 tokens_avoided_est: u32, note, created_at }
@@ -565,7 +566,9 @@ run_id, agent_id,
 task_id, attempt,
 purpose,
 prompt_tokens,
-completion_tokens
+completion_tokens,
+cache_read_tokens,
+cost_usd
 
 Inserts a
 

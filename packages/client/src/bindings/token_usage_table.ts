@@ -21,4 +21,6 @@ export default __t.row({
   completionTokens: __t.u32().name("completion_tokens"),
   wasted: __t.bool(),
   createdAt: __t.timestamp().name("created_at"),
+  cacheReadTokens: __t.u32().name("cache_read_tokens"),
+  costUsd: __t.f64().name("cost_usd"),
 });

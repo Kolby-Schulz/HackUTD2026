@@ -392,7 +392,28 @@ describe('accounting', () => {
 
     // Assert
     const row = await waitFor(() => [...admin.db.tokenUsage.iter()].find((t) => t.taskId === 5n && t.agentId === id('agent-a')));
-    expect(row).toMatchObject({ runId, attempt: 1, purpose: 'code', promptTokens: 81_515, completionTokens: 1_200, wasted: false });
+    expect(row).toMatchObject({
+      runId,
+      attempt: 1,
+      purpose: 'code',
+      promptTokens: 81_515,
+      completionTokens: 1_200,
+      cacheReadTokens: 40_000,
+      costUsd: 0.12,
+      wasted: false,
+    });
+  });
+
+  it('logTokens() clamps cache reads to prompt tokens and bad costs to 0, so the row is never lost', async () => {
+    // Arrange: an estimated usage from an aborted run can be inconsistent.
+    const usage = { prompt_tokens: 100, completion_tokens: 5, cache_read_tokens: 250, cost_usd: Number.NaN, estimated: true };
+
+    // Act
+    await a.logTokens(8n, 1, 'code', usage);
+
+    // Assert
+    const row = await waitFor(() => [...admin.db.tokenUsage.iter()].find((t) => t.taskId === 8n));
+    expect(row).toMatchObject({ promptTokens: 100, cacheReadTokens: 100, costUsd: 0 });
   });
 
   it('logTokens() rounds fractional estimates and clamps negatives', async () => {

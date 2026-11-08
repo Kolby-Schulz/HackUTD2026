@@ -195,6 +195,8 @@ export const TokenUsage = __t.object("TokenUsage", {
   completionTokens: __t.u32(),
   wasted: __t.bool(),
   createdAt: __t.timestamp(),
+  cacheReadTokens: __t.u32(),
+  costUsd: __t.f64(),
 });
 export type TokenUsage = __Infer<typeof TokenUsage>;
 

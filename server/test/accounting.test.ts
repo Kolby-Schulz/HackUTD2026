@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { makeHarness, register, mod, all, type Harness, type Who } from './helpers';
 
-function logTokens(t: Harness, overrides: Partial<{ agent_id: string; task_id: bigint; attempt: number; purpose: string; who: Who }> = {}) {
+function logTokens(t: Harness, overrides: Partial<{ agent_id: string; task_id: bigint; attempt: number; purpose: string; prompt_tokens: number; cache_read_tokens: number; cost_usd: number; who: Who }> = {}) {
   const { who = 'worker-a', ...rest } = overrides;
   t.as(who, (ctx) =>
     mod.log_tokens(ctx, {
@@ -13,6 +13,8 @@ function logTokens(t: Harness, overrides: Partial<{ agent_id: string; task_id: b
       purpose: 'code',
       prompt_tokens: 81_515,
       completion_tokens: 1_200,
+      cache_read_tokens: 40_000,
+      cost_usd: 0.0812,
       ...rest,
     }),
   );
@@ -43,9 +45,31 @@ describe('log_tokens', () => {
       purpose: 'plan',
       prompt_tokens: 81_515,
       completion_tokens: 1_200,
+      cache_read_tokens: 40_000,
+      cost_usd: 0.0812,
       wasted: false,
     });
     expect(row.created_at.microsSinceUnixEpoch).toBe(t.now());
+  });
+
+  it('rejects more cache-read tokens than prompt tokens', () => {
+    // Arrange
+    const overrides = { prompt_tokens: 100, cache_read_tokens: 101 };
+
+    // Act
+    const act = () => logTokens(t, overrides);
+
+    // Assert
+    expect(act).toThrow(/cache_read_tokens exceeds prompt_tokens/);
+    expect(all(t.db.tokenUsage.iter())).toHaveLength(0);
+  });
+
+  it.each([-0.01, Number.NaN])('rejects cost_usd %s', (cost_usd) => {
+    // Act
+    const act = () => logTokens(t, { cost_usd });
+
+    // Assert
+    expect(act).toThrow(/cost_usd must be a non-negative number/);
   });
 
   it.each(['plan', 'code', 'context', 'test_fix', 'merge_fix', 'coordination'])('accepts purpose %s', (purpose) => {
@@ -95,6 +119,8 @@ describe('log_tokens', () => {
         purpose: 'code',
         prompt_tokens: 1,
         completion_tokens: 1,
+        cache_read_tokens: 0,
+        cost_usd: 0,
       }),
     );
 

@@ -229,6 +229,11 @@ const tokenUsage = table(
     completion_tokens: t.u32(),
     wasted: t.bool(),
     created_at: t.timestamp(),
+    // TASKS.md "Scoreboard units": prompt_tokens includes cache reads (~40k per Claude
+    // Code turn), so the scoreboard headlines cost_usd and splits fresh vs cached.
+    // Appended with defaults so existing databases migrate without --delete-data.
+    cache_read_tokens: t.u32().default(0), // part of prompt_tokens served from cache
+    cost_usd: t.f64().default(0), // provider-reported cost (Claude Code total_cost_usd)
   },
 );
 
@@ -879,9 +884,13 @@ export const log_tokens = spacetimedb.reducer(
     purpose: t.string(),
     prompt_tokens: t.u32(),
     completion_tokens: t.u32(),
+    cache_read_tokens: t.u32(),
+    cost_usd: t.f64(),
   },
   (ctx, args) => {
     requireAgent(ctx, args.agent_id);
+    if (args.cache_read_tokens > args.prompt_tokens) throw new SenderError('cache_read_tokens exceeds prompt_tokens');
+    if (!(args.cost_usd >= 0)) throw new SenderError('cost_usd must be a non-negative number');
     oneOf(args.purpose, PURPOSES, 'token purpose');
     ctx.db.tokenUsage.insert({ id: 0n, ...args, wasted: false, created_at: ctx.timestamp });
   },
