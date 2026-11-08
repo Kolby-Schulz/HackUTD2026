@@ -373,13 +373,21 @@ function referencedIds(decl: Decl, index: DeclIndex, checker: ts.TypeChecker): S
 
 export const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '.contract', '.worktrees']);
 
-/** Whether a repo-relative path is a source file the mapper maps (not tests, not .d.ts). */
+/**
+ * Folders that hold tests and tooling, not app code. Their helpers (test fixtures,
+ * demo-repo's check-dupes script) would clutter the shared code map and could trip
+ * Rule 2 with false duplicates, so they are never mapped.
+ */
+const NON_SOURCE_DIRS: ReadonlySet<string> = new Set(['test', 'tests', '__tests__', 'scripts']);
+
+/** Whether a repo-relative path is app source the mapper maps (not tests, tooling, configs or .d.ts). */
 export function isMappable(relPath: string): boolean {
   const parts = relPath.split(/[\\/]/);
-  if (parts.some((p) => SKIP_DIRS.has(p) || p === '__tests__')) return false;
+  if (parts.some((p) => SKIP_DIRS.has(p) || NON_SOURCE_DIRS.has(p))) return false;
   const base = parts[parts.length - 1];
   if (!/\.(ts|tsx|mts|cts)$/.test(base) || /\.d\.[mc]?ts$/.test(base)) return false;
   if (/\.(test|spec)\.[mc]?tsx?$/.test(base)) return false;
+  if (/\.config\.[mc]?tsx?$/.test(base)) return false; // vitest.config.ts and friends
   return true;
 }
 
