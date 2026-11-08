@@ -22,6 +22,10 @@ import type { BoardMessageRow } from '../src/playground/net/types';
 
 const BOARD = 'playground';
 const TEAM_SIZE = 10;
+/** Designers use a fast model by default; override with BOARD_DESIGN_MODEL. Nemo (planning) is unchanged. */
+const DESIGN_MODEL = process.env.BOARD_DESIGN_MODEL || 'claude-sonnet-5-5';
+/** A designer's model call is stopped after this long, so one slow call never holds up the rest. */
+const DESIGN_TIMEOUT_MS = 180_000;
 const host = process.env.SPACETIME_HOST;
 const database = process.env.SPACETIME_DB_NAME;
 if (!host || !database) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (.env)');
@@ -213,6 +217,19 @@ async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, inde
   status(a, 'idle');
 }
 
+/** One designer's model call: the fast model, a time limit, and one retry if the first answer fails. */
+async function design(a: LocalActor, prompt: string): Promise<Design> {
+  const once = async () => (await claude.decide<Design>(prompt, DESIGN_SCHEMA as unknown as Record<string, unknown>, {
+    purpose: 'design', model: DESIGN_MODEL, system: DESIGN_SYSTEM, onUsage: logUsage(a.id), signal: AbortSignal.timeout(DESIGN_TIMEOUT_MS),
+  })).output;
+  try { return await once(); }
+  catch (e) {
+    console.error(`[board-agent] ${a.name} retrying after: ${e instanceof Error ? e.message : String(e)}`);
+    status(a, 'thinking', 'retrying');
+    return once();
+  }
+}
+
 // ---- requests ----
 function post(from: LocalActor, to: BoardMessageRow, body: string) {
   remember(from.name, body);
@@ -250,8 +267,9 @@ async function handle(m: BoardMessageRow) {
     status(a, 'thinking', `designing ${b.title}`.slice(0, 40));
     await glide(a, spots[i].x + 180, spots[i].y + 200, 300);
     try {
-      const { output } = await claude.decide<Design>(`${ctx}\n\nYour brief: ${b.title}. ${b.brief}`, DESIGN_SCHEMA as unknown as Record<string, unknown>,
-        { purpose: 'design', system: DESIGN_SYSTEM, onUsage: logUsage(a.id) });
+      const t0 = Date.now();
+      const output = await design(a, `${ctx}\n\nYour brief: ${b.title}. ${b.brief}`);
+      console.log(`[board-agent] ${a.name} designed "${output.frame.name}" (${output.elements.length} layers) in ${Math.round((Date.now() - t0) / 1000)} s`);
       await draw(a, output, spots[i], indexes[i]);
       remember(a.name, `designed "${output.frame.name}"`);
     } catch (e) {
