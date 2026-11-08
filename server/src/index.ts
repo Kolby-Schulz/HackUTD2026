@@ -32,6 +32,8 @@ const DEFAULT_CLAIM_TTL_SECS = 300;
 const HEARTBEAT_TIMEOUT_SECS = 60;
 const EXPIRE_EVERY_MICROS = 30_000_000n; // 30 s
 const REQUIRE_CLAIM_FOR_CHANGE = false;
+/** Rule 1 follows callers this many hops up from a changed symbol (1 = direct callers only). */
+const RULE1_MAX_HOPS = 3;
 
 const TASK_STATUSES = ['todo', 'in_progress', 'paused', 'done', 'discarded'] as const;
 const SYMBOL_KINDS = ['function', 'class', 'method', 'const'] as const;
@@ -431,6 +433,30 @@ function sendInstruction(ctx: Ctx, agentId: string, text: string, conflictId?: b
 }
 
 /** Active plan items on symbolId, from any agent. */
+/**
+ * Symbols that reach `symbolId` through calls, at most `maxHops` callers up, nearest first.
+ * `chain` runs from the caller down to (not including) `symbolId`. Cycles are visited once.
+ */
+function callersUpTo(ctx: Ctx, symbolId: string, maxHops: number) {
+  const out: { id: string; chain: string[] }[] = [];
+  const seen = new Set([symbolId]);
+  let frontier = [{ id: symbolId, chain: [] as string[] }];
+  for (let hop = 0; hop < maxHops && frontier.length; hop++) {
+    const next: typeof frontier = [];
+    for (const f of frontier) {
+      const callers = [...ctx.db.symbolEdge.callee_id.filter(f.id)].map((e) => e.caller_id).sort();
+      for (const c of callers) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        next.push({ id: c, chain: [c, ...f.chain] });
+      }
+    }
+    out.push(...next);
+    frontier = next;
+  }
+  return out;
+}
+
 function activePlanItemsOn(ctx: Ctx, symbolId: string) {
   const items = [];
   for (const item of ctx.db.planItem.symbol_id.filter(symbolId)) {
@@ -871,19 +897,20 @@ export const report_change = spacetimedb.reducer(
     }
 
     // Rule 1: who is affected? (a) active plans that depend on S;
-    // (b) active plans that modify, create or depend on a symbol that calls S (one level:
-    // depending on computeTotal means relying on what calculateFee returns through it).
+    // (b) active plans that modify, create or depend on a symbol that reaches S through calls,
+    // up to RULE1_MAX_HOPS callers up (depending on checkout means relying on what
+    // calculateFee returns through computeTotal). Breadth-first, so the nearest path wins.
     const affected = new Map<string, string>(); // agent id -> why
     for (const item of activePlanItemsOn(ctx, symbol_id)) {
       if (item.agent_id !== agent_id && item.intent === 'depend') {
         affected.set(item.agent_id, `its plan depends on ${symbol_id}`);
       }
     }
-    for (const edge of ctx.db.symbolEdge.callee_id.filter(symbol_id)) {
-      for (const item of activePlanItemsOn(ctx, edge.caller_id)) {
+    for (const { id: callerId, chain } of callersUpTo(ctx, symbol_id, RULE1_MAX_HOPS)) {
+      for (const item of activePlanItemsOn(ctx, callerId)) {
         if (item.agent_id !== agent_id && !affected.has(item.agent_id)) {
           const verb = item.intent === 'depend' ? 'depends on' : 'changes';
-          affected.set(item.agent_id, `its plan ${verb} ${edge.caller_id}, which calls ${symbol_id}`);
+          affected.set(item.agent_id, `its plan ${verb} ${chain.map((id) => `${id}, which calls `).join('')}${symbol_id}`);
         }
       }
     }

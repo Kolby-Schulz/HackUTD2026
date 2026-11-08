@@ -12,6 +12,7 @@ import {
   INVOICE,
   TOTAL,
   CHECKOUT,
+  sym,
   type Harness,
 } from './helpers';
 
@@ -353,5 +354,104 @@ describe('report_change: Rule 1 (broken dependency)', () => {
     expect(conflicts(t).map((c) => `${c.symbol_id}:${c.agent_a}->${c.agent_b}`).sort()).toEqual(
       [`${CHECKOUT}:agent-b->agent-a`, `${FEES}:agent-a->agent-b`].sort(),
     );
+  });
+});
+
+describe('report_change: Rule 1 through several callers (up to 3 hops)', () => {
+  // renderApp -> renderCart -> postCart -> computeTotal -> calculateFee
+  const ROUTE = 'src/api/cart.ts#postCart'; // 2 hops above FEES
+  const PAGE = 'src/ui/cart.ts#renderCart'; // 3 hops
+  const APP = 'src/ui/app.ts#renderApp'; // 4 hops: past the limit
+  let t: Harness;
+  beforeEach(() => {
+    t = makeHarness();
+    seedCodeMap(t);
+    t.as('mapper', (ctx) =>
+      mod.upsert_symbols(ctx, { file: 'src/api/cart.ts', symbols: [sym(ROUTE)], edges: [{ caller_id: ROUTE, callee_id: TOTAL }] }),
+    );
+    t.as('mapper', (ctx) =>
+      mod.upsert_symbols(ctx, { file: 'src/ui/cart.ts', symbols: [sym(PAGE)], edges: [{ caller_id: PAGE, callee_id: ROUTE }] }),
+    );
+    t.as('mapper', (ctx) =>
+      mod.upsert_symbols(ctx, { file: 'src/ui/app.ts', symbols: [sym(APP)], edges: [{ caller_id: APP, callee_id: PAGE }] }),
+    );
+    register(t, 'agent-a');
+    register(t, 'agent-b');
+    plan(t, 'agent-a', [{ symbol_id: FEES, intent: 'modify' }]);
+  });
+
+  it('pauses an agent that depends on a caller two hops up, and names the path', () => {
+    // Arrange
+    plan(t, 'agent-b', [{ symbol_id: ROUTE, intent: 'depend' }]);
+
+    // Act
+    reportChange(t, 'agent-a', FEES, 'behavior', 'rounds half-up');
+
+    // Assert
+    const [c] = conflicts(t);
+    expect(c).toMatchObject({ kind: 'broken_dependency', symbol_id: FEES, agent_a: 'agent-a', agent_b: 'agent-b' });
+    expect(c.details).toContain(`depends on ${ROUTE}, which calls ${TOTAL}, which calls ${FEES}`);
+    expect(status(t, 'agent-b')).toBe('paused');
+  });
+
+  it('flags an agent changing a caller three hops up', () => {
+    // Arrange
+    plan(t, 'agent-b', [{ symbol_id: PAGE, intent: 'modify' }]);
+
+    // Act
+    reportChange(t, 'agent-a', FEES);
+
+    // Assert
+    const [c] = conflicts(t);
+    expect(c.details).toContain(`changes ${PAGE}, which calls ${ROUTE}, which calls ${TOTAL}, which calls ${FEES}`);
+  });
+
+  it('stops after three hops', () => {
+    // Arrange
+    plan(t, 'agent-b', [{ symbol_id: APP, intent: 'depend' }]);
+
+    // Act
+    reportChange(t, 'agent-a', FEES);
+
+    // Assert
+    expect(conflicts(t)).toHaveLength(0);
+    expect(status(t, 'agent-b')).toBe('idle');
+  });
+
+  it('reports the nearest path when an agent is reachable several ways', () => {
+    // Arrange
+    plan(t, 'agent-b', [
+      { symbol_id: PAGE, intent: 'modify' },
+      { symbol_id: TOTAL, intent: 'depend' },
+    ]);
+
+    // Act
+    reportChange(t, 'agent-a', FEES);
+
+    // Assert
+    const all1 = conflicts(t);
+    expect(all1).toHaveLength(1);
+    expect(all1[0].details).toContain(`depends on ${TOTAL}, which calls ${FEES}`);
+  });
+
+  it('survives a call cycle (recursion between callers)', () => {
+    // Arrange: postCart and renderCart call each other
+    t.as('mapper', (ctx) =>
+      mod.upsert_symbols(ctx, {
+        file: 'src/api/cart.ts',
+        symbols: [sym(ROUTE)],
+        edges: [
+          { caller_id: ROUTE, callee_id: TOTAL },
+          { caller_id: ROUTE, callee_id: PAGE },
+        ],
+      }),
+    );
+    plan(t, 'agent-b', [{ symbol_id: PAGE, intent: 'depend' }]);
+
+    // Act
+    reportChange(t, 'agent-a', FEES);
+
+    // Assert
+    expect(conflicts(t)).toHaveLength(1);
   });
 });
