@@ -1,0 +1,12 @@
+.page { background: #fff; min-height: 100%; }
+.stage { padding: 88px 64px 96px; text-align: center; background: #f6f7f9; }
+.stage:has([data-tone='dark']) { background: radial-gradient(1200px 500px at 50% -10%, #2b1d6b 0%, #0b0b1a 60%); color: #f4f2ff; }
+.stage:has([data-tone='light']) { background: #faf8f4; color: #1d1b17; }
+.stage:has([data-tone='warm']) { background: linear-gradient(160deg, #fff1d6, #ffe0ec); color: #2b1d12; }
+.cta { margin-top: 40px; display: flex; justify-content: center; }
+.body { padding: 72px 64px; }
+
+@container (max-width: 800px) {
+  .stage { padding: 56px 20px 64px; }
+  .body { padding: 40px 20px; }
+}
