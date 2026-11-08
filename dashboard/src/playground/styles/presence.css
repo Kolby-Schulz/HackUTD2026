@@ -1,0 +1,9 @@
+/* Presence list (everyone with a cursor). */
+.pg-cursorlist { flex: 1; overflow: auto; border-top: 1px solid var(--pg-line); padding: 6px; }
+.pg-crow { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; }
+.pg-crow:hover { background: var(--pg-hover-faint); }
+.pg-mini path { fill: var(--pg-white); stroke: var(--c); stroke-width: 2.2; stroke-linejoin: round; }
+.pg-cname { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pg-cname small { color: var(--pg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg .ghost { border: 0; background: none; color: var(--pg-muted); padding: 2px 5px; border-radius: 5px; font-size: 11px; }
+.pg .ghost:hover { background: var(--pg-hover-strong); color: var(--pg-ink); }

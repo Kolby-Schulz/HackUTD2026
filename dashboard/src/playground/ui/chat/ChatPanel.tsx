@@ -1,6 +1,7 @@
 // Chat column, in the spirit of the original web Claude Design: one conversation per agent,
 // a thread switcher on top, the conversation in the middle, a roomy composer at the bottom.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import '../../styles/chat.css';
 
 /** One chat line. `thread` is an agent id (one chat per agent) or 'general'; `from` 'you' marks the human. */
 export type Msg = { id: string; thread: string; from: string; name: string; color: string; text: string; ctx?: string; pin?: string; shapeId?: string; t: number };

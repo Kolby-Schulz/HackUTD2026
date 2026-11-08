@@ -1,0 +1,23 @@
+/* Top bar: back link, title, avatars, comment tool + options menu, share. */
+.pg-top { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: var(--pg-panel); border-bottom: 1px solid var(--pg-line); z-index: 3; }
+.pg-back { color: var(--pg-muted); font-size: 16px; padding: 2px 6px; border-radius: 6px; }
+.pg-back:hover { background: var(--pg-hover); color: var(--pg-ink); }
+.pg-logo { color: var(--pg-accent); }
+.pg-sub { color: var(--pg-muted); font-size: 12px; }
+.pg-avatars { display: flex; }
+.pg-avatars span { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; color: var(--pg-white); font-size: 11px; font-weight: 600; border: 2px solid var(--pg-white); margin-left: -6px; }
+.pg-avatars .more { background: var(--pg-chip); color: var(--pg-muted); }
+
+.pg-cbtn { position: relative; display: flex; align-items: center; }
+.pg-icon { border: 0; background: none; width: 34px; height: 30px; border-radius: 7px; display: grid; place-items: center; }
+.pg-icon svg path { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+.pg-icon:hover { background: var(--pg-hover); }
+.pg-icon.on { background: var(--pg-accent-soft); color: var(--pg-accent); }
+.pg-chev { border: 0; background: none; color: var(--pg-muted); font-size: 11px; padding: 4px 3px; border-radius: 5px; }
+.pg-chev:hover { background: var(--pg-hover); }
+.pg-menu { position: absolute; top: 36px; right: 0; background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 10px; box-shadow: var(--pg-shadow-menu); padding: 6px; min-width: 200px; z-index: 10; display: flex; flex-direction: column; }
+.pg-menu label, .pg-menu button { display: flex; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 6px; border: 0; background: none; text-align: left; }
+.pg-menu label:hover, .pg-menu button:hover { background: var(--pg-hover-soft); }
+.pg-share { display: flex; align-items: center; gap: 6px; border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 8px; padding: 4px 11px; font-weight: 500; }
+.pg-share svg path { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
+.pg-share:hover { background: var(--pg-hover-faint); }
