@@ -53,7 +53,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 ## Milestone 4: Rule 2 end to end
 
 - [x] **BE:** Rule 2 in `publish_plan` (normalized names, same types + shared token), reuse instruction; Rule 3 in `claim_symbol`/`publish_plan` (Rule 2 also re-runs on `report_change('created')` once the signature is known)
-- [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings. **Client part done** (`context_slice` and `cache_hit` savings logged); **MCP tools done;** `find_existing` logs one `reuse` saving per matched symbol (score ≥ 0.8; estimate `CONTRACT_REUSE_EST_TOKENS`, default 1500, until a baseline measures it).
+- [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings. **Client part done** (`context_slice` and `cache_hit` savings logged); **MCP tools done;** `find_existing` logs one `reuse` saving per matched symbol (score ≥ 0.8; estimate `CONTRACT_REUSE_EST_TOKENS`, default 1500, until a baseline measures it). `get_summary` / `put_summary` MCP tools added so workers can read and fill `summary_cache` (`cache_hit` is now reachable from real runs); rules rewritten as an ordered workflow with the symbol id format. A summary hook (`agents/worker/src/summary-hook.ts`) caches file outlines on read, serves them to later agents and counts a `cache_hit` only when the file isn't read anyway. See `docs/spec-additions-summary-tools.md`.
 - [ ] **CM:** check the duplicate-formatter scenario resolves to "reuse A's"
 
 ## Milestone 5: Without/with runs
