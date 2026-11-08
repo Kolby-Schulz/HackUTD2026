@@ -8,6 +8,9 @@
 export {
   RepoMapper,
   mapFile,
+  symbolRanges,
+  symbolsTouched,
+  type SymbolRange,
   isMappable,
   signatureHash,
   normalizeSignature,

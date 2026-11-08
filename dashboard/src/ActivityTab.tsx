@@ -6,7 +6,7 @@ import { timeline } from './model.ts';
 import { Avatar, Empty, Icon, KIND_COLOR, StatusLabel } from './ui.tsx';
 
 const FILTERS: [Kind | 'all', string][] = [
-  ['all', 'All activity'], ['plan', 'Plans'], ['claim', 'Claims'], ['change', 'Changes'],
+  ['all', 'All activity'], ['plan', 'Plans'], ['claim', 'Claims'], ['change', 'Changes'], ['edit', 'Edits'],
   ['conflict', 'Conflicts'], ['decision', 'Decisions'], ['instruction', 'Pushes'],
 ];
 

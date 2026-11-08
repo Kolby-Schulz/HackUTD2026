@@ -19,6 +19,7 @@ export interface Tables {
   runs: Rows<R.Run>;
   usage: Rows<R.TokenUsage>;
   savings: Rows<R.TokenSaving>;
+  fileEdits: Rows<R.FileEdit>;
 }
 
 /* ---------------- basics ---------------- */
@@ -267,7 +268,7 @@ const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 
 /* ---------------- activity feed ---------------- */
 
-export type Kind = 'plan' | 'claim' | 'change' | 'conflict' | 'decision' | 'instruction';
+export type Kind = 'plan' | 'claim' | 'change' | 'edit' | 'conflict' | 'decision' | 'instruction';
 
 export interface FeedEvent {
   key: string;
@@ -333,12 +334,20 @@ export function feed(t: Tables, w: Window): FeedEvent[] {
     }
     out.push({ key: 'push' + i.id, kind: 'instruction', at, time: rel(at), actor: person(ppl, 'coordinator'), verb: `pushed to ${person(ppl, i.agentId).name}`, sub: i.text, conflictId: i.conflictId });
   }
+  for (const e of t.fileEdits ?? []) {
+    const at = ms(e.createdAt);
+    if (!inWin(w, at)) continue;
+    const file = e.file.split('/').pop() ?? e.file;
+    const syms = e.symbolIds.map(name);
+    out.push({ key: 'edit' + e.id, kind: 'edit', at, time: rel(at), actor: person(ppl, e.agentId),
+      verb: `edited ${file}${syms.length ? ` (${syms.join(', ')})` : ''}`, sub: diffStat(e.diff) });
+  }
   // newest first; within the same instant, the cause comes after (below) its effects
   return out.sort((a, b) => b.at - a.at || KIND_ORDER[b.kind] - KIND_ORDER[a.kind] || b.key.localeCompare(a.key));
 }
 
 /** Story order for events in the same instant: a plan leads to a claim, a change to a conflict, etc. */
-const KIND_ORDER: Record<Kind, number> = { plan: 0, claim: 1, change: 2, conflict: 3, decision: 4, instruction: 5 };
+const KIND_ORDER: Record<Kind, number> = { plan: 0, claim: 1, edit: 2, change: 2, conflict: 3, decision: 4, instruction: 5 };
 
 /* ---------------- activity timeline: conflicts fold into threads ---------------- */
 
@@ -515,4 +524,32 @@ export function modeSummary(t: Tables, mode: string, now: number): ModeSummary |
     total: avg('total'), wasted: avg('wasted'), mergeFix: avg('mergeFix'), coordination: avg('coordination'), cost: avg('cost'),
     conflictsCaught: avg('conflictsCaught'), mergeFixAgents: avg('mergeFixAgents'),
   };
+}
+
+/* ---------------- live code (issue #24) ---------------- */
+
+export interface EditView { id: string; agent: Person; file: string; symbolIds: string[]; symbols: string[]; diff: string; at: number; time: string; stat: string }
+
+/** "+3 −1" for a unified diff (header lines excluded). */
+export function diffStat(diff: string): string {
+  let add = 0, del = 0;
+  for (const l of diff.split('\n')) {
+    if (l.startsWith('+++') || l.startsWith('---')) continue;
+    if (l.startsWith('+')) add++;
+    else if (l.startsWith('-')) del++;
+  }
+  return `+${add} −${del}`;
+}
+
+/** File edits in the window, newest first; `symbolId` narrows to edits that touched it. */
+export function edits(t: Tables, w: Window, symbolId?: string): EditView[] {
+  const ppl = people(t.agents);
+  return (t.fileEdits ?? [])
+    .filter((e) => inWin(w, ms(e.createdAt)) && (!symbolId || e.symbolIds.includes(symbolId)))
+    .slice()
+    .sort((a, b) => Number(b.id - a.id))
+    .map((e) => ({
+      id: String(e.id), agent: person(ppl, e.agentId), file: e.file, symbolIds: [...e.symbolIds], symbols: e.symbolIds.map((s) => symbolName(s, t.symbols)),
+      diff: e.diff, at: ms(e.createdAt), time: fmtClock(ms(e.createdAt) - w.start), stat: diffStat(e.diff),
+    }));
 }

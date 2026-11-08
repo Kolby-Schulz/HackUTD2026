@@ -6,8 +6,12 @@
 // that file, and calls report_change for every created, removed or re-signed symbol, so
 // Rule 1 (broken dependency) fires without the model having to remember.
 //
+// It also sends the edit itself to the live diff stream (report_edit, issue #24): the file's
+// unified diff against the worktree's base commit plus the symbols the changed lines touch.
+//
 // It never calls upsert_symbols (a worktree must not overwrite the shared code map) and
 // never uses the client's getContext (that logs savings). Always exits 0.
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,6 +76,41 @@ export function editedFile(input: HookInput, repoDir: string): string | undefine
   return path ? repoFile(path, input.cwd, repoDir) : undefined;
 }
 
+/**
+ * The new-side line numbers a unified diff adds or changes. A pure deletion counts as the
+ * line it was removed before, so deleting lines inside a function still touches it.
+ */
+export function changedLines(diff: string): number[] {
+  const out = new Set<number>();
+  let line = 0;
+  for (const l of diff.split('\n')) {
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+    if (h) {
+      line = Number(h[1]);
+      continue;
+    }
+    if (!line || l.startsWith('+++') || l.startsWith('---')) continue;
+    if (l.startsWith('+')) out.add(line++);
+    else if (l.startsWith('-')) out.add(Math.max(1, line));
+    else if (l.startsWith(' ')) line++;
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/** Unified diff of `rel` in repoDir against HEAD (the agent's base); new files diff against /dev/null. */
+export function fileDiff(repoDir: string, rel: string): string {
+  const git = (args: string[]) => {
+    try {
+      return execFileSync('git', args, { cwd: repoDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 8 << 20 });
+    } catch (e) {
+      // --no-index exits 1 when the files differ; its stdout is still the diff.
+      return String((e as { stdout?: string }).stdout ?? '');
+    }
+  };
+  const tracked = git(['ls-files', '--', rel]).trim() !== '';
+  return tracked ? git(['diff', '--no-color', 'HEAD', '--', rel]) : git(['diff', '--no-color', '--no-index', '--', '/dev/null', rel]);
+}
+
 const sql = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /** report_change leaves removed rows in place: remember them per session so they're reported once. */
@@ -98,8 +137,13 @@ async function main() {
   const host = process.env.SPACETIME_HOST;
   if (!agentId || !token || !host) return; // not running under a Contract worker
 
-  const { mapFile } = await import('@contract/mapper');
+  const { mapFile, symbolRanges, symbolsTouched } = await import('@contract/mapper');
   const { symbols } = mapFile(resolve(repoDir, rel), { repoDir, edges: false });
+  const diff = fileDiff(repoDir, rel);
+  let touched: string[] = [];
+  try {
+    touched = symbolsTouched(symbolRanges(rel, readFileSync(resolve(repoDir, rel), 'utf8')), changedLines(diff));
+  } catch { /* deleted or unreadable: send the diff without symbols */ }
 
   const { DbConnection } = await import('@contract/client');
   const conn = await new Promise<InstanceType<typeof DbConnection>>((ok, fail) => {
@@ -127,6 +171,11 @@ async function main() {
       } catch (e) {
         console.error(`contract-hook: report_change ${ch.symbolId} failed: ${e instanceof Error ? e.message : String(e)}`);
       }
+    }
+    if (diff.trim()) {
+      await conn.reducers
+        .reportEdit({ agentId, file: rel, diff, symbolIds: touched })
+        .catch((e: unknown) => console.error(`contract-hook: report_edit failed: ${e instanceof Error ? e.message : String(e)}`));
     }
   } finally {
     conn.disconnect();

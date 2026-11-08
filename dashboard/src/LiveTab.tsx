@@ -2,9 +2,10 @@
 // and notification-style latest activity (H3 A).
 import { useState } from 'react';
 import type * as R from '@bindings/types.ts';
-import type { AgentCard, CaseView, FeedEvent, MapEdge, MapNode, ModeSummary, Step, TokenStats } from './model.ts';
+import type { AgentCard, CaseView, EditView, FeedEvent, MapEdge, MapNode, ModeSummary, Step, TokenStats } from './model.ts';
 import { fmtK, symbolName } from './model.ts';
 import { CodeMap } from './CodeMap.tsx';
+import { EditCard } from './CodeTab.tsx';
 import { Avatar, Empty, Icon, KIND_COLOR, StatusLabel } from './ui.tsx';
 
 interface Props {
@@ -17,9 +18,10 @@ interface Props {
   symbols: readonly R.Symbol[];
   edges: readonly R.SymbolEdge[];
   runStart: number;
+  edits: EditView[];
 }
 
-export function LiveTab({ agents, cases, events, map, stats, without, symbols, edges, runStart }: Props) {
+export function LiveTab({ agents, cases, events, map, stats, without, symbols, edges, runStart, edits }: Props) {
   const [picked, setPicked] = useState<string>();
   const resolved = cases.filter((c) => !c.open).length;
   const open = cases.filter((c) => c.open);
@@ -71,7 +73,7 @@ export function LiveTab({ agents, cases, events, map, stats, without, symbols, e
         <div className="side-cards">
           {open.map((c) => <CaseCard key={c.key} c={c} />)}
           {/* The selected symbol can vanish (a new run resets the code map); show nothing then instead of crashing. */}
-          {selectedNode && <SymbolCard id={selectedNode.id} node={selectedNode} symbols={symbols} edges={edges} />}
+          {selectedNode && <SymbolCard id={selectedNode.id} node={selectedNode} symbols={symbols} edges={edges} edits={edits.filter((e) => e.symbolIds.includes(selectedNode.id))} />}
         </div>
       </div>
 
@@ -157,7 +159,7 @@ function CaseCard({ c }: { c: CaseView }) {
   );
 }
 
-function SymbolCard({ id, node, symbols, edges }: { id: string; node: MapNode; symbols: readonly R.Symbol[]; edges: readonly R.SymbolEdge[] }) {
+function SymbolCard({ id, node, symbols, edges, edits }: { id: string; node: MapNode; symbols: readonly R.Symbol[]; edges: readonly R.SymbolEdge[]; edits: EditView[] }) {
   const s = symbols.find((x) => x.id === id);
   const callers = edges.filter((e) => e.calleeId === id).map((e) => symbolName(e.callerId, symbols));
   const callees = edges.filter((e) => e.callerId === id).map((e) => symbolName(e.calleeId, symbols));
@@ -178,6 +180,12 @@ function SymbolCard({ id, node, symbols, edges }: { id: string; node: MapNode; s
         <span className="muted">Calls</span><span className="mono" style={{ fontSize: 12 }}>{callees.join(', ') || 'none'}</span>
         {s?.behaviorNote && <><span className="muted">Behavior</span><span>{s.behaviorNote}</span></>}
       </div>
+      {edits.length > 0 && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div className="cap muted">Latest edits · {edits.length}</div>
+          {edits.slice(0, 2).map((e) => <EditCard key={e.id} e={e} showAgent />)}
+        </div>
+      )}
       <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>Click a symbol on the map to inspect it.</div>
     </div>
   );

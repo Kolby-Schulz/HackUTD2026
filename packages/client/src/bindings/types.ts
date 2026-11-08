@@ -80,6 +80,16 @@ export const ExpireClaimsSchedule = __t.object("ExpireClaimsSchedule", {
 });
 export type ExpireClaimsSchedule = __Infer<typeof ExpireClaimsSchedule>;
 
+export const FileEdit = __t.object("FileEdit", {
+  id: __t.u64(),
+  agentId: __t.string(),
+  file: __t.string(),
+  diff: __t.string(),
+  symbolIds: __t.array(__t.string()),
+  createdAt: __t.timestamp(),
+});
+export type FileEdit = __Infer<typeof FileEdit>;
+
 export const Instruction = __t.object("Instruction", {
   id: __t.u64(),
   agentId: __t.string(),

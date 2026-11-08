@@ -23,6 +23,8 @@ import { duplicateReason, nameOf } from './rules';
 // ---------------------------------------------------------------------------------
 
 const COORDINATOR_ID = 'coordinator';
+const FILE_EDITS_PER_AGENT = 50;
+const MAX_DIFF_CHARS = 20_000;
 /** Marks instruction rows written by send_instruction (an operator on the dashboard). */
 const OPERATOR_PREFIX = 'Operator: ';
 const DEFAULT_CLAIM_TTL_SECS = 300;
@@ -209,6 +211,20 @@ const instruction = table(
   },
 );
 
+// Live code (docs/spec-additions-live-code.md part A): one row per Edit/Write an agent
+// makes, sent by contract-hook. report_edit keeps the newest FILE_EDITS_PER_AGENT per agent.
+const fileEdit = table(
+  { name: 'file_edit', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    agent_id: t.string().index('btree'),
+    file: t.string().index('btree'),
+    diff: t.string(), // unified diff vs the agent's base commit
+    symbol_ids: t.array(t.string()), // symbols whose bodies the edit touched
+    created_at: t.timestamp(),
+  },
+);
+
 // Token accounting
 const run = table(
   { name: 'run', public: true },
@@ -281,6 +297,7 @@ const spacetimedb = schema({
   tokenUsage,
   tokenSaving,
   expireClaimsSchedule,
+  fileEdit,
 });
 export default spacetimedb;
 
@@ -941,6 +958,22 @@ export const acknowledge_instruction = spacetimedb.reducer(
     if (!row) throw new SenderError(`unknown instruction ${instruction_id}`);
     requireAgent(ctx, row.agent_id); // caller must be the instruction's agent
     if (!row.acknowledged) ctx.db.instruction.id.update({ ...row, acknowledged: true });
+  },
+);
+
+/**
+ * Live diff stream (spec-additions part A): contract-hook reports each edit with its diff
+ * and the symbols it touched. Only the newest FILE_EDITS_PER_AGENT rows per agent are kept.
+ */
+export const report_edit = spacetimedb.reducer(
+  { agent_id: t.string(), file: t.string(), diff: t.string(), symbol_ids: t.array(t.string()) },
+  (ctx, { agent_id, file, diff, symbol_ids }) => {
+    requireAgent(ctx, agent_id);
+    if (!file) throw new SenderError('file is empty');
+    const body = diff.length > MAX_DIFF_CHARS ? diff.slice(0, MAX_DIFF_CHARS) + '\n… (diff truncated)' : diff;
+    ctx.db.fileEdit.insert({ id: 0n, agent_id, file, diff: body, symbol_ids, created_at: ctx.timestamp });
+    const mine = [...ctx.db.fileEdit.agent_id.filter(agent_id)].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of mine.slice(0, Math.max(0, mine.length - FILE_EDITS_PER_AGENT))) ctx.db.fileEdit.id.delete(old.id);
   },
 );
 

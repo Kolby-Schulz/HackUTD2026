@@ -50,6 +50,7 @@ import RecordCacheHitReducer from "./record_cache_hit_reducer";
 import RegisterAgentReducer from "./register_agent_reducer";
 import ReleaseClaimReducer from "./release_claim_reducer";
 import ReportChangeReducer from "./report_change_reducer";
+import ReportEditReducer from "./report_edit_reducer";
 import ResetDemoStateReducer from "./reset_demo_state_reducer";
 import ResolveConflictReducer from "./resolve_conflict_reducer";
 import SendInstructionReducer from "./send_instruction_reducer";
@@ -65,6 +66,7 @@ import ChangeRow from "./change_table";
 import ClaimRow from "./claim_table";
 import ConflictRow from "./conflict_table";
 import DecisionRow from "./decision_table";
+import FileEditRow from "./file_edit_table";
 import InstructionRow from "./instruction_table";
 import PlanRow from "./plan_table";
 import PlanItemRow from "./plan_item_table";
@@ -138,6 +140,23 @@ const tablesSchema = __schema({
       { name: 'decision_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, DecisionRow),
+  fileEdit: __table({
+    name: 'file_edit',
+    indexes: [
+      { accessor: 'agent_id', name: 'file_edit_agent_id_idx_btree', algorithm: 'btree', columns: [
+        'agentId',
+      ] },
+      { accessor: 'file', name: 'file_edit_file_idx_btree', algorithm: 'btree', columns: [
+        'file',
+      ] },
+      { accessor: 'id', name: 'file_edit_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'file_edit_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, FileEditRow),
   instruction: __table({
     name: 'instruction',
     indexes: [
@@ -292,6 +311,7 @@ const reducersSchema = __reducers(
   __reducerSchema("register_agent", RegisterAgentReducer),
   __reducerSchema("release_claim", ReleaseClaimReducer),
   __reducerSchema("report_change", ReportChangeReducer),
+  __reducerSchema("report_edit", ReportEditReducer),
   __reducerSchema("reset_demo_state", ResetDemoStateReducer),
   __reducerSchema("resolve_conflict", ResolveConflictReducer),
   __reducerSchema("send_instruction", SendInstructionReducer),

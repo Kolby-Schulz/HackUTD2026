@@ -46,10 +46,11 @@ export function useLive(): Live {
   const [runs, r12] = useTable(tables.run);
   const [usage, r13] = useTable(tables.tokenUsage);
   const [savings, r14] = useTable(tables.tokenSaving);
+  const [fileEdits, r15] = useTable(tables.fileEdit);
   const now = useNow(1000);
   return {
-    agents, tasks, symbols, edges, plans, planItems, claims, changes, conflicts, decisions, instructions, runs, usage, savings,
-    ready: r1 && r2 && r3 && r4 && r5 && r6 && r7 && r8 && r9 && r10 && r11 && r12 && r13 && r14,
+    agents, tasks, symbols, edges, plans, planItems, claims, changes, conflicts, decisions, instructions, runs, usage, savings, fileEdits,
+    ready: r1 && r2 && r3 && r4 && r5 && r6 && r7 && r8 && r9 && r10 && r11 && r12 && r13 && r14 && r15,
     connected: conn.isActive, error: conn.connectionError?.message, now,
   };
 }

@@ -101,6 +101,8 @@ export interface ContractClient {
   ): Promise<void>;
 
   // Live pushes
+  /** Live diff stream (issue #24): usually sent by contract-hook, not the model. */
+  reportEdit(file: string, diff: string, symbolIds: string[]): Promise<void>;
   onInstruction(cb: (instr: Instruction) => void): () => void; // returns unsubscribe
   onStatusChange(cb: (status: AgentStatus) => void): () => void;
   ack(instructionId: bigint): Promise<void>;
@@ -314,6 +316,11 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
       await r.reportChange({ agentId, symbolId, kind, newSignature: o.newSignature, description: o.description });
     },
 
+    async reportEdit(file, diff, symbolIds) {
+      live();
+      await r.reportEdit({ agentId, file, diff, symbolIds });
+    },
+
     onInstruction(cb) {
       const handler = (_ctx: unknown, row: Parameters<typeof toInstruction>[0]) => {
         if (row.agentId === agentId) cb(toInstruction(row));
@@ -446,6 +453,7 @@ export function noopClient(agentId: string, logTokens: ContractClient['logTokens
     claim: nothing,
     release: nothing,
     reportChange: nothing,
+    reportEdit: async () => {},
     onInstruction: () => () => {},
     onStatusChange: () => () => {},
     ack: nothing,

@@ -3,15 +3,16 @@
 // The agents column stays on every tab. Everything comes from live subscriptions.
 import { useEffect, useMemo, useState } from 'react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
-import { agentCards, cases, codeMap, coordinator, feed, fmtClock, latestRun, modeSummary, people, runWindow, tokenStats } from './model.ts';
+import { agentCards, cases, codeMap, coordinator, edits, feed, fmtClock, latestRun, modeSummary, people, runWindow, tokenStats } from './model.ts';
 import { AgentsPanel } from './AgentsPanel.tsx';
 import { LiveTab } from './LiveTab.tsx';
 import { ActivityTab } from './ActivityTab.tsx';
 import { TokensTab } from './TokensTab.tsx';
 import { ScoreboardTab } from './ScoreboardTab.tsx';
+import { CodeTab } from './CodeTab.tsx';
 
-type Tab = 'live' | 'activity' | 'tokens' | 'scoreboard';
-const TABS: [Tab, string][] = [['live', 'Live'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard']];
+type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard';
+const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard']];
 
 function useHashTab(): Tab {
   const read = (): Tab => {
@@ -43,6 +44,7 @@ export function App() {
       coord: coordinator(live, run, now),
       cases: cs,
       events: feed(live, w),
+      edits: edits(live, w),
       map: codeMap(live, w, now),
       stats: tokenStats(live, run),
       without: modeSummary(live, 'without_contract', now),
@@ -97,7 +99,8 @@ export function App() {
         <AgentsPanel agents={view.agents} coord={view.coord} openRun={live.runs.find((r) => r.endedAt === undefined)} tasks={live.tasks}
           onlineIds={new Set(live.agents.filter((a) => now - Number(a.lastHeartbeat.microsSinceUnixEpoch / 1000n) < 60_000).map((a) => a.id))} />
         <main className="main">
-          {tab === 'live' && <LiveTab agents={view.agents} cases={view.cases} events={view.events} map={view.map} stats={view.stats} without={view.without} symbols={live.symbols} edges={live.edges} runStart={w.start} />}
+          {tab === 'live' && <LiveTab agents={view.agents} cases={view.cases} events={view.events} map={view.map} stats={view.stats} without={view.without} symbols={live.symbols} edges={live.edges} runStart={w.start} edits={view.edits} />}
+          {tab === 'code' && <CodeTab agents={view.agents} edits={view.edits} />}
           {tab === 'activity' && <ActivityTab events={view.events} cases={view.cases} people={view.people} />}
           {tab === 'tokens' && <TokensTab stats={view.stats} agents={view.agents} coord={view.coord} cases={view.cases} runStart={w.start} />}
           {tab === 'scoreboard' && <ScoreboardTab without={view.without} withC={view.withC} />}
