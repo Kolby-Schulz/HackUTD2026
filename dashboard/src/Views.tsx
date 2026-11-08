@@ -28,8 +28,11 @@ function said(events: FeedEvent[], id: string): FeedEvent | undefined {
 
 /* ---------------- Agents side bar ---------------- */
 
-export function AgentsView({ agents, coord, events, runLabel }: { agents: AgentCard[]; coord: CoordView; events: FeedEvent[]; runLabel: string }) {
+export function AgentsView({ agents: called, waiting = [], coord, events, runLabel }: { agents: AgentCard[]; waiting?: AgentCard[]; coord: CoordView; events: FeedEvent[]; runLabel: string }) {
   const [closed, setClosed] = useState<Set<string>>(new Set());
+  // registered workers that have not been called in this run stay hidden unless asked for
+  const [showWaiting, setShowWaiting] = useState(false);
+  const agents = showWaiting ? [...called, ...waiting] : called;
   const toggle = (id: string) => setClosed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // agent card turns green for a moment when it leaves Paused (storyboard: amber on pause, green on resume)
   const prev = useRef(new Map<string, string>());
@@ -48,7 +51,7 @@ export function AgentsView({ agents, coord, events, runLabel }: { agents: AgentC
   return (
     <>
       <div className="tree-run">{ICON.chevron}<span className="ellipsis">{runLabel}</span><span className="muted" style={{ fontWeight: 500, marginLeft: 4 }}>{working} working</span></div>
-      {agents.length === 0 && <div className="empty">No worker agents yet. They appear here when a worker calls register_agent.</div>}
+      {called.length === 0 && <div className="empty">No agent has been called in this run yet. Agents appear here once they get a task or start working.</div>}
       {agents.map((a) => {
         const s = said(events, a.id);
         const open = !closed.has(a.id);
@@ -73,6 +76,11 @@ export function AgentsView({ agents, coord, events, runLabel }: { agents: AgentC
           </section>
         );
       })}
+      {waiting.length > 0 && (
+        <button type="button" className="waiting-toggle" aria-expanded={showWaiting} onClick={() => setShowWaiting(!showWaiting)}>
+          {showWaiting ? 'Hide' : 'Show'} {waiting.length} registered agent{waiting.length === 1 ? '' : 's'} not called yet
+        </button>
+      )}
       <section className={'agent' + (coord.status === 'Working' ? ' paused' : '')} aria-label="Coordinator">
         <div className="agent-row" style={{ cursor: 'default' }}>
           <span className="chev">{ICON.chevron}</span>

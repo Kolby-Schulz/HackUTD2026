@@ -1,21 +1,21 @@
 // The whole dashboard on one screen, laid out like an editor workbench: title bar,
-// Agents side bar, Code map editor, bottom panel (Savings / Problems), Chat, status bar.
-// The side bar, chat and panel resize by dragging their edge and collapse like VS Code: drag
+// Agents side bar, editor groups (Code map, Control, Chat: Dock.tsx), bottom panel, status bar.
+// The side bar and panel resize by dragging their edge and collapse like VS Code: drag
 // past the minimum, double-click the edge, press Enter on it, or use the title bar buttons.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
-export type PaneId = 'side' | 'chat' | 'panel';
+export type PaneId = 'side' | 'panel';
 interface Layout { size: Record<PaneId, number>; open: Record<PaneId, boolean> }
 
-const DEFAULT: Layout = { size: { side: 290, chat: 380, panel: 230 }, open: { side: true, chat: true, panel: true } };
-const MIN: Record<PaneId, number> = { side: 220, chat: 280, panel: 130 };
-const MAX: Record<PaneId, number> = { side: 560, chat: 680, panel: 600 };
+const DEFAULT: Layout = { size: { side: 290, panel: 230 }, open: { side: true, panel: true } };
+const MIN: Record<PaneId, number> = { side: 220, panel: 130 };
+const MAX: Record<PaneId, number> = { side: 560, panel: 600 };
 const KEY = 'insync.workbench.layout';
 
 function load(): Layout {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? 'null') as Layout | null;
-    if (raw?.size && raw.open) return { size: { ...DEFAULT.size, ...raw.size }, open: { ...DEFAULT.open, ...raw.open } };
+    if (raw?.size && raw.open) return { size: { side: raw.size.side ?? DEFAULT.size.side, panel: raw.size.panel ?? DEFAULT.size.panel }, open: { side: raw.open.side ?? true, panel: raw.open.panel ?? true } };
   } catch { /* no storage: defaults are fine */ }
   return DEFAULT;
 }
@@ -76,6 +76,8 @@ export const ICON = {
   agents: <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.8a3.4 3.4 0 0 1 0 6.4M18.5 14.8c1.6.8 2.6 2.6 3 5.2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>,
   map: <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="6" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.7" /><rect x="15" y="4" width="6" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.7" /><rect x="9" y="15" width="6" height="5" rx="1" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M6 9v3h12V9M12 12v3" fill="none" stroke="currentColor" strokeWidth="1.7" /></svg>,
   chat: <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11h-9l-4.5 3.5V16H4z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>,
+  changes: <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7l-5 5 5 5M15 7l5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+  control: <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /><circle cx="9" cy="6" r="2.2" fill="var(--chrome)" stroke="currentColor" strokeWidth="1.7" /><circle cx="15" cy="12" r="2.2" fill="var(--chrome)" stroke="currentColor" strokeWidth="1.7" /><circle cx="8" cy="18" r="2.2" fill="var(--chrome)" stroke="currentColor" strokeWidth="1.7" /></svg>,
   panel: <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M3.5 14.5h17" stroke="currentColor" strokeWidth="1.7" /><path d="M7 17.5h4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>,
   chevron: <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>,
   close: <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>,

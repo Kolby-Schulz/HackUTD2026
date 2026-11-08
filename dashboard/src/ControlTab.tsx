@@ -21,12 +21,19 @@ function useSend() {
   };
 }
 
-/** The paired laptop's target repo label, or undefined when no paired laptop is online. */
-export function useControlRepo(): string | undefined {
-  return useMachine().status?.repoLabel;
+/** The paired laptop's facts: its target repo label (once one is chosen) and its machine name.
+ *  Both are undefined while no paired laptop is online (most viewers never pair one). */
+export function useControlInfo(): { repoLabel?: string; machine?: string } {
+  const { status } = useMachine();
+  return { repoLabel: status?.repo ? status.repoLabel : undefined, machine: status?.machine };
 }
 
-function useControl() {
+/** The paired laptop's target repo label, or undefined when none is chosen or no laptop is online. */
+export function useControlRepo(): string | undefined {
+  return useControlInfo().repoLabel;
+}
+
+export function useControl() {
   const { status } = useMachine();
   return { status, down: !status, refresh: () => undefined };
 }
@@ -185,7 +192,7 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
  * Which repository the agents work on. Applies to every process this laptop starts. On the demo
  * the link field is always open, so using your own repo is one paste and Enter.
  */
-function RepoPicker({ status, openRun, locked, busy, onSet }: {
+export function RepoPicker({ status, openRun, locked, busy, onSet }: {
   status?: Status; openRun?: R.Run; locked: boolean; busy: boolean; onSet: (repo: string) => Promise<boolean>;
 }) {
   const [text, setText] = useState('');
@@ -205,7 +212,7 @@ function RepoPicker({ status, openRun, locked, busy, onSet }: {
     <section className="card pad repo-picker" aria-label="Repository">
       <div className="row">
         <span className="cap muted">Repository</span>
-        <span className="mono">{demo ? 'Built-in demo (demo-repo)' : status?.repoLabel}</span>
+        <span className="mono">{demo ? <span className="muted">No repository chosen yet</span> : status?.repoLabel}</span>
         {!demo && cloning && <span className="label-wrap muted">{clone?.label === 'Clone repository' ? 'Cloning…' : 'Pulling latest…'}</span>}
         {!demo && !cloning && !failed && status?.repoInfo && <span className="repo-ok">✓ Ready</span>}
         <span className="grow" />
@@ -213,8 +220,6 @@ function RepoPicker({ status, openRun, locked, busy, onSet }: {
           <>
             <button type="button" className="btn small ghost" disabled={busy || locked} title={locked ? 'Stop what is running first' : undefined}
               onClick={() => { setText(status?.repo ?? ''); setEditing(true); }}>Change</button>
-            <button type="button" className="btn small ghost" disabled={busy || locked} title={locked ? 'Stop what is running first' : undefined}
-              onClick={() => void use('')}>Use demo</button>
           </>
         )}
       </div>

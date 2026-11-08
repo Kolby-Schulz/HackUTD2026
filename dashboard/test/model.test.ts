@@ -281,3 +281,28 @@ describe('workbench', () => {
     expect(runStage(t, t.runs[0], runWindow(t.runs[0], NOW))).toBe('Merge');
   });
 });
+
+describe('changes tab', () => {
+  it('numbers diff lines from the hunk header and drops file headers', async () => {
+    const { diffLines } = await import('../src/Changes.tsx');
+    const d = 'diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n@@ -10,3 +10,3 @@ export function fee()\n const a = 1;\n-return Math.trunc(fee);\n+return Math.round(fee * 100) / 100;\n }\n';
+    const l = diffLines(d);
+    expect(l.map((x) => x.kind)).toEqual(['hunk', 'ctx', 'del', 'add', 'ctx']);
+    expect(l[1]).toMatchObject({ oldNo: 10, newNo: 10 });
+    expect(l[2]).toMatchObject({ oldNo: 11, text: 'return Math.trunc(fee);' });
+    expect(l[3]).toMatchObject({ newNo: 11 });
+    expect(l[4]).toMatchObject({ oldNo: 12, newNo: 12 });
+    expect(l[0].text).toBe('export function fee()');
+  });
+});
+
+describe('called agents', () => {
+  it('lists agents with work in the run and leaves registered idle workers out', async () => {
+    const { calledAgents } = await import('../src/model.ts');
+    const t = story();
+    const c = { ...t.agents[0], id: 'agent-c', name: 'Agent C', status: 'idle', currentTaskId: undefined };
+    const withC = { ...t, agents: [...t.agents, c] } as unknown as Tables;
+    expect([...calledAgents(withC, withC.runs[1], NOW)].sort()).toEqual(['agent-a', 'agent-b']);
+    expect(calledAgents(withC, undefined, NOW).size).toBe(0);
+  });
+});
