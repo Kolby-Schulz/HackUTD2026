@@ -12,6 +12,7 @@ import {
   CHECKOUT,
   type Harness,
   type Who,
+  asOperator,
 } from './helpers';
 
 const status = (t: Harness, id: string) => t.db.agent.id.find(id)!.status;
@@ -209,12 +210,12 @@ describe('resolve_conflict', () => {
 
   it('does not change an agent that was not paused', () => {
     // Arrange
-    t.as('outsider', (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
+    asOperator(t, (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
     const runId = all(t.db.run.iter())[0].id;
-    t.as('outsider', (ctx) => mod.create_task(ctx, { title: 'x', description: 'x', agent_id: 'agent-a', run_id: runId }));
+    asOperator(t, (ctx) => mod.create_task(ctx, { title: 'x', description: 'x', agent_id: 'agent-a', run_id: runId }));
     const taskId = all(t.db.task.iter())[0].id;
-    t.as('outsider', (ctx) => mod.set_task_status(ctx, { task_id: taskId, status: 'in_progress' }));
-    t.as('outsider', (ctx) => mod.set_task_status(ctx, { task_id: taskId, status: 'done' }));
+    t.as('worker-a', (ctx) => mod.set_task_status(ctx, { task_id: taskId, status: 'in_progress' }));
+    t.as('worker-a', (ctx) => mod.set_task_status(ctx, { task_id: taskId, status: 'done' }));
 
     // Act
     resolve(t, conflictId);

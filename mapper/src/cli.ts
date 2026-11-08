@@ -2,14 +2,16 @@
 //   npm run mapper -- [--repo ../demo-repo] [--watch] [--dry-run [--json]]
 // --repo     repo to map (relative to the cwd, which is mapper/ under `npm run mapper`);
 //            default: CONTRACT_TARGET (issue #18), else the monorepo's demo-repo/.
-//            --watch holds the "mapper" service lock: one watching mapper per database.
+//            Every run holds the "mapper" service lock (the server only takes the code map
+//            from its holder): one mapper per database, so stop a --watch mapper elsewhere first.
 // --watch    keep running and re-map files as they change (plus the files importing them).
 //            A big batch of changes (a `git checkout`, a pull) re-maps the whole repo instead.
 // --dry-run  print the map instead of sending it; --json prints it as JSON.
 // Connects to SPACETIME_HOST / SPACETIME_DB_NAME from the monorepo's .env.
 //
 // TS/JS: .ts/.tsx/.js/.jsx/.mjs/.cjs files are mapped (ES module exports; CommonJS
-// module.exports is not), and tsconfig `paths` aliases resolve, from the root
+// module.exports is not; a JS file with no exports at all, such as a browser script or an
+// entry module, maps its top-level declarations), and tsconfig `paths` aliases resolve, from the root
 // tsconfig.json or, in a monorepo without one, from the packages' own tsconfig.json files.
 // Python, Go, Java, Rust, Ruby, PHP, C# and C/C++ are mapped with tree-sitter
 // (src/polyglot.ts); their edges are name-based and approximate.
@@ -137,21 +139,21 @@ async function main(): Promise<void> {
     },
   });
 
-  // A watching mapper is a singleton per database (issue #19): two laptops both watching
-  // would overwrite each other's code map. One-shot mapping (session start) needs no lock.
-  const lock = values.watch
-    ? await holdService(sync.reducers, 'mapper', process.env.CONTRACT_MACHINE || hostname(), (why) => {
-        console.error(`[mapper] lost the mapper lock (${why}); stopping`);
-        process.exit(1);
-      }).catch((e: unknown) => {
-        sync.close();
-        throw e;
-      })
-    : undefined;
+  // The mapper is a singleton per database (issue #19): two mappers would overwrite each
+  // other's code map, and the server accepts upsert_symbols only from the holder of the
+  // `mapper` service lock (#62). A one-shot run (session start) holds it just for the push.
+  const lock = await holdService(sync.reducers, 'mapper', process.env.CONTRACT_MACHINE || hostname(), (why) => {
+    console.error(`[mapper] lost the mapper lock (${why}); stopping`);
+    process.exit(1);
+  }).catch((e: unknown) => {
+    sync.close();
+    throw e;
+  });
 
   const first = await pushSnapshot(sync, maps, dbName);
 
   if (!values.watch) {
+    await lock.release();
     sync.close();
     if (first.failed) process.exitCode = 1;
     return;
@@ -208,7 +210,7 @@ async function main(): Promise<void> {
   const stop = async () => {
     await watcher.close();
     await queue;
-    await lock?.release();
+    await lock.release();
     sync.close();
     process.exit(0);
   };

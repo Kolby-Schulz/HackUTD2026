@@ -1,10 +1,10 @@
 // reset_demo_state: per-run working state is cleared between demo runs; history is kept.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, FEES, TOTAL, type Harness } from './helpers';
+import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, FEES, TOTAL, type Harness, asOperator } from './helpers';
 
-const reset = (t: Harness) => t.as('outsider', (ctx) => mod.reset_demo_state(ctx, {}));
-const startRun = (t: Harness) => t.as('outsider', (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
-const endRun = (t: Harness, id: bigint) => t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: id }));
+const reset = (t: Harness) => asOperator(t, (ctx) => mod.reset_demo_state(ctx, {}));
+const startRun = (t: Harness) => asOperator(t, (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
+const endRun = (t: Harness, id: bigint) => asOperator(t, (ctx) => mod.end_run(ctx, { run_id: id }));
 
 describe('reset_demo_state', () => {
   let t: Harness;
@@ -17,6 +17,21 @@ describe('reset_demo_state', () => {
     plan(t, 'agent-a', [{ symbol_id: FEES, intent: 'modify' }]);
     claim(t, 'agent-a', FEES);
     reportChange(t, 'agent-a', FEES, 'signature', 'adds bps', 'calculateFee(amountCents: number, bps: number): number');
+    // The workers have gone quiet (crashed or stopped), as they are between demo runs.
+    t.advance(61);
+  });
+
+  it('is refused while a worker is still running', () => {
+    // Arrange: agent-b (paused) is still heartbeating.
+    t.as('worker-b', (ctx) => mod.heartbeat(ctx, { agent_id: 'agent-b' }));
+
+    // Act
+    const act = () => reset(t);
+
+    // Assert
+    expect(act).toThrow(/agent-b still running/);
+    expect(all(t.db.symbol.iter()).length).toBeGreaterThan(0);
+    expect(t.db.agent.id.find('agent-b')?.status).toBe('paused');
   });
 
   it('clears the code map, plans, claims and undelivered instructions', () => {

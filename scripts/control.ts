@@ -11,22 +11,22 @@
 // Any repo: `npm run control -- --repo <owner/name | git URL | path>` (or CONTRACT_TARGET, or
 // the dashboard's Repository field) picks the repository. Every process it starts gets it as
 // CONTRACT_TARGET, which the worker, session, mapper, judge and reset scripts all honor
-// (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<name>.
+// (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<owner>/<name>.
 //
 // Safety: nothing listens on a port. Only dashboards paired with this machine (machine_access,
 // which only this daemon writes) can queue commands, every command goes through toCommand's
 // allowlist, and arguments are passed as argv, never through a shell.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { hostname } from 'node:os';
 import { createLLM } from '@contract/llm';
 import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingTool } from '@contract/client';
 import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
 import { browserCommand, Daemon, Pairer, type MachinePort } from './daemon.ts';
-import { REPO, savedToken, saveToken, TSX } from './lib.ts';
+import { machineId, machineTokenKey, REPO, savedToken, saveToken, TSX } from './lib.ts';
 
 const LOG_LINES = 300;
 
@@ -104,10 +104,12 @@ export function gitAccessHint(log: string[], repo: string): string | undefined {
  * Environment for every process the daemon starts. Git must fail instead of prompting: no one
  * can type into these processes, so a private repo without credentials would hang forever.
  */
-export function childEnv(base: NodeJS.ProcessEnv, repo: string): NodeJS.ProcessEnv {
+export function childEnv(base: NodeJS.ProcessEnv, repo: string, machine = ''): NodeJS.ProcessEnv {
   return {
     ...base,
     CONTRACT_TARGET: repo,
+    // The daemon's machine id, so workers, coordinator, mapper and judge all report as this laptop.
+    ...(machine ? { CONTRACT_MACHINE: machine } : {}),
     FORCE_COLOR: '0',
     GIT_TERMINAL_PROMPT: '0',
     GIT_SSH_COMMAND: base.GIT_SSH_COMMAND ?? 'ssh -o BatchMode=yes',
@@ -207,8 +209,10 @@ export class Registry {
   repo = '';
   /** The repo the last successful session start from here mapped (undefined = none yet). */
   sessionRepo?: string;
+  /** This daemon's machine id, passed to every child as CONTRACT_MACHINE ('' = don't set it). */
+  machine = '';
   info?: RepoInfo;
-  /** Where repo + sessionRepo are saved so a restart keeps them (unset in tests). */
+  /** Where repo, sessionRepo and machine are saved so a restart keeps them (unset in tests). */
   stateFile?: string;
   constructor(private spawnFn: typeof spawn = spawn, private bin = TSX, private cwd = REPO) {}
 
@@ -216,8 +220,9 @@ export class Registry {
   load(): string | undefined {
     if (!this.stateFile || !existsSync(this.stateFile)) return undefined;
     try {
-      const st = JSON.parse(readFileSync(this.stateFile, 'utf8')) as { repo?: string; sessionRepo?: string };
+      const st = JSON.parse(readFileSync(this.stateFile, 'utf8')) as { repo?: string; sessionRepo?: string; machine?: string };
       this.sessionRepo = st.sessionRepo;
+      if (typeof st.machine === 'string') this.machine = st.machine;
       return st.repo;
     } catch {
       return undefined;
@@ -228,8 +233,14 @@ export class Registry {
     if (!this.stateFile) return;
     try {
       mkdirSync(dirname(this.stateFile), { recursive: true });
-      writeFileSync(this.stateFile, JSON.stringify({ repo: this.repo, sessionRepo: this.sessionRepo }, null, 2));
+      writeFileSync(this.stateFile, JSON.stringify({ repo: this.repo, sessionRepo: this.sessionRepo, machine: this.machine }, null, 2));
     } catch { /* best effort */ }
+  }
+
+  /** Remembers the machine id this install registers as (see claimMachine). */
+  setMachine(id: string) {
+    this.machine = id;
+    this.save();
   }
 
   /** Re-reads the target's checks once it's on disk. */
@@ -297,7 +308,7 @@ export class Registry {
       cwd: this.cwd,
       // Always set, so a CONTRACT_TARGET in .env can't override the dashboard's choice (dotenv
       // never overwrites a variable that exists).
-      env: childEnv(process.env, this.repo),
+      env: childEnv(process.env, this.repo, this.machine),
       detached: true, // own process group, so stop() also ends the Claude Code runs it started
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -350,18 +361,31 @@ export class Registry {
   }
 }
 
-/** This laptop's machine id: the hostname, lowercased (override with --machine or CONTRACT_MACHINE). */
-export function machineId(name = hostname()): string {
-  const id = name.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
-  return id || 'laptop';
+/** This laptop's machine id (shared with the admin scripts in lib.ts, which connect as the same machine). */
+export { machineId };
+
+/** `<base>-xxxx`: a machine id that won't collide with another laptop of the same hostname. */
+export function suffixedId(base: string, rand: () => number = Math.random): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz23456789';
+  let suffix = '';
+  for (let i = 0; i < 4; i++) suffix += alphabet[Math.min(alphabet.length - 1, Math.floor(rand() * alphabet.length))];
+  return `${base.slice(0, 64 - 5)}-${suffix}`;
 }
+
+/** True for register_machine's refusal when a live daemon elsewhere holds the same id. */
+export function heldByAnotherDaemon(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('is online with another daemon');
+}
+
+/** Connections we closed on purpose (claimMachine's retry), so onDisconnect doesn't exit. */
+const closing = new WeakSet<DbConnection>();
 
 /** Connects as this laptop's daemon (same saved token every run, so pairings survive restarts). */
 function connectDaemon(id: string): Promise<DbConnection> {
   const host = process.env.SPACETIME_HOST;
   const dbName = process.env.SPACETIME_DB_NAME;
   if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
-  const tokenKey = `machine:${id}`;
+  const tokenKey = machineTokenKey(id);
   const q = (s: string) => s.replace(/'/g, "''");
   return new Promise((res, rej) => {
     const timer = setTimeout(() => rej(new Error(`no response from ${host} (${dbName}) within 10 s`)), 10_000);
@@ -380,6 +404,7 @@ function connectDaemon(id: string): Promise<DbConnection> {
             `SELECT * FROM machine_access WHERE machine_id = '${q(id)}'`,
             `SELECT * FROM machine_command WHERE machine_id = '${q(id)}'`,
             `SELECT * FROM machine_pair_request WHERE machine_id = '${q(id)}'`,
+            `SELECT * FROM machine_process WHERE machine_id = '${q(id)}'`,
             'SELECT * FROM run',
             'SELECT * FROM agent',
             'SELECT * FROM task',
@@ -387,11 +412,42 @@ function connectDaemon(id: string): Promise<DbConnection> {
       })
       .onConnectError((_ctx, err) => (clearTimeout(timer), rej(err)))
       .onDisconnect(() => {
+        if (closing.has(conn)) return;
         console.error('[control] lost the connection to SpacetimeDB; restart npm run control');
         process.exit(1);
       })
       .build();
   });
+}
+
+/**
+ * Connects and registers as `id`. Two laptops often share a hostname (every Mac is someone's
+ * "MacBook-Pro"), and the second would otherwise be refused, or worse, steer the dashboard to
+ * the wrong laptop. So when the id came from the hostname and another live daemon holds it,
+ * this install picks `<hostname>-xxxx` once, saves it in .contract/control.json and keeps it.
+ */
+async function claimMachine(id: string, explicit: boolean, reg: Registry): Promise<{ conn: DbConnection; id: string }> {
+  const fail = (e: unknown, hint = ''): never => {
+    console.error(`[control] ${e instanceof Error ? e.message : String(e)}${hint}`);
+    process.exit(1);
+  };
+  const conn = await connectDaemon(id).catch(fail);
+  try {
+    await conn.reducers.registerMachine({ id });
+    return { conn, id };
+  } catch (e) {
+    if (!heldByAnotherDaemon(e)) return fail(e);
+    if (explicit) return fail(e, ' Pick another name with --machine <name>.');
+    closing.add(conn);
+    conn.disconnect();
+  }
+  const base = machineId(hostname());
+  const next = suffixedId(base);
+  const conn2 = await connectDaemon(next).catch(fail);
+  await conn2.reducers.registerMachine({ id: next }).catch(fail);
+  reg.setMachine(next);
+  console.log(`[control] another laptop is already online as "${base}"; this one is "${next}" from now on (saved in .contract/control.json; override with --machine <name>)`);
+  return { conn: conn2, id: next };
 }
 
 function machinePort(conn: DbConnection, id: string): MachinePort {
@@ -406,21 +462,15 @@ function machinePort(conn: DbConnection, id: string): MachinePort {
 
 if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'control.ts')) {
   const { values } = parseArgs({ options: { repo: { type: 'string' }, machine: { type: 'string' }, pair: { type: 'string', multiple: true }, open: { type: 'boolean' }, 'no-open': { type: 'boolean' } } });
-  const id = machineId(values.machine ?? process.env.CONTRACT_MACHINE);
   const reg = new Registry();
   reg.stateFile = join(REPO, '.contract', 'control.json');
   const saved = reg.load();
+  // --machine / CONTRACT_MACHINE win; else the id this install registered as before; else the hostname.
+  const wanted = values.machine ?? process.env.CONTRACT_MACHINE;
+  const { conn, id } = await claimMachine(wanted ? machineId(wanted) : reg.machine || machineId(hostname()), Boolean(wanted), reg);
+  reg.machine = id; // before anything can spawn: every child gets it as CONTRACT_MACHINE
   const { repo, clone } = reg.setRepo(values.repo ?? process.env.CONTRACT_TARGET ?? saved ?? '');
   console.log(`[control] repository: ${repo || 'demo-repo (built-in)'}${clone ? ' (cloning…)' : ''}`);
-
-  const conn = await connectDaemon(id).catch((e: unknown) => {
-    console.error(`[control] ${e instanceof Error ? e.message : String(e)}`);
-    process.exit(1);
-  });
-  await conn.reducers.registerMachine({ id }).catch((e: unknown) => {
-    console.error(`[control] ${e instanceof Error ? e.message : String(e)}`);
-    process.exit(1);
-  });
   // --pair <identity>: lets that dashboard (its identity is on the Control tab) command this laptop.
   for (const hex of values.pair ?? []) {
     try {
@@ -447,6 +497,10 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
     if (++ticks % 10 === 0) daemon.touch();
     queue = queue.then(() => daemon.sync()).catch((e: unknown) => console.error(`[control] sync: ${e instanceof Error ? e.message : String(e)}`));
   }, 1000);
+  // Rows an earlier daemon left at 'running' (it was killed before it could report) are marked stopped.
+  await daemon.adopt([...conn.db.machineProcess.iter()].filter((p) => p.machineId === id).map((p) => ({
+    procKey: p.procKey, label: p.label, long: p.long, status: p.status, code: p.code, startedAtMs: p.startedAtMs, endedAtMs: p.endedAtMs, log: p.log,
+  })));
   await daemon.sync();
   const paired = [...conn.db.machineAccess.iter()].length;
   console.log(`[control] online as machine "${id}" on ${process.env.SPACETIME_HOST} (${process.env.SPACETIME_DB_NAME}); ${paired} paired dashboard${paired === 1 ? '' : 's'}`);
@@ -486,7 +540,12 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   conn.db.machinePairRequest.onInsert((_ctx, row) => answer(row));
   for (const row of [...conn.db.machinePairRequest.iter()]) answer(row); // queued while the daemon was off: the code is new, so these fail
 
-  const quit = () => { reg.stopAll(); setTimeout(() => process.exit(0), 300); };
+  // Report the stopped processes before exiting (the 1 s tick may not run again), else the next
+  // daemon finds them at 'running'. The timer is a backstop for a database that doesn't answer.
+  const quit = () => {
+    setTimeout(() => process.exit(0), 2000).unref();
+    daemon.shutdown().catch(() => undefined).finally(() => process.exit(0));
+  };
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
 
@@ -506,8 +565,8 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
     }
     takenOver = true;
     console.error(`[control] another npm run control just registered as machine "${id}"; stopping this one so only one answers the dashboard. If you meant this one, stop the other and start this again.`);
-    reg.stopAll();
-    setTimeout(() => process.exit(1), 300);
+    setTimeout(() => process.exit(1), 2000).unref();
+    daemon.shutdown().catch(() => undefined).finally(() => process.exit(1));
   });
 }
 
