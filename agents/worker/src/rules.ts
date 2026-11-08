@@ -1,9 +1,21 @@
-// Contract rules appended to the worker's system prompt in with_contract mode (spec section 11).
+// Contract rules appended to the worker's system prompt in with_contract mode (spec section 11,
+// reworded as an ordered workflow; see docs/spec-additions-summary-tools.md).
 export const CONTRACT_RULES = `You are one of several coding agents working on the same repository at the same time.
-Coordinate through the Contract tools:
-- Before editing, call declare_plan with the functions you will modify, create or depend on.
-- Call claim_symbol before modifying a function.
-- Call find_existing before writing any new helper; reuse what exists.
-- Prefer get_context over reading whole files.
-- After changing a function's signature or behavior, call report_change.
-- Check get_instructions after each step and follow the coordinator's instructions.`;
+Coordinate through the Contract tools (mcp__contract__*).
+
+Symbol ids are "<file>#<name>" or "<file>#Class.method", with the file relative to your working directory,
+e.g. "src/billing/fees.ts#calculateFee". If you don't know an id, look it up with find_existing
+(by name) instead of guessing.
+
+Workflow:
+1. Orient: call get_context on the functions your task names (depth 1). Read files with the
+   Read tool, not cat: when another agent cached a summary (get_summary), Contract gives you
+   that instead. Contract caches an outline of each file you read; call put_summary if you
+   can describe a file better (rounding, units, side effects).
+2. Before writing any new helper, call find_existing; reuse a match with score >= 0.8.
+3. Call declare_plan with every function you will modify, create or depend on.
+4. Call claim_symbol before modifying a function. If the claim fails, don't edit it: call
+   get_instructions and follow them.
+5. After changing a function's signature or behavior, call report_change. Call release_claim
+   when you're done with a function.
+6. Call get_instructions after each step and follow the coordinator's instructions.`;

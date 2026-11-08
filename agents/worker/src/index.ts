@@ -119,14 +119,17 @@ let prompt = task;
 for (;;) {
   try {
     const r = await llm.runWorker(prompt, {
+      ...contractOpts,
       cwd,
-      env,
+      // Load every tool schema up front: with lazy loading the model's first Contract calls
+      // guess the arguments and fail validation.
+      env: { ...env, ENABLE_TOOL_SEARCH: 'false' },
       signal: controller.signal,
       resumeSessionId: sessionId,
       onSessionId: (id) => (sessionId = id),
       onUsage,
-      allowedTools: ['Bash(npm test:*)', 'Bash(npx vitest:*)', ...(contractOpts.allowedTools ?? [])],
-      ...contractOpts,
+      // After the spread, so contractOpts.allowedTools can't drop the test commands.
+      allowedTools: ['Bash(npm test:*)', 'Bash(npm run:*)', 'Bash(npx vitest:*)', ...(contractOpts.allowedTools ?? [])],
     });
     console.log(`[${agentId}] done (${r.usage.prompt_tokens}+${r.usage.completion_tokens} tokens, $${r.usage.cost_usd.toFixed(4)})`);
     break;
