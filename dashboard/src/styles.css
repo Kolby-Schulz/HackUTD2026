@@ -262,6 +262,8 @@ button { cursor: pointer; }
 .node.conflict { border: 2px solid var(--danger); box-shadow: 0 0 0 5px var(--danger-soft); }
 .node.conflict.ghost { border-style: dashed; }
 .node.changed { border: 2px solid var(--warn); animation: pulse 1.6s ease-out 2; }
+.node.removed { border: 2px dashed var(--danger); background: var(--danger-soft); }
+.node.removed .nn .grow, .node.removed .nf { text-decoration: line-through; color: var(--text2); }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(212, 118, 0, 0.45); } 100% { box-shadow: 0 0 0 14px rgba(212, 118, 0, 0); } }
 .node .nn { display: flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 12px; font-weight: 700; }
 .node .nf { font-family: var(--mono); font-size: 10.5px; color: var(--text2); }

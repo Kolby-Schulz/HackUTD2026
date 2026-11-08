@@ -424,7 +424,7 @@ export function timeline(events: FeedEvent[], cs: CaseView[]): Entry[] {
 
 /* ---------------- code map ---------------- */
 
-export type NodeState = 'conflict' | 'changed' | 'claimed' | 'planned' | 'idle';
+export type NodeState = 'conflict' | 'removed' | 'changed' | 'claimed' | 'planned' | 'idle';
 
 export interface MapNode {
   id: string;
@@ -437,6 +437,8 @@ export interface MapNode {
   owners: Person[];
   state: NodeState;
   ghost: boolean;
+  /** An agent removed it; kept on the map (struck through) while recent, even after the mapper drops its row. */
+  removed: boolean;
   /** An agent is working on it: claimed, in conflict, or touched within the idle limit. */
   active: boolean;
   /** Not active itself, but directly calls an active function (shown faded for context). */
@@ -490,19 +492,32 @@ export function codeMap(t: Tables, w: Window, now: number, idleMs = MAP_IDLE_MS)
   }
 
   const hotSyms = new Set(t.conflicts.filter((c) => (c.status === 'open' || c.status === 'resolving') && inWin(w, ms(c.createdAt))).map((c) => c.symbolId));
-  const changed = new Set(t.changes.filter((c) => inWin(w, ms(c.createdAt))).map((c) => c.symbolId));
+  const winChanges = t.changes.filter((c) => inWin(w, ms(c.createdAt)));
+  const changed = new Set(winChanges.map((c) => c.symbolId));
+  // removed: the symbol's latest change in the window is a removal
+  const latest = new Map<string, (typeof winChanges)[number]>();
+  for (const c of winChanges) {
+    const cur = latest.get(c.symbolId);
+    if (!cur || ms(c.createdAt) > ms(cur.createdAt) || (ms(c.createdAt) === ms(cur.createdAt) && c.id > cur.id)) latest.set(c.symbolId, c);
+  }
+  const removed = new Set([...latest.values()].filter((c) => c.kind === 'removed').map((c) => c.symbolId));
   const claimBy = new Map<string, string>();
   for (const c of t.claims) if (ms(c.expiresAt) > now) claimBy.set(c.symbolId, c.agentId);
 
-  const all = [...ids, ...ghosts.keys()];
+  // worked on: anything held or contested right now, or touched within idleMs
+  const lastAt = symbolActivity(t, now);
+  const idleOf = (id: string) => (claimBy.has(id) || hotSyms.has(id) ? 0 : now - (lastAt.get(id) ?? -Infinity));
+  // A removed function whose row the mapper already dropped stays on the map while it is recent,
+  // so the removal is visible instead of the box just vanishing.
+  const gone = [...removed].filter((id) => !ids.has(id) && idleOf(id) <= idleMs);
+  for (const id of gone) ghosts.delete(id);
+
+  const all = [...ids, ...gone, ...ghosts.keys()];
   const shown = new Set(all);
   const edges = t.edges.filter((e) => shown.has(e.callerId) && shown.has(e.calleeId));
   const callers = new Map<string, string[]>();
   for (const e of edges) callers.set(e.calleeId, [...(callers.get(e.calleeId) ?? []), e.callerId]);
 
-  // worked on: anything held or contested right now, or touched within idleMs
-  const lastAt = symbolActivity(t, now);
-  const idleOf = (id: string) => (claimBy.has(id) || hotSyms.has(id) ? 0 : now - (lastAt.get(id) ?? -Infinity));
   const activeIds = new Set(all.filter((id) => idleOf(id) <= idleMs));
   const contextIds = new Set<string>();
   for (const id of activeIds) {
@@ -545,13 +560,14 @@ export function codeMap(t: Tables, w: Window, now: number, idleMs = MAP_IDLE_MS)
     placed.set(d, i + 1);
     const c = firstCol.get(d)! + Math.floor(i / maxRows);
     const r = i % maxRows;
-    const ghost = !s;
+    const isRemoved = removed.has(id);
+    const ghost = !s && !isRemoved;
     const ownerIds = claimBy.has(id) ? [claimBy.get(id)!] : ghost ? ghosts.get(id) ?? [] : [];
     const ownerId = ownerIds[0];
-    const state: NodeState = hotSyms.has(id) ? 'conflict' : changed.has(id) ? 'changed' : ghost ? 'planned' : claimBy.has(id) ? 'claimed' : 'idle';
+    const state: NodeState = hotSyms.has(id) ? 'conflict' : isRemoved ? 'removed' : changed.has(id) ? 'changed' : ghost ? 'planned' : claimBy.has(id) ? 'claimed' : 'idle';
     return {
       id, name: s?.name ?? symbolName(id), file: s?.file ?? symbolFile(id), kind: s?.kind ?? 'function', version: s?.version ?? 0,
-      owner: ownerId ? person(ppl, ownerId) : undefined, owners: ownerIds.map((x) => person(ppl, x)), state, ghost, col: c, row: r,
+      owner: ownerId ? person(ppl, ownerId) : undefined, owners: ownerIds.map((x) => person(ppl, x)), state, ghost, removed: isRemoved, col: c, row: r,
       active: activeIds.has(id), context: contextIds.has(id),
       fading: activeIds.has(id) && idleOf(id) > idleMs - FADE_MS,
     };

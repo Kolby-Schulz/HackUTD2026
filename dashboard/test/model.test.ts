@@ -191,6 +191,20 @@ describe('code map', () => {
     const at = Object.fromEntries(m.nodes.map((n) => [n.id, n.col]));
     for (const e of m.edges) expect(at[e.source]).toBeLessThan(at[e.target]);
   });
+  it('shows a removed function as removed, even after the mapper drops its row, until it goes idle', () => {
+    const t = story();
+    t.conflicts = [];
+    t.claims = [];
+    const removal = { id: 2n, agentId: 'agent-a', symbolId: TOTAL, kind: 'removed', oldSignature: undefined, newSignature: undefined, description: 'gone', createdAt: ts(30) };
+    t.changes = [...t.changes, removal] as unknown as Tables['changes'];
+    const w = runWindow(t.runs[1], NOW);
+    const at = (now: number) => codeMap(t, w, now, MAP_IDLE_MS).nodes.find((n) => n.id === TOTAL);
+    expect(at(T0 + 31_000)).toMatchObject({ state: 'removed', removed: true, ghost: false, active: true });
+    // the mapper deletes the symbol row once the removal lands in the checkout
+    t.symbols = t.symbols.filter((s) => s.id !== TOTAL) as unknown as Tables['symbols'];
+    expect(at(T0 + 31_000)).toMatchObject({ state: 'removed', removed: true, ghost: false, active: true, name: 'computeTotal' });
+    expect(at(T0 + 30_000 + MAP_IDLE_MS + 1)).toBeUndefined();
+  });
   it('keeps a claimed function active however long it sits idle', () => {
     const t = story();
     t.conflicts = [];
@@ -202,7 +216,7 @@ describe('code map', () => {
 
 describe('code map layout', () => {
   const node = (id: string, col: number, row: number, active = false, context = false) =>
-    ({ id, name: id, file: `src/${id}.py`, kind: 'function', version: 1, owners: [], state: 'idle', ghost: false, active, context, fading: false, col, row }) as MapNode;
+    ({ id, name: id, file: `src/${id}.py`, kind: 'function', version: 1, owners: [], state: 'idle', ghost: false, removed: false, active, context, fading: false, col, row }) as MapNode;
   // three columns of five; agents work on a0 and c4, a1 calls a0 (context);
   // a0 reaches c4 only through b2 and b3, which are collapsed
   const grid = ['a', 'b', 'c'].flatMap((k, col) => Array.from({ length: 5 }, (_, row) => node(`${k}${row}`, col, row, `${k}${row}` === 'a0' || `${k}${row}` === 'c4', `${k}${row}` === 'a1')));
