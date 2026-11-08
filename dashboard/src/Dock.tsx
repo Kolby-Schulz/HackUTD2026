@@ -1,4 +1,4 @@
-// Editor groups, like VS Code: the Code map, Control and Chat views are tabs. Drag a tab to
+// Editor groups, like VS Code: the Code map, Changes, Control and Chat views are tabs. Drag a tab to
 // reorder it, drop it on another group's tab strip to move it there, or drop it on a group's left
 // or right edge to split that group. Groups resize by dragging the edge between them. A closed view
 // comes back from the title bar. The arrangement is saved per browser.
@@ -8,14 +8,20 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ICON } from './Workbench.tsx';
 
-export type ViewId = 'map' | 'control' | 'chat';
-export const VIEWS: ViewId[] = ['map', 'control', 'chat'];
+export type ViewId = 'map' | 'changes' | 'control' | 'chat';
+export const VIEWS: ViewId[] = ['map', 'changes', 'control', 'chat'];
 interface Group { id: string; views: ViewId[]; active: ViewId; size: number }
-export interface DockState { groups: Group[] }
+export interface DockState { groups: Group[]; v?: number }
 
 const KEY = 'insync.workbench.dock';
 const MIN_PX = 240;
-const DEFAULT: DockState = { groups: [{ id: 'g1', views: ['map', 'control'], active: 'map', size: 2 }, { id: 'g2', views: ['chat'], active: 'chat', size: 1 }] };
+// Code map and its code changes side by side, Chat on the right
+const VERSION = 2;
+const DEFAULT: DockState = { v: VERSION, groups: [
+  { id: 'g1', views: ['map', 'control'], active: 'map', size: 1.25 },
+  { id: 'g2', views: ['changes'], active: 'changes', size: 1.3 },
+  { id: 'g3', views: ['chat'], active: 'chat', size: 0.9 },
+] };
 
 let seq = 0;
 const newId = () => `g${Date.now().toString(36)}${seq++}`;
@@ -30,7 +36,12 @@ function load(): DockState {
         .map((g) => ({ ...g, views: g.views.filter((v) => VIEWS.includes(v) && !seen.has(v) && seen.add(v)) }))
         .filter((g) => g.views.length)
         .map((g) => ({ ...g, active: g.views.includes(g.active) ? g.active : g.views[0], size: g.size > 0 ? g.size : 1 }));
-      if (groups.length) return { groups };
+      // saved before the Changes tab existed: give it its own group right of the map's
+      if ((raw.v ?? 1) < 2 && !seen.has('changes')) {
+        const at = groups.findIndex((g) => g.views.includes('map')) + 1;
+        groups.splice(at > 0 ? at : groups.length, 0, { id: newId(), views: ['changes'], active: 'changes', size: 1 });
+      }
+      if (groups.length) return { v: VERSION, groups };
     }
   } catch { /* no storage: defaults */ }
   return DEFAULT;
@@ -48,7 +59,7 @@ function without(s: DockState, v: ViewId): DockState {
 export function useDock() {
   const [dock, setDock] = useState<DockState>(load);
   useEffect(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(dock)); } catch { /* private window */ }
+    try { localStorage.setItem(KEY, JSON.stringify({ ...dock, v: VERSION })); } catch { /* private window */ }
   }, [dock]);
   const isOpen = (v: ViewId) => dock.groups.some((g) => g.views.includes(v));
 
@@ -81,7 +92,14 @@ export function useDock() {
   const open = useCallback((v: ViewId) => setDock((s) => {
     if (s.groups.some((g) => g.views.includes(v))) return { groups: s.groups.map((g) => (g.views.includes(v) ? { ...g, active: v } : g)) };
     if (!s.groups.length) return { groups: [{ id: newId(), views: [v], active: v, size: 1 }] };
-    // chat reopens as its own group on the right, like a side bar; the others join the first group
+    // chat reopens as its own group on the right, like a side bar; changes opens beside the map;
+    // the others join the first group
+    if (v === 'changes') {
+      const at = s.groups.findIndex((g) => g.views.includes('map')) + 1;
+      const groups = s.groups.slice();
+      groups.splice(at > 0 ? at : groups.length, 0, { id: newId(), views: [v], active: v, size: 1 });
+      return { groups };
+    }
     if (v === 'chat') return { groups: [...s.groups, { id: newId(), views: [v], active: v, size: Math.max(0.6, s.groups.reduce((a, g) => a + g.size, 0) / 3) }] };
     return { groups: s.groups.map((g, i) => (i === 0 ? { ...g, views: [...g.views, v], active: v } : g)) };
   }), []);

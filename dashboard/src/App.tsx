@@ -6,13 +6,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
-import { agentCards, cases, codeMap, coordFocus, coordinator, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
+import { agentCards, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
 import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
 import { CodeMap } from './CodeMap.tsx';
 import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
 import { DockArea, useDock, type ViewId } from './Dock.tsx';
 import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
 import { ChatView } from './Chat.tsx';
+import { ChangesView } from './Changes.tsx';
 import { Boundary } from './ui.tsx';
 import { ControlTab, useControlInfo } from './ControlTab.tsx';
 
@@ -37,6 +38,7 @@ export function App() {
     coord: coordinator(live, run, now),
     cases: cases(live, w),
     events: feed(live, w),
+    edits: edits(live, w),
     map: codeMap(live, w, now),
     savings: savingsNow(live, run, now),
     stage: runStage(live, run, w),
@@ -77,6 +79,7 @@ export function App() {
           <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" title="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
           <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" title="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
           <button type="button" className="iconbtn" aria-pressed={dock.isOpen('map')} aria-label="Toggle code map" title="Code map" onClick={() => flip('map')}>{ICON.map}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('changes')} aria-label="Toggle changes" title="Changes" onClick={() => flip('changes')}>{ICON.changes}</button>
           <button type="button" className="iconbtn" aria-pressed={dock.isOpen('control')} aria-label="Toggle control" title="Control" onClick={() => flip('control')}>{ICON.control}</button>
           <button type="button" className="iconbtn" aria-pressed={dock.isOpen('chat')} aria-label="Toggle chat" title="Chat" onClick={() => flip('chat')}>{ICON.chat}</button>
         </div>
@@ -123,6 +126,14 @@ export function App() {
                       )}
                     </Boundary>
                   </div>
+                </div>
+              ) },
+              changes: { title: 'Changes', icon: ICON.changes, hint: "The code each agent wrote, as diffs · drag to move or split", render: () => (
+                <div className="view">
+                  <Boundary name="Changes">
+                    <ChangesView edits={view.edits} agents={view.agents} symbol={selected} symbolName={node?.name}
+                      onPickSymbol={(id) => { setPicked(id); if (!dock.isOpen('map')) dock.open('map'); }} onClearSymbol={() => setPicked(undefined)} />
+                  </Boundary>
                 </div>
               ) },
               control: { title: 'Control', icon: ICON.control, hint: "Start and stop this laptop's processes (npm run control) · drag to move or split", render: () => (
