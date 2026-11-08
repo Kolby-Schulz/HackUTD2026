@@ -1,12 +1,14 @@
-// Comment routing: which agent a note on a layer goes to, and how a layer is labelled in chat.
+// Comment routing: which agent a note on a layer goes to (via agents/router.ts), and how a layer is labelled in chat.
+import { route as decide, GENERAL } from '../../agents/router';
+import type { RouteWhy, RouterAgent, RouterInput } from '../../agents/router';
 import type { AgentRuntime } from '../../agents/runtime';
 import type { BoardKit } from '../../core/commands';
-import { absRect, ancestors } from '../../core/tree';
-import type { ActorId, ShapeId } from '../../core/types';
+import { ancestors } from '../../core/tree';
+import type { ShapeId } from '../../core/types';
 
-/** A comment pin, anchored to a layer (offset from its top-left) so it follows the layer around. */
+/** Legacy per-send pin shape; the page still passes `chat.pins` (always empty now) to <Pins>. Real pins are `commentThreads`. */
 export type Pin = { id: string; n: number; shapeId: string; dx: number; dy: number; thread: string; done: boolean };
-export type Route = { thread: string; how: 'author' | 'nearest' | 'none' };
+export type Route = { thread: string; how: RouteWhy; label: string };
 
 /** "Frame › Layer" for the nearest frame above a layer. */
 export function ctxLabel(board: BoardKit, id: ShapeId): string {
@@ -17,22 +19,22 @@ export function ctxLabel(board: BoardKit, id: ShapeId): string {
   return f ? `${f.name} › ${s.name}` : s.name;
 }
 
-/** A note about a layer goes to the agent that made it, else its frame's maker, else the nearest agent. */
-export function routeFor(board: BoardKit, rt: AgentRuntime | null, id: ShapeId): Route {
-  const live = new Set(rt?.agentIds() ?? []);
-  const st = board.doc.getState();
-  for (const sid of [id, ...ancestors(st, id)]) {
-    const s = st.shapes.get(sid);
-    const owner = [s?.author, s?.createdBy].find((a) => a && live.has(a));
-    if (owner) return { thread: owner, how: 'author' };
-  }
-  const r = absRect(st, id);
-  let best: ActorId | null = null, bd = Infinity;
-  for (const a of live) {
-    const p = board.presence.get(a);
-    if (!r || p?.x === undefined || p.y === undefined) continue;
-    const d = Math.hypot(p.x - (r.x + r.w / 2), p.y - (r.y + r.h / 2));
-    if (d < bd) { bd = d; best = a; }
-  }
-  return best ? { thread: best, how: 'nearest' } : { thread: 'general', how: 'none' };
+/** The agents the runtime hosts, as the router sees them (name, role, stopped, queue length). */
+export function routerAgents(board: BoardKit, rt: AgentRuntime | null): RouterAgent[] {
+  return (rt?.agentIds() ?? []).map((id) => {
+    const a = board.actors.get(id);
+    return { id, name: a?.name ?? id, ...(a?.role ? { role: a.role } : {}), stopped: rt!.isStopped(id), load: rt!.tasks(id).length };
+  });
 }
+
+export function routerInput(board: BoardKit, rt: AgentRuntime | null, shapeId?: ShapeId): RouterInput {
+  return { agents: routerAgents(board, rt), doc: board.doc.getState(), shapeId, claims: board.claims, presence: board.presence };
+}
+
+/** A note about a layer: mention-free routing by claim, author, frame author, role, then the nearest idle agent. */
+export function routeFor(board: BoardKit, rt: AgentRuntime | null, id: ShapeId): Route {
+  const d = decide(routerInput(board, rt, id));
+  return { thread: d.to, how: d.why, label: d.label };
+}
+
+export { GENERAL };

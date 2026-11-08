@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMsg } from '../../chat/store';
 import '../../styles/chat.css';
+import { MentionTextarea } from './MentionTextarea';
 import { Messages } from './MessageView';
 import type { MessageEnv } from './MessageView';
 
@@ -108,9 +109,9 @@ export function ChatPanel(p: {
             <button onClick={p.onDetach} aria-label="Detach layer">✕</button>
           </div>
         )}
-        <textarea value={draft} rows={3}
-          placeholder={p.attached ? `Ask ${p.attached.to?.name ?? 'Claude'} about ${p.attached.label.split(' › ').pop()}…` : thread.id === 'general' ? 'Message the board…' : `Reply to ${thread.name}…`}
-          onChange={(e) => setDraft(e.target.value)}
+        <MentionTextarea value={draft} rows={3} onChange={setDraft}
+          agents={p.threads.filter((t) => t.id !== 'general' && t.live).map((t) => ({ id: t.id, name: t.name, stopped: t.status === 'stopped' }))}
+          placeholder={p.attached ? `Ask ${p.attached.to?.name ?? 'Claude'} about ${p.attached.label.split(' › ').pop()}…` : thread.id === 'general' ? 'Message the board, or @mention an agent…' : `Reply to ${thread.name}…`}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }} />
         <div className="pg-compose-foot">
           <button className={'pg-mini-tool' + (p.commentOn ? ' on' : '')} onClick={p.onCommentTool} title="Comment tool (C)">◎ Point at a layer</button>

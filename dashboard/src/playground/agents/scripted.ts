@@ -93,7 +93,7 @@ export function createScriptedDriver(o: { slots: Slots; templates?: Tpl[] }): Ag
     await ctx.choreo.moveTo(box.x + box.w / 2, box.y + box.h / 2);
     ctx.choreo.press(true);
     await wait(220);
-    const res = ctx.board.exec({ actor: ctx.me.id, opId: opId(ctx.me.id), commands: editCommands(shape.id, edit), label: `${ctx.me.name}: ${edit.summary[0]}` });
+    const res = ctx.board.exec({ actor: ctx.me.id, opId: opId(ctx.me.id), commands: editCommands(shape.id, edit), label: `${ctx.me.name}: ${edit.summary.join(', ')}` });
     ctx.choreo.press(false);
     const fail = res.results.find((r) => !r.ok);
     ctx.say(res.ok || !fail || fail.ok ? `Done: ${edit.summary.join(', ')}.` : `Could not change ${shape.name}: ${fail.message}`);

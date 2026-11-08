@@ -15,25 +15,25 @@ rule, double-click enter, escape ladder, native cursors, avatar stack, guide tok
 humanEdited rule, palette.open, toast action, share link and URL view.
 
 ## A. Routing and mentions (WP-63) - large, delegate
-- todo: `ui/comments/route.ts` `routeFor` calls `route()` from `agents/router.ts` (agents from `rt.agentIds()` mapped to
+- done (wire/chat): `ui/comments/route.ts` `routeFor` calls `route()` from `agents/router.ts` (agents from `rt.agentIds()` mapped to
   `board.actors.get(id)`; pass `board.claims`, `board.presence`, `board.doc.getState()`); return
   `{thread: d.to, how: d.why, label: d.label}`.
-- todo: `ui/comments/CommentPopover.tsx` (~line 66) shows `route.label` instead of the three-way ternary.
-- todo: `ui/chat/useChat.ts` `send`: replace the `Math.random` pick: `parseMentions` (error line per unknown/ambiguous
+- done (wire/chat): `ui/comments/CommentPopover.tsx` (~line 66) shows `route.label` instead of the three-way ternary.
+- done (wire/chat): `ui/chat/useChat.ts` `send`: replace the `Math.random` pick: `parseMentions` (error line per unknown/ambiguous
   name; "X is stopped, start?" for stopped agents; confirm `@all` when `needsAllConfirm`), `route()` with mentions, post
   `routingCard()` in General with `routedBy`, then `request()`; a General message with no layer or mention tries
   `splitGeneral` first (one request and card per part). Demo beat 3.
-- todo: composer and popover textareas: `@` autocomplete with `mentionQuery`, `suggestMentions`, `applyMention`.
-- todo: `ui/chat/MessageView.tsx` renders `m.text` for routing messages.
+- done (wire/chat): composer and popover textareas: `@` autocomplete with `mentionQuery`, `suggestMentions`, `applyMention`.
+- done (wire/chat): `ui/chat/MessageView.tsx` renders `m.text` for routing messages.
 - note: `MsgBody` routing `why` lacks `role|split|general` (types frozen); `routingCard` maps them to `manual`.
 
 ## B. Action cards (WP-61)
 - todo: `ui/useBoot.ts` `startAgents(..., { host, onSay, ...agentChatHooks(sink.chat) })` + import from
   `./chat/agentChat`.
-- todo: `ui/chat/ChatView.tsx` replace `onUndo` with the `doc` + `undo(m)` handler that calls
+- done (wire/chat): `ui/chat/ChatView.tsx` replace `onUndo` with the `doc` + `undo(m)` handler that calls
   `board.revert(board.me, m.body.tx)`, marks the card undone and posts "You undid: ...".
-- todo: `styles/chat.css` pulse for `.pg-msg.thinking`.
-- todo: `agents/scripted.ts` (~line 87) card label uses `edit.summary.join(', ')`.
+- done (wire/chat): `styles/chat.css` pulse for `.pg-msg.thinking`.
+- done (wire/chat): `agents/scripted.ts` (~line 87) card label uses `edit.summary.join(', ')`.
 
 ## C. Snapping (WP-52)
 - todo: `core/snap/move.ts` wraps candidates with `withParent(...)` from `./parent` (parent-frame snapping for moves).
@@ -50,9 +50,9 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - todo: layer chips and presence jump use `goToShape(view, id)`.
 
 ## F. Comment threads (WP-43)
-- todo: layer comments create threads in `commentThreads` instead of the old `Pin` list in `useChat`.
-- todo: `useChat` forwards `commentThreads.onHumanMessage` to the chat thread; `markAnswered` when the agent finishes.
-- todo: `ui/comments/CommentList.tsx` lists orphan pins.
+- done (wire/chat): layer comments create threads in `commentThreads` instead of the old `Pin` list in `useChat`.
+- done (wire/chat): `useChat` forwards `commentThreads.onHumanMessage` to the chat thread; `markAnswered` when the agent finishes.
+- done (wire/chat): `ui/comments/CommentList.tsx` lists orphan pins.
 
 ## G. Agents and presence
 - todo: `core/commands.ts` emits `status.changed` on `status.set` (WP-41; today only `rt.onStatus`).

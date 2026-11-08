@@ -1,25 +1,31 @@
 // Chat and comment state for the page: messages, the open thread, comment pins, and `send`, which
 // routes a note to an agent. The page owns it so it survives panel switches and collapses.
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { MutableRefObject } from 'react';
 import type { AgentRuntime } from '../../agents/runtime';
 import type { BoardKit } from '../../core/commands';
-import { newId, opId } from '../../core/ids';
+import { opId } from '../../core/ids';
 import { absRect } from '../../core/tree';
+import { GENERAL, parseMentions, routingCard } from '../../agents/router';
+import { commentThreads } from '../../comments/threads';
+import type { CommentThread, ThreadMsg } from '../../comments/threads';
 import type { ActorId, ShapeId } from '../../core/types';
 import { CLAUDE, YOU_COLOR } from '../constants';
 import type { ChatSink } from '../kit';
 import { statusOf } from '../meta';
 import type { Meta } from '../meta';
-import { ctxLabel, routeFor } from '../comments/route';
+import { ctxLabel, routeFor, routerInput } from '../comments/route';
 import type { Pin } from '../comments/route';
 import { createChatStore, YOU } from '../../chat/store';
 import type { ChatMsg, NewMsg } from '../../chat/store';
 import type { Thread } from './ChatPanel';
+import { planMessage } from './plan';
+import type { SendPlan } from './plan';
 
 /** Actor that reassigns an unowned layer to the agent a note was routed to (kept off the human's undo stack). */
 const ROUTER: ActorId = 'system-router';
 
+const NO_PINS: Pin[] = [];
 export type SendOpts = { thread?: string; shapeId?: string; at?: { x: number; y: number } };
 
 export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject<AgentRuntime | null>, cursors: Meta[], onOpenChat: () => void) {
@@ -29,20 +35,19 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
   const messages = useSyncExternalStore(store.subscribe, store.messages);
   const unread = useSyncExternalStore(store.subscribe, store.unread);
   const [thread, setThread] = useState('general');
-  const [pins, setPins] = useState<Pin[]>([]);
+  /** Legacy per-send pins. Layer comments are `commentThreads` now; the page still passes this (empty) list to <Pins>. */
+  const pins: Pin[] = NO_PINS;
   const [showPins, setShowPins] = useState(true);
   const [flash, setFlash] = useState<string | null>(null);
   const [focusMsg, setFocusMsg] = useState<string | null>(null);
-  const pinCount = useRef(0);
   /** Notes waiting on each agent, oldest first: its replies are tagged with the head note's layer. */
   const pending = useRef(new Map<ActorId, Array<{ ctx?: string; shapeId?: string }>>());
 
   const post = useCallback((m: NewMsg) => store.post(m), [store]);
   const postText = useCallback((m: Omit<NewMsg, 'body'> & { text: string }) => { const { text, ...rest } = m; return store.post({ ...rest, body: { kind: 'text', text } }); }, [store]);
-  const resolvePin = useCallback((id: string) => setPins((ps) => ps.map((p) => (p.id === id ? { ...p, done: true } : p))), []);
-  const clearResolved = useCallback(() => setPins((ps) => ps.filter((p) => !p.done)), []);
+  const clearResolved = useCallback(() => { for (const t of commentThreads.list()) if (t.state === 'resolved') commentThreads.remove(t.id); }, []);
   /** Page teardown: forget every message, pin and queued note. */
-  const reset = useCallback(() => { pending.current.clear(); store.reset(); setPins([]); pinCount.current = 0; }, [store]);
+  const reset = useCallback(() => { pending.current.clear(); store.reset(); commentThreads.load({ v: 1, counter: 0, threads: [] }); }, [store]);
 
   // agent chat lines land in the agent's own thread
   sink.say = (actor, text) => {
@@ -62,51 +67,96 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     if (msgId) setFocusMsg(msgId);
   }, [onOpenChat]);
 
+  const nameOf = useCallback((id: ActorId) => board.actors.get(id)?.name ?? id, [board]);
+  const note = useCallback((thread: string, text: string, kind: 'error' | 'system' = 'error') =>
+    post({ thread, from: 'claude', ...CLAUDE, body: { kind, text } }), [post]);
+
+  /** One user message into an agent's chat, then the agent's request. Resolves true when an agent ran it. */
+  const deliverChat = useCallback(async (target: ActorId, text: string, o: { shapeId?: string; ctx?: string; pin?: string } = {}) => {
+    const r = rtRef.current;
+    postText({ thread: target, from: YOU, name: 'You', color: YOU_COLOR, text, ...(o.ctx ? { ctx: o.ctx } : {}), ...(o.pin ? { pin: o.pin } : {}), ...(o.shapeId ? { shapeId: o.shapeId } : {}) });
+    if (!r || !r.has(target)) {
+      postText({ thread: 'general', from: 'claude', ...CLAUDE, text: 'No agents on the board yet. Add one with + Agent and I will route notes to it.' });
+      return false;
+    }
+    const q = pending.current.get(target) ?? [];
+    q.push({ ctx: o.ctx, shapeId: o.shapeId });
+    pending.current.set(target, q);
+    try { await r.request(target, { text, shapeId: o.shapeId, from: me }); } finally { pending.current.get(target)?.shift(); }
+    return true;
+  }, [rtRef, postText, me]);
+
+  /** A human message on a comment thread (first note or a reply) goes to the thread's chat; the agent finishing marks it answered. */
+  const forward = useCallback((t: CommentThread, msg: ThreadMsg) => {
+    const shapeId = t.anchor.kind === 'layer' ? t.anchor.shapeId : undefined;
+    const live = shapeId ? board.doc.getState().shapes.get(shapeId) : undefined;
+    const sid = live && !live.deleted ? live.id : undefined;
+    if (t.state === 'answered') commentThreads.reopen(t.id);
+    void deliverChat(t.chat, msg.text, { shapeId: sid, ctx: sid ? ctxLabel(board, sid) : undefined, pin: t.id })
+      .then((ran) => { if (ran) commentThreads.markAnswered(t.id); });
+  }, [board, deliverChat]);
+  const forwardRef = useRef(forward);
+  forwardRef.current = forward;
+  useEffect(() => commentThreads.onHumanMessage((t, m) => forwardRef.current(t, m)), []);
+
   const send = useCallback((text: string, opts: SendOpts = {}) => {
     const r = rtRef.current;
     const st = board.doc.getState();
     const found = opts.shapeId ? st.shapes.get(opts.shapeId) : undefined;
     const shape = found && !found.deleted ? found : undefined;
-    let target = opts.thread ?? 'general';
-    if (shape) {
-      const route = routeFor(board, r, shape.id);
-      target = route.thread;
-      // claim unowned layers for the agent we routed to, so follow-ups land in the same chat
-      if (route.how === 'nearest') board.exec({ actor: ROUTER, opId: opId(ROUTER), commands: [{ t: 'shape.update', ids: [shape.id], patch: { author: route.thread } }] });
-    } else if (target === 'general') {
-      const live = r?.agentIds() ?? [];
-      if (live.length) {
-        const pick = live[Math.floor(Math.random() * live.length)];
-        postText({ thread: 'general', from: YOU, name: 'You', color: YOU_COLOR, text });
-        post({ thread: 'general', from: 'claude', ...CLAUDE, body: { kind: 'routing', to: pick, why: 'manual' } });
-        target = pick;
-      }
+    const home = opts.thread ?? 'general';
+    const mentions = parseMentions(text, routerInput(board, r).agents);
+
+    // stopped agents that were mentioned: offer to start them, then plan again with the live set
+    let plan: SendPlan = planMessage(text, routerInput(board, r, shape?.id));
+    if (plan.stopped.length && r) {
+      for (const a of plan.stopped) if (window.confirm(`${a.name} is stopped. Start it?`)) r.restart(a.id);
+      plan = planMessage(text, routerInput(board, r, shape?.id));
     }
-    const ctx = shape ? ctxLabel(board, shape.id) : undefined;
-    let pinId: string | undefined;
+    if (plan.errors.length) { for (const e of plan.errors) note(home, e); openThread(home); return; }
+    if (plan.confirmAll && !window.confirm(`Send this to all ${routerInput(board, r).agents.filter((a) => !a.stopped).length} agents?`)) return;
+
+    // inside an agent's own chat, a message without @mentions stays with that agent
+    const direct = !shape && home !== 'general' && !mentions.agents.length && !mentions.all;
+    const deliveries = direct ? [{ decision: { to: home, why: 'author' as const, label: 'this chat' }, text }] : plan.deliveries;
+    const first = deliveries[0]?.decision.to ?? GENERAL;
+
     if (shape) {
+      const d = deliveries[0]?.decision;
+      if (!d || d.to === GENERAL) {
+        postText({ thread: 'general', from: YOU, name: 'You', color: YOU_COLOR, text, ctx: ctxLabel(board, shape.id), shapeId: shape.id });
+        postText({ thread: 'general', from: 'claude', ...CLAUDE, text: 'No agents on the board yet. Add one with + Agent and I will route notes to it.' });
+        openThread('general');
+        return;
+      }
+      // claim unowned layers for the agent we routed to, so follow-ups land in the same chat
+      if (d.why === 'nearest') board.exec({ actor: ROUTER, opId: opId(ROUTER), commands: [{ t: 'shape.update', ids: [shape.id], patch: { author: d.to } }] });
       const box = absRect(st, shape.id)!;
       const at = opts.at ?? { x: box.x + box.w - 4, y: box.y + 4 };
-      pinId = newId('p');
-      const pin: Pin = { id: pinId, n: ++pinCount.current, shapeId: shape.id, dx: at.x - box.x, dy: at.y - box.y, thread: target, done: false };
-      setPins((ps) => [...ps, pin]);
+      const th = commentThreads.addOnLayer(st, shape.id, at, { chat: d.to, color: board.actors.get(d.to)?.color ?? CLAUDE.color });
+      if (th) commentThreads.reply(th.id, { from: 'you', name: 'You', color: YOU_COLOR, text });   // -> forward()
+      else void deliverChat(d.to, text, { shapeId: shape.id, ctx: ctxLabel(board, shape.id) });
+      for (const x of deliveries.slice(1)) void deliverChat(x.decision.to, x.text, { shapeId: shape.id, ctx: ctxLabel(board, shape.id) });
+      openThread(d.to);
+      return;
     }
-    postText({ thread: target, from: YOU, name: 'You', color: YOU_COLOR, text, ...(ctx ? { ctx } : {}), ...(pinId ? { pin: pinId } : {}), ...(shape ? { shapeId: shape.id } : {}) });
-    if (target === 'general' || !r) {
+
+    if (home === 'general') postText({ thread: 'general', from: YOU, name: 'You', color: YOU_COLOR, text });
+    if (!deliveries.length || first === GENERAL) {
+      if (home !== 'general') postText({ thread: home, from: YOU, name: 'You', color: YOU_COLOR, text });
       postText({ thread: 'general', from: 'claude', ...CLAUDE, text: 'No agents on the board yet. Add one with + Agent and I will route notes to it.' });
-      if (pinId) resolvePin(pinId);
-    } else {
-      const q = pending.current.get(target) ?? [];
-      q.push({ ctx, shapeId: shape?.id });
-      pending.current.set(target, q);
-      const pid = pinId;
-      r.request(target, { text, shapeId: shape?.id, from: me }).finally(() => {
-        pending.current.get(target)?.shift();
-        if (pid) resolvePin(pid);
-      });
+      openThread('general');
+      return;
     }
-    openThread(target);
-  }, [board, me, rtRef, post, postText, resolvePin, openThread]);
+    for (const x of deliveries) {
+      if (home === 'general' || x.decision.why === 'mention') {
+        const card = routingCard(x.decision, nameOf);
+        post({ thread: 'general', from: 'claude', ...CLAUDE, body: card.body, text: card.text, routedBy: { to: x.decision.to, why: x.decision.why }, ...(home !== 'general' ? { from_thread: home } : {}) });
+      }
+      void deliverChat(x.decision.to, x.text);
+    }
+    openThread(first);
+  }, [board, rtRef, post, postText, note, nameOf, deliverChat, openThread]);
 
   const threads: Thread[] = useMemo(() => {
     const list: Thread[] = [{ id: 'general', name: 'General', color: CLAUDE.color, status: 'everyone', live: true }];
