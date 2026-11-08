@@ -1,0 +1,7 @@
+/* Minimap (CANVAS-24, MULTI-11): 180x120 canvas, bottom-right of the board. Hidden below 900px window width. */
+.pg-minimap { position: absolute; right: 12px; bottom: 12px; width: 180px; height: 120px; z-index: 3; pointer-events: auto;
+  background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 8px; box-shadow: var(--pg-shadow-toolbar); overflow: hidden; }
+.pg-minimap[hidden] { display: none; }
+.pg-minimap canvas { display: block; width: 180px; height: 120px; cursor: crosshair; touch-action: none; }
+.pg-minimap.is-drag canvas { cursor: grabbing; }
+@media (max-width: 899px) { .pg-minimap { display: none; } }
