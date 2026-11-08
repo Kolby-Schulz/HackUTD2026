@@ -12,6 +12,7 @@
   "dependencies": {
     "@contract/client": "*",
     "@contract/llm": "*",
+    "@contract/mapper": "*",
     "dotenv": "^18.0.9"
   },
   "devDependencies": {

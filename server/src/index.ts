@@ -136,6 +136,9 @@ const planItem = table(
     agent_id: t.string(),
     symbol_id: t.string().index('btree'),
     intent: t.string(), // Intent
+    // Optional, for intent 'create': the signature the agent will write, so Rule 2's
+    // type match runs at plan time (formatDate vs toDisplayDate), not only once written.
+    signature: t.option(t.string()).default(undefined), // default: lets maincloud migrate without wiping data
   },
 );
 
@@ -300,6 +303,7 @@ const EdgeInput = t.object('EdgeInput', {
 const PlanItemInput = t.object('PlanItemInput', {
   symbol_id: t.string(),
   intent: t.string(),
+  signature: t.option(t.string()),
 });
 
 // ---------------------------------------------------------------------------------
@@ -443,11 +447,20 @@ function checkDuplicates(ctx: Ctx, agentId: string, newId: string, newSignature?
     const reason =
       e.id === newId ? 'it already exists' : duplicateReason(mine, { name: e.name, signature: e.signature });
     if (!reason) continue;
+    if (!creator) {
+      // Pre-existing code (from the mapper), not another agent's work: there is nobody to
+      // coordinate with, so no conflict (one with the agent on both sides misleads the
+      // coordinator). Just point the agent at it, once while the hint is undelivered.
+      const text = `${e.id} may already do this (${reason}); reuse it if it fits instead of writing ${newId}.`;
+      const pending = [...ctx.db.instruction.agent_id.filter(agentId)].some((i) => !i.acknowledged && i.text === text);
+      if (!pending) sendInstruction(ctx, agentId, text);
+      continue;
+    }
     const c = openConflict(
       ctx,
       'duplicate',
       e.id,
-      creator ?? agentId,
+      creator,
       agentId,
       `${agentId} plans to create ${newId}, which duplicates existing ${e.id} (${reason}).`,
     );
@@ -460,7 +473,9 @@ function checkDuplicates(ctx: Ctx, agentId: string, newId: string, newSignature?
     const p = ctx.db.plan.id.find(item.plan_id);
     if (!p || !p.active) continue;
     const reason =
-      item.symbol_id === newId ? 'the same symbol' : duplicateReason(mine, { name: nameOf(item.symbol_id) });
+      item.symbol_id === newId
+        ? 'the same symbol'
+        : duplicateReason(mine, { name: nameOf(item.symbol_id), signature: item.signature });
     if (!reason) continue;
     openConflict(
       ctx,
@@ -566,6 +581,38 @@ export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }
   if (!r) throw new SenderError(`unknown run ${run_id}`);
   if (r.ended_at !== undefined) throw new SenderError(`run ${run_id} already ended`);
   ctx.db.run.id.update({ ...r, ended_at: ctx.timestamp });
+});
+
+/**
+ * Clears per-run working state before a demo run so nothing leaks from the last one: the
+ * code map (the mapper rebuilds it from the clean demo-repo; agent-reported signatures would
+ * otherwise survive, since the mapper keeps server signature text while the hash matches),
+ * plans, claims, and undelivered instructions. Live conflicts are dismissed and agents set idle.
+ * History the dashboard shows per run (change, conflict, decision, token rows) is kept, as is
+ * the summary cache (keyed by content hash, so it stays correct). Refused while a run is open.
+ */
+export const reset_demo_state = spacetimedb.reducer({}, (ctx) => {
+  for (const r of ctx.db.run.iter()) {
+    if (r.ended_at === undefined) throw new SenderError(`run ${r.id} is still open; end it first`);
+  }
+  for (const row of [...ctx.db.symbolEdge.iter()]) ctx.db.symbolEdge.id.delete(row.id);
+  for (const row of [...ctx.db.symbol.iter()]) ctx.db.symbol.id.delete(row.id);
+  for (const row of [...ctx.db.planItem.iter()]) ctx.db.planItem.id.delete(row.id);
+  for (const row of [...ctx.db.plan.iter()]) ctx.db.plan.id.delete(row.id);
+  for (const row of [...ctx.db.claim.iter()]) ctx.db.claim.symbol_id.delete(row.symbol_id);
+  for (const row of [...ctx.db.instruction.iter()]) {
+    if (!row.acknowledged) ctx.db.instruction.id.update({ ...row, acknowledged: true });
+  }
+  for (const status of ['open', 'resolving']) {
+    for (const c of [...ctx.db.conflict.status.filter(status)]) {
+      ctx.db.conflict.id.update({ ...c, status: 'dismissed', resolved_at: ctx.timestamp });
+    }
+  }
+  for (const a of [...ctx.db.agent.iter()]) {
+    if (a.status !== 'idle' || a.current_task_id !== undefined) {
+      ctx.db.agent.id.update({ ...a, status: 'idle', current_task_id: undefined });
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------------
@@ -674,6 +721,7 @@ export const publish_plan = spacetimedb.reducer(
         agent_id,
         symbol_id: item.symbol_id,
         intent: item.intent,
+        signature: item.signature || undefined,
       });
     }
 
@@ -683,7 +731,7 @@ export const publish_plan = spacetimedb.reducer(
     }
     // Rule 2: planning to create something that already exists or is planned elsewhere.
     for (const item of items) {
-      if (item.intent === 'create') checkDuplicates(ctx, agent_id, item.symbol_id);
+      if (item.intent === 'create') checkDuplicates(ctx, agent_id, item.symbol_id, item.signature || undefined);
     }
   },
 );
@@ -779,7 +827,8 @@ export const report_change = spacetimedb.reducer(
     }
 
     // Rule 1: who is affected? (a) active plans that depend on S;
-    // (b) active plans that modify or create a symbol that calls S.
+    // (b) active plans that modify, create or depend on a symbol that calls S (one level:
+    // depending on computeTotal means relying on what calculateFee returns through it).
     const affected = new Map<string, string>(); // agent id -> why
     for (const item of activePlanItemsOn(ctx, symbol_id)) {
       if (item.agent_id !== agent_id && item.intent === 'depend') {
@@ -788,8 +837,9 @@ export const report_change = spacetimedb.reducer(
     }
     for (const edge of ctx.db.symbolEdge.callee_id.filter(symbol_id)) {
       for (const item of activePlanItemsOn(ctx, edge.caller_id)) {
-        if (item.agent_id !== agent_id && item.intent !== 'depend' && !affected.has(item.agent_id)) {
-          affected.set(item.agent_id, `its plan changes ${edge.caller_id}, which calls ${symbol_id}`);
+        if (item.agent_id !== agent_id && !affected.has(item.agent_id)) {
+          const verb = item.intent === 'depend' ? 'depends on' : 'changes';
+          affected.set(item.agent_id, `its plan ${verb} ${edge.caller_id}, which calls ${symbol_id}`);
         }
       }
     }

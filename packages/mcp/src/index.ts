@@ -102,13 +102,21 @@ export function createServer(clientP: Promise<ContractClient>, taskId: bigint): 
             z.object({
               symbol_id: z.string(),
               intent: z.enum(['modify', 'create', 'depend']),
+              signature: z
+                .string()
+                .optional()
+                .describe('For intent create: the full signature you will write, e.g. formatDate(d: Date): string'),
             }),
           )
           .describe('Every function you will modify or create, and the ones your code calls (depend)'),
       },
     },
-    tool(async (c, { summary, items }: { summary: string; items: { symbol_id: string; intent: 'modify' | 'create' | 'depend' }[] }) => {
-      await c.publishPlan(taskId, summary, items.map((i) => ({ symbolId: i.symbol_id, intent: i.intent })));
+    tool(async (c, { summary, items }: { summary: string; items: { symbol_id: string; intent: 'modify' | 'create' | 'depend'; signature?: string }[] }) => {
+      await c.publishPlan(
+        taskId,
+        summary,
+        items.map((i) => ({ symbolId: i.symbol_id, intent: i.intent, ...(i.signature ? { signature: i.signature } : {}) })),
+      );
       return ok({ plan: 'published', items: items.length, instructions: await takeInstructions(c) });
     }),
   );

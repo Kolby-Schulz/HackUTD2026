@@ -106,12 +106,14 @@ export const PlanItem = __t.object("PlanItem", {
   agentId: __t.string(),
   symbolId: __t.string(),
   intent: __t.string(),
+  signature: __t.option(__t.string()),
 });
 export type PlanItem = __Infer<typeof PlanItem>;
 
 export const PlanItemInput = __t.object("PlanItemInput", {
   symbolId: __t.string(),
   intent: __t.string(),
+  signature: __t.option(__t.string()),
 });
 export type PlanItemInput = __Infer<typeof PlanItemInput>;
 

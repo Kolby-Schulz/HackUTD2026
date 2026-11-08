@@ -8,7 +8,7 @@
 //  3. ends any open run (unless --offline). Past runs' rows stay: the scoreboard averages them.
 // Keeps .contract/ (baseline token log, saved identities, run results).
 import { parseArgs } from 'node:util';
-import { adminConnect, endOpenRuns, git, log } from './lib.ts';
+import { adminConnect, git, log, resetServerState } from './lib.ts';
 
 const DEMO_BRANCH = /^refs\/heads\/(agent|demo)\//;
 
@@ -52,8 +52,9 @@ export function demoRepoChanges(): string {
 
 export async function resetRuns() {
   const conn = await adminConnect(['SELECT * FROM run']);
-  const ended = await endOpenRuns(conn);
+  const ended = await resetServerState(conn);
   log('reset', ended.length ? `ended open run(s) ${ended.join(', ')}` : 'no open run');
+  log('reset', 'cleared code map, plans, claims and pending instructions');
   conn.disconnect();
 }
 

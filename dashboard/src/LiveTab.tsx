@@ -26,6 +26,8 @@ export function LiveTab({ agents, cases, events, map, stats, without, symbols, e
   const count = (s: string) => agents.filter((a) => a.status === s).length;
   const fallback = open[0]?.symbolId ?? map.nodes.find((n) => n.state === 'changed')?.id ?? map.nodes.find((n) => n.owner)?.id;
   const selected = picked && map.nodes.some((n) => n.id === picked) ? picked : fallback;
+  // fallback can name a symbol that isn't on the map (e.g. an open conflict on a planned create).
+  const selectedNode = map.nodes.find((n) => n.id === selected);
 
   return (
     <>
@@ -68,7 +70,8 @@ export function LiveTab({ agents, cases, events, map, stats, without, symbols, e
         </div>
         <div className="side-cards">
           {open.map((c) => <CaseCard key={c.key} c={c} />)}
-          {selected && <SymbolCard id={selected} node={map.nodes.find((n) => n.id === selected)!} symbols={symbols} edges={edges} />}
+          {/* The selected symbol can vanish (a new run resets the code map); show nothing then instead of crashing. */}
+          {selectedNode && <SymbolCard id={selectedNode.id} node={selectedNode} symbols={symbols} edges={edges} />}
         </div>
       </div>
 
