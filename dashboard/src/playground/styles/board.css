@@ -1,0 +1,24 @@
+/* Board viewport, world layer, nested shapes and the screen-space overlay layer (WP-11). Scoped under .pg. */
+.pg-view { position: relative; flex: 1; overflow: hidden; cursor: none; touch-action: none; background-color: var(--pg-bg); }
+.pg-grid { position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(circle, var(--pg-dot) 1.2px, transparent 1.4px); }
+
+/* world: one transform written by the paint frame; --pg-zi = 1 / zoom for zoom-independent labels */
+.pg-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; --pg-zi: 1; }
+.pg-shape { position: absolute; left: 0; top: 0; box-sizing: border-box; }
+.pg-surface { position: absolute; inset: 0; }
+.pg-shape.k-frame > .pg-surface { box-shadow: 0 1px 3px rgba(28,25,23,.06), 0 8px 24px rgba(28,25,23,.06); }
+.pg-shape.k-text { white-space: pre-wrap; overflow-wrap: break-word; }
+.pg-shape textarea { position: absolute; inset: 0; width: 100%; min-height: 100%; border: 0; outline: 0; resize: none; background: transparent; font: inherit; color: inherit; line-height: inherit; letter-spacing: inherit; text-align: inherit; padding: 0; margin: 0; cursor: text; user-select: text; }
+.pg-fname { position: absolute; left: 0; top: calc(-18px * var(--pg-zi)); font-size: calc(12px * var(--pg-zi)); color: var(--pg-muted); white-space: nowrap; font-weight: 500; pointer-events: none; }
+
+/* overlays: screen space, positioned by the paint frame */
+.pg-overlays { position: absolute; inset: 0; pointer-events: none; }
+.pg-sel { position: absolute; left: 0; top: 0; border: 1.5px solid var(--pg-sel); box-sizing: border-box; pointer-events: none; }
+.pg-handle { position: absolute; width: 8px; height: 8px; background: #fff; border: 1.5px solid var(--pg-sel); box-sizing: border-box; pointer-events: auto; }
+.pg-handle.h-nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.pg-handle.h-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.pg-handle.h-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.pg-handle.h-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+.pg-dims { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); background: var(--pg-sel); color: #fff; white-space: nowrap; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+.pg-target { position: absolute; left: 0; top: 0; border: 2px solid var(--c); box-sizing: border-box; pointer-events: none; background: color-mix(in srgb, var(--c) 6%, transparent); }
+.pg-target span { position: absolute; left: -2px; top: -21px; background: var(--c); color: #fff; white-space: nowrap; font-weight: 600; font-size: 11px; padding: 2px 6px; border-radius: 4px; }
