@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { getRenaming, renameShape, requestRename, soloVisible, subscribeRenaming, toggleFlag } from '../../actions/layers';
 import { activeBoard } from '../board/state';
 import type { ShapeId } from '../../core/types';
+import { beginRowDrag, useRowDropState } from './dnd';
 import { MAX_INDENT_DEPTH, type LayerRowData } from './treeView';
 
 export const ROW_HEIGHT = 28;
@@ -33,6 +34,8 @@ export interface LayerRowProps {
   lockColors?: readonly string[];
   /** Colours of agents editing a descendant: shown as a hollow ring while this row is collapsed. */
   belowColors?: readonly string[];
+  /** Ids the row drags along when it is part of the selection (the human's selection). */
+  getSelection?: () => readonly ShapeId[];
   onPick: (id: ShapeId) => void;
   onToggle: (id: ShapeId, deep: boolean) => void;
   /** Double-click on the row (not the name, which renames): centre the camera on the layer. */
@@ -64,7 +67,7 @@ function RenameInput({ id, initial }: { id: ShapeId; initial: string }) {
   );
 }
 
-export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, lockColors, belowColors, onPick, onToggle, onJump }: LayerRowProps) {
+export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, lockColors, belowColors, getSelection, onPick, onToggle, onJump }: LayerRowProps) {
   const env = activeBoard();
   // Per-row subscription to its own shape, so flags and author show without the panel passing them down.
   const shape = useSyncExternalStore(
@@ -73,6 +76,8 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
   );
   const editing = useSyncExternalStore(subscribeRenaming, () => getRenaming() === row.id);
   const [hover, setHover] = useState(false);
+  const drop = useRowDropState(row.id);
+  const [dropMode, dropDepth] = drop.split(':');
   const locked = !!shape?.locked, hidden = !!shape?.hidden;
   const owner = env && shape ? env.board.actors.get(shape.author ?? shape.createdBy) : undefined;
   const ownerColor = owner && owner.kind !== 'human' ? owner.color : undefined;
@@ -84,9 +89,14 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
     const sel = env.board.selection.get(env.board.me).ids;
     toggleFlag(env.board, selected ? sel : [row.id], flag);
   };
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (editing || (e.target as HTMLElement).closest('button, input, .chev')) return;
+    const selection = getSelection?.() ?? (env ? env.board.selection.get(env.board.me).ids : []);
+    beginRowDrag(e, row.id, { selection, onExpand: (id) => onToggle(id, false) });
+  };
   return (
-    <div className={cls} style={{ height: ROW_HEIGHT, paddingLeft: 6 + Math.min(row.depth, MAX_INDENT_DEPTH) * 16, opacity: hidden ? 0.5 : undefined }}
-      data-layer={row.id} onClick={() => onPick(row.id)} onDoubleClick={() => onJump?.(row.id)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <div className={cls} style={{ height: ROW_HEIGHT, position: 'relative', paddingLeft: 6 + Math.min(row.depth, MAX_INDENT_DEPTH) * 16, opacity: drop === 'drag' ? 0.4 : hidden ? 0.5 : undefined, boxShadow: dropMode === 'into' ? 'inset 0 0 0 2px var(--pg-sel)' : undefined }}
+      data-layer={row.id} data-expanded={row.expanded} data-haschildren={row.hasChildren} onPointerDown={onPointerDown} onClick={() => onPick(row.id)} onDoubleClick={() => onJump?.(row.id)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
       <span className="chev" onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { if (!row.hasChildren) return; e.stopPropagation(); onToggle(row.id, e.altKey); }}>
         {row.hasChildren && (
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: row.expanded ? 'rotate(90deg)' : undefined }}>
@@ -107,6 +117,9 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
             <svg {...P} width={14} height={14}>{hidden ? <path d="M2 8s2.3-4 6-4 6 4 6 4M3 13L13 3" /> : <><path d="M2 8s2.3-4 6-4 6 4 6 4-2.3 4-6 4-6-4-6-4z" /><circle cx="8" cy="8" r="1.8" /></>}</svg>
           </button>
         </>
+      )}
+      {(dropMode === 'before' || dropMode === 'after') && (
+        <span aria-hidden style={{ position: 'absolute', height: 2, borderRadius: 1, background: 'var(--pg-sel)', pointerEvents: 'none', right: 4, left: 6 + Math.min(Number(dropDepth), MAX_INDENT_DEPTH) * 16, [dropMode === 'before' ? 'top' : 'bottom']: -1 }} />
       )}
       {lockColors?.length
         ? (
