@@ -19,6 +19,16 @@ export type CommentThread = {
   state: ThreadState;
   messages: ThreadMsg[];
 };
+export type ThreadFilter = {
+  /** 'open' = not resolved (open + answered); 'resolved'; 'all'. */
+  state?: 'all' | 'open' | 'resolved';
+  /** Only threads you started (first message from you). */
+  mine?: boolean;
+  /** Only threads in these chats (agent ids). Empty / undefined = every agent. */
+  agents?: readonly string[];
+  /** Only threads whose layer is gone. */
+  orphaned?: boolean;
+};
 export type PinPlace = { x: number; y: number; orphan: boolean; hidden: boolean };
 
 let uid = 0;
@@ -29,6 +39,7 @@ export function createThreadStore() {
   let counter = 0;
   let openId: string | null = null;
   let version = 0;
+  let hoverId: string | null = null;
   const subs = new Set<() => void>();
   const sends = new Set<(thread: CommentThread, msg: ThreadMsg) => void>();
   const emit = () => { version++; subs.forEach((f) => f()); };
@@ -52,12 +63,35 @@ export function createThreadStore() {
     return false;
   }
 
+  function reanchor(view: TreeView, id: string, shapeId: string, at?: Pt): boolean {
+      const t = threads.find((x) => x.id === id);
+      const r = absRect(view, shapeId);
+      if (!t || !r) return false;
+      const w = at ?? (t.anchor.kind === 'point' ? { x: t.anchor.x, y: t.anchor.y } : layerPoint(view, t.anchor) ?? t.last);
+      patch(id, (c) => ({ ...c, last: w, anchor: { kind: 'layer', shapeId, fx: r.w ? (w.x - r.x) / r.w : 0, fy: r.h ? (w.y - r.y) / r.h : 0 } }));
+      return true;
+    }
+
   return {
     get version() { return version; },
     subscribe(fn: () => void) { subs.add(fn); return () => { subs.delete(fn); }; },
     list: () => threads,
     get: (id: string) => threads.find((t) => t.id === id),
     get openId() { return openId; },
+    /** Thread whose pin / list row the pointer is over (drives the preview card and highlight). */
+    get hoverId() { return hoverId; },
+    hover(id: string | null) { if (hoverId !== id) { hoverId = id; emit(); } },
+    /** Threads matching every given filter (AND), in creation order. `view` is needed only for `orphaned`. */
+    filter(f: ThreadFilter, view?: TreeView): CommentThread[] {
+      return threads.filter((t) => {
+        if (f.state === 'open' && t.state === 'resolved') return false;
+        if (f.state === 'resolved' && t.state !== 'resolved') return false;
+        if (f.mine && t.messages[0]?.from !== 'you') return false;
+        if (f.agents?.length && !f.agents.includes(t.chat)) return false;
+        if (f.orphaned && (!view || t.anchor.kind !== 'layer' || layerPoint(view, t.anchor))) return false;
+        return true;
+      });
+    },
     open(id: string | null) { if (openId !== id) { openId = id; emit(); } },
 
     /** New pin on a layer; `at` is the clicked world point. Returns the thread. */
@@ -90,7 +124,7 @@ export function createThreadStore() {
     markAnswered(id: string) { patch(id, (t) => (t.state === 'open' ? { ...t, state: 'answered' } : t)); },
     resolve(id: string) { patch(id, (t) => ({ ...t, state: 'resolved' })); },
     reopen(id: string) { patch(id, (t) => ({ ...t, state: 'open' })); },
-    remove(id: string) { threads = threads.filter((t) => t.id !== id); if (openId === id) openId = null; emit(); },
+    remove(id: string) { threads = threads.filter((t) => t.id !== id); if (openId === id) openId = null; if (hoverId === id) hoverId = null; emit(); },
     /** Drop pins nobody wrote on (a popover opened and closed without sending). */
     discardEmpty() {
       const keep = threads.filter((t) => t.messages.length > 0);
@@ -118,13 +152,19 @@ export function createThreadStore() {
       t.last = p;
       return { ...p, orphan: false, hidden: hiddenLayer(view, t.anchor.shapeId) };
     },
+    /**
+     * Re-anchor a pin (free, orphaned or live) onto a layer, keeping its world position, or the dropped
+     * point `at` when given. Returns false if the layer is missing.
+     */
+    reanchor,
     /** Re-anchor a free pin onto a layer (drag a point pin onto a frame), keeping its world position. */
     anchorTo(view: TreeView, id: string, shapeId: string) {
       const t = threads.find((x) => x.id === id);
-      const r = absRect(view, shapeId);
-      if (!t || !r || t.anchor.kind !== 'point') return;
-      const { x, y } = t.anchor;
-      patch(id, (c) => ({ ...c, anchor: { kind: 'layer', shapeId, fx: r.w ? (x - r.x) / r.w : 0, fy: r.h ? (y - r.y) / r.h : 0 } }));
+      if (t?.anchor.kind === 'point') reanchor(view, id, shapeId);
+    },
+    /** Turn any pin into a free pin at a world point (orphan dropped on empty canvas). */
+    pinAt(id: string, at: Pt) {
+      patch(id, (t) => ({ ...t, last: at, anchor: { kind: 'point', x: at.x, y: at.y } }));
     },
     /** Move a free pin. */
     movePoint(id: string, at: Pt) {

@@ -80,3 +80,22 @@ describe('comment threads', () => {
     expect(s2.addAtPoint({ x: 0, y: 0 }, opt).n).toBe(b.n + 1);
   });
 });
+
+describe('comment list filters and re-anchor', () => {
+  const v = view([mk('f', null, { w: 400, h: 400 }), mk('b', 'f', { x: 10, y: 20, w: 200, h: 100 })]);
+  it('filters combine and orphans re-anchor', () => {
+    const s = createThreadStore();
+    const a = s.addOnLayer(v, 'b', { x: 20, y: 30 }, { chat: 'iris', color: '#f0f' })!;
+    const b = s.addAtPoint({ x: 5, y: 5 }, { chat: 'juno', color: '#0ff' });
+    s.reply(a.id, { from: 'you', name: 'Me', color: '#000', text: 'hi' });
+    s.resolve(b.id);
+    expect(s.filter({ state: 'open' }).map((t) => t.id)).toEqual([a.id]);
+    expect(s.filter({ state: 'resolved' }).map((t) => t.id)).toEqual([b.id]);
+    expect(s.filter({ mine: true, agents: ['juno'] })).toEqual([]);
+    const gone = view([mk('f', null, { w: 400, h: 400 }), mk('b', 'f', { x: 10, y: 20, w: 200, h: 100, deleted: true })]);
+    expect(s.filter({ orphaned: true }, gone).map((t) => t.id)).toEqual([a.id]);
+    expect(s.place(gone, a.id)?.orphan).toBe(true);
+    expect(s.reanchor(gone, a.id, 'f', { x: 100, y: 100 })).toBe(true);
+    expect(s.place(gone, a.id)).toMatchObject({ x: 100, y: 100, orphan: false });
+  });
+});
