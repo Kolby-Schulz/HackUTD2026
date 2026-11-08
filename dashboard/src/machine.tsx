@@ -55,7 +55,7 @@ export interface MachineState {
 
 export interface Pairing { machine: string; state: 'working' | 'done' | 'failed'; error?: string }
 
-/** A #/pair?machine=…&code=… link: read once on load, then removed from the address bar. */
+/** A #/pair?machine=…&code=… link: read on load (and when the hash changes), then removed from the address bar. */
 function takePairLink(): { machine: string; code: string } | undefined {
   const m = /^#\/pair\?(.*)$/.exec(location.hash);
   if (!m) return undefined;
@@ -92,8 +92,20 @@ export function MachineProvider({ children }: { children: ReactNode }) {
   const now = useNow(5000);
   const [picked, setPicked] = useState(readPick);
   const [pairing, setPairing] = useState<Pairing>();
-  const [link] = useState(takePairLink);
+  const [link, setLink] = useState(takePairLink);
   const linkUsed = useRef(false);
+  // A link pasted into a tab that already shows the dashboard changes only the hash (no reload),
+  // so watch for it too; each new link pairs once, like one on load.
+  useEffect(() => {
+    const onHash = () => {
+      const next = takePairLink();
+      if (!next) return;
+      linkUsed.current = false;
+      setLink(next);
+    };
+    addEventListener('hashchange', onHash);
+    return () => removeEventListener('hashchange', onHash);
+  }, []);
 
   const value = useMemo<MachineState>(() => {
     const online = (m: R.Machine) => now - ms(m.heartbeatAt) < ONLINE_MS;
