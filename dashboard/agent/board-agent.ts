@@ -1,43 +1,90 @@
-// The design board's agent process: a real model-driven agent on the live board.
-// It is a SpacetimeDB client like a browser tab: it joins the board as an agent (an `agent` row), reads chat from
-// board_message, asks the model for a design through packages/llm (tokens logged with purpose `design`), and draws it
-// step by step through the same session as people, so every viewer watches the layers grow.
+// The design board's agent process: a Nemotron orchestrator and a team of Claude designers on the live board.
+// Everything is a SpacetimeDB client action: each agent joins the board (an `agent` row), people's chat arrives
+// through board_message, and every layer is drawn step by step as ops through push_ops, so every viewer watches
+// all the designers build in parallel. Model calls go through packages/llm, with tokens logged as `design`.
 //
-// Run: npm run board-agent -w @contract/dashboard   (reads SPACETIME_HOST / SPACETIME_DB_NAME from the root .env)
-import { createLLM } from '@contract/llm';
+// A request goes to the orchestrator (Nemotron), which reads the conversation and a summary of the board and splits
+// the work into up to TEAM_SIZE briefs. Each brief goes to its own Claude designer; all of them run at once, each in
+// a spot reserved on the board before drawing starts.
+//
+// Run: npm run board-agent -w @contract/dashboard   (reads SPACETIME_HOST / SPACETIME_DB_NAME / NVIDIA_* from .env)
+import { ClaudeCodeLLM, NemotronLLM } from '@contract/llm';
+import type { LLM, Usage } from '@contract/llm';
 import { keysBetween, between } from '../src/playground/core/order';
 import { newId } from '../src/playground/core/ids';
 import { createDocStore } from '../src/playground/core/store';
-import type { Op, Shape, ShapeId } from '../src/playground/core/types';
+import type { ActorId, Op, Shape, ShapeId } from '../src/playground/core/types';
 import { createPresenceBus } from '../src/playground/presence/bus';
 import { connectBoard } from '../src/playground/net/session';
+import type { LocalActor } from '../src/playground/net/session';
 import { connectSpacetime } from '../src/playground/net/spacetime';
 import type { BoardMessageRow } from '../src/playground/net/types';
 
 const BOARD = 'playground';
+const TEAM_SIZE = 10;
 const host = process.env.SPACETIME_HOST;
 const database = process.env.SPACETIME_DB_NAME;
-if (!host || !database) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (root .env)');
+if (!host || !database) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (.env)');
 
-const AGENT = { id: `agent-claude-${newId('').slice(-6)}`, kind: 'agent' as const, name: 'Claude', color: '#d97757' };
-const llm = createLLM();
+const run = newId('').slice(-5);
+const COLORS = ['#d97757', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#0ea5e9', '#8b5cf6', '#ef4444', '#14b8a6', '#84cc16'];
+const ORCH: LocalActor = { id: `agent-nemo-${run}`, kind: 'agent', name: 'Nemo', color: '#76b900', agentId: `agent-nemo-${run}` };
+const TEAM: LocalActor[] = Array.from({ length: TEAM_SIZE }, (_, i) => ({
+  id: `agent-claude${i + 1}-${run}`, kind: 'agent', name: `Claude ${i + 1}`, color: COLORS[i], agentId: `agent-claude${i + 1}-${run}`,
+}));
+
+const nemo: LLM = new NemotronLLM();
+const claude: LLM = new ClaudeCodeLLM();
 const doc = createDocStore({ boardId: BOARD });
 const bus = createPresenceBus({ schedule: (f) => { setTimeout(f, 16); } });
 const net = connectSpacetime({ uri: host, database, boardId: BOARD, boardName: 'Design board' });
-connectBoard({
-  boardId: BOARD, doc, presence: bus, transport: net,
-  actors: [{ ...AGENT, agentId: AGENT.id }],
-  onError: (e) => console.error('[board-agent] sync', e),
-});
+connectBoard({ boardId: BOARD, doc, presence: bus, transport: net, actors: [ORCH, ...TEAM], onError: (e) => console.error('[board-agent] sync', e) });
 
-// ---- the design the model returns ----
-interface El { kind: 'rect' | 'ellipse' | 'text'; name: string; x: number; y: number; w: number; h: number; fill?: string; radius?: number; text?: string; fontSize?: number; fontWeight?: number; color?: string }
-interface Design { reply: string; frame: { name: string; w: number; h: number; fill: string }; elements: El[] }
+const logUsage = (agentId: string) => (u: Usage) =>
+  net.logTokens({ agentId, promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens, costUsd: u.cost_usd })
+    .catch((e: unknown) => console.error('[board-agent] log_tokens', e));
 
-const SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['reply', 'frame', 'elements'],
+// ---- what the models see: the conversation and the board ----
+const history: { who: string; text: string }[] = [];
+const remember = (who: string, text: string) => { history.push({ who, text }); if (history.length > 30) history.shift(); };
+
+/** The board as text: each screen (top-level frame) with the words on it, newest last. */
+function boardSummary(): string {
+  const st = doc.getState();
+  const frames = (st.children.get(null) ?? []).map((id) => st.shapes.get(id)).filter((s): s is Shape => !!s && !s.deleted && s.kind === 'frame');
+  if (!frames.length) return '(the board is empty)';
+  return frames.slice(-15).map((f) => {
+    const words = (st.children.get(f.id) ?? []).map((id) => st.shapes.get(id)).filter((s) => s && !s.deleted && s.kind === 'text' && s.text).map((s) => s!.text).join(' | ');
+    return `- "${f.name}" (${Math.round(f.w)}x${Math.round(f.h)}, by ${f.author ?? f.createdBy}): ${words.slice(0, 300)}`;
+  }).join('\n');
+}
+const context = () => `Conversation so far:\n${history.map((h) => `${h.who}: ${h.text}`).join('\n') || '(none)'}\n\nScreens on the board now:\n${boardSummary()}`;
+
+// ---- orchestrator: split a request into briefs ----
+interface Plan { reply: string; briefs: { title: string; brief: string }[] }
+const PLAN_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['reply', 'briefs'],
   properties: {
-    reply: { type: 'string', description: 'One short sentence to the person about what you designed.' },
+    reply: { type: 'string', description: 'One short sentence to the person: what the team will make.' },
+    briefs: {
+      type: 'array', minItems: 1, maxItems: TEAM_SIZE,
+      items: { type: 'object', additionalProperties: false, required: ['title', 'brief'], properties: { title: { type: 'string' }, brief: { type: 'string' } } },
+    },
+  },
+} as const;
+const PLAN_SYSTEM = `You are the orchestrator of a team of up to ${TEAM_SIZE} UI designers on a shared design board. Read the
+conversation and the screens already on the board, work out what the person wants now, and split it into one brief
+per screen, each for a different designer working in parallel. Follow-ups refer to earlier work: "3 more" means three
+more screens like the most recent ones (same product, new screens or variations), not something unrelated. Make
+exactly as many briefs as screens asked for (default 1, never more than ${TEAM_SIZE}). Each brief must stand alone:
+name the product, the screen, its content, and the visual style to match (colours and layout of the existing screens).`;
+
+// ---- designer: one screen ----
+interface El { kind: 'rect' | 'ellipse' | 'text'; name: string; x: number; y: number; w: number; h: number; fill?: string; radius?: number; text?: string; fontSize?: number; fontWeight?: number; color?: string }
+interface Design { frame: { name: string; w: number; h: number; fill: string }; elements: El[] }
+const DESIGN_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['frame', 'elements'],
+  properties: {
     frame: {
       type: 'object', additionalProperties: false, required: ['name', 'w', 'h', 'fill'],
       properties: { name: { type: 'string' }, w: { type: 'number' }, h: { type: 'number' }, fill: { type: 'string', description: 'hex colour' } },
@@ -56,139 +103,163 @@ const SCHEMA = {
     },
   },
 } as const;
+const DESIGN_SYSTEM = `You are a UI designer on a shared design board. Design exactly the screen in your brief as one frame
+and the layers inside it. Coordinates are relative to the frame's top-left corner, in pixels; keep every layer inside
+the frame. Use a mobile frame (390 x 844) unless the brief says otherwise. Build a real, readable layout: header,
+content and controls, with a text layer for every label (fontSize 12-32). No emoji. Order layers back to front
+(backgrounds and cards before the text on them). At most 40 layers.`;
 
-const SYSTEM = `You are a UI designer working on a shared design board. Answer with one screen as a frame and the layers
-inside it. Coordinates are relative to the frame's top-left corner, in pixels; keep every layer inside the frame.
-Use a mobile frame (390 x 844) unless the request says otherwise. Build a real, readable layout: a header, content
-and controls, with text layers for every label (fontSize 12-32). Use a small, consistent palette. Order layers
-back to front (backgrounds and cards before the text on them). At most 40 layers.`;
-
-// ---- drawing, step by step ----
+// ---- drawing, step by step, one cursor per agent ----
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-let cursor = { x: 0, y: 0 };
-const say = (state: 'idle' | 'thinking' | 'drawing', detail = '') => bus.publish({ actor: AGENT.id, state, detail, x: cursor.x, y: cursor.y });
-
-async function glide(x: number, y: number, ms = 300) {
-  const from = cursor, steps = Math.max(1, Math.round(ms / 50));
+const clamp = (v: number, lo: number, hi: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo);
+const cursors = new Map<ActorId, { x: number; y: number }>();
+const status = (a: LocalActor, state: 'idle' | 'thinking' | 'drawing', detail = '') => {
+  const c = cursors.get(a.id) ?? { x: 0, y: 0 };
+  bus.publish({ actor: a.id, state, detail, x: c.x, y: c.y });
+};
+async function glide(a: LocalActor, x: number, y: number, ms: number) {
+  const from = cursors.get(a.id) ?? { x, y }, steps = Math.max(1, Math.round(ms / 50));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps, e = t * t * (3 - 2 * t);
-    cursor = { x: from.x + (x - from.x) * e, y: from.y + (y - from.y) * e };
-    bus.publish({ actor: AGENT.id, x: cursor.x, y: cursor.y });
+    const c = { x: from.x + (x - from.x) * e, y: from.y + (y - from.y) * e };
+    cursors.set(a.id, c);
+    bus.publish({ actor: a.id, x: c.x, y: c.y });
     await sleep(50);
   }
 }
-const put = (label: string, ops: Op[]) => doc.dispatch(AGENT.id, label, ops);
+const put = (a: LocalActor, label: string, ops: Op[]) => doc.dispatch(a.id, label, ops);
 
-/** Free space to the right of everything on the board. */
-function freeSpot(): { x: number; y: number } {
-  let right = -Infinity, top = 0;
-  for (const s of doc.getState().shapes.values()) {
-    if (s.deleted || s.parent !== null) continue;
-    if (s.x + s.w > right) { right = s.x + s.w; top = s.y; }
-  }
-  return right === -Infinity ? { x: 0, y: 0 } : { x: right + 120, y: top };
-}
-
-async function grow(id: ShapeId, x: number, y: number, w: number, h: number, steps: number) {
+async function grow(a: LocalActor, id: ShapeId, x: number, y: number, w: number, h: number, steps: number) {
   for (let i = 1; i <= steps; i++) {
     const t = i / steps, e = 1 - (1 - t) ** 3;
-    put('Draw', [{ t: 'set', id, patch: { w: Math.max(1, w * e), h: Math.max(1, h * e) } }]);
-    await glide(x + w * e, y + h * e, 60);
+    put(a, 'Draw', [{ t: 'set', id, patch: { w: Math.max(1, w * e), h: Math.max(1, h * e) } }]);
+    await glide(a, x + w * e, y + h * e, 60);
   }
 }
 
-async function draw(d: Design) {
-  const st = doc.getState();
-  const top = st.children.get(null) ?? [];
-  const lastTop = top.length ? st.shapes.get(top[top.length - 1])?.index ?? null : null;
-  const at = freeSpot();
+/** Reserve `n` spots in a new row below everything on the board, so parallel designers never overlap. */
+function reserveRow(n: number): { x: number; y: number }[] {
+  let bottom = -Infinity, left = Infinity;
+  for (const s of doc.getState().shapes.values()) {
+    if (s.deleted || s.parent !== null) continue;
+    bottom = Math.max(bottom, s.y + s.h);
+    left = Math.min(left, s.x);
+  }
+  const y = bottom === -Infinity ? 0 : bottom + 160;
+  const x0 = left === Infinity ? 0 : left;
+  return Array.from({ length: n }, (_, i) => ({ x: x0 + i * 480, y }));
+}
+
+async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, index: string) {
   const frameId = newId('s');
   const fw = clamp(d.frame.w, 200, 1600), fh = clamp(d.frame.h, 200, 1600);
-  say('drawing', `frame ${d.frame.name}`);
-  await glide(at.x, at.y, 500);
-  const frame: Omit<Shape, 'stamps' | 'deleted'> = {
+  status(a, 'drawing', `frame ${d.frame.name}`.slice(0, 40));
+  await glide(a, at.x, at.y, 400);
+  put(a, 'Draw frame', [{ t: 'create', shape: {
     id: frameId, kind: 'frame', name: d.frame.name, x: at.x, y: at.y, w: 1, h: 1, clip: true,
-    fills: [{ type: 'solid', color: d.frame.fill || '#ffffff' }], parent: null, index: between(lastTop, null), createdBy: AGENT.id, author: AGENT.id,
-  };
-  put('Draw frame', [{ t: 'create', shape: frame }]);
-  await grow(frameId, at.x, at.y, fw, fh, 10);
-
+    fills: [{ type: 'solid', color: d.frame.fill || '#ffffff' }], parent: null, index, createdBy: a.id, author: a.id,
+  } }]);
+  await grow(a, frameId, at.x, at.y, fw, fh, 8);
   const keys = keysBetween(d.elements.length);
   for (const [i, el] of d.elements.entries()) {
     const x = clamp(el.x, 0, fw - 1), y = clamp(el.y, 0, fh - 1);
     const w = clamp(el.w, 1, fw - x), h = clamp(el.h, 1, fh - y);
     const id = newId('s');
-    say('drawing', `${el.kind === 'text' ? 'typing' : 'drawing'} ${el.name}`.slice(0, 40));
-    await glide(at.x + x, at.y + y, 220);
+    status(a, 'drawing', `${el.kind === 'text' ? 'typing' : 'drawing'} ${el.name}`.slice(0, 40));
+    await glide(a, at.x + x, at.y + y, 200);
     if (el.kind === 'text') {
       const text = el.text ?? el.name;
-      put('Add text', [{ t: 'create', shape: {
+      put(a, 'Add text', [{ t: 'create', shape: {
         id, kind: 'text', name: el.name, x, y, w, h, fills: [], text: '', textMode: 'fixed',
         fontSize: clamp(el.fontSize ?? 16, 8, 96), fontWeight: el.fontWeight ?? 400, color: el.color ?? '#111111',
-        parent: frameId, index: keys[i], createdBy: AGENT.id, author: AGENT.id,
+        parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
       } }]);
-      // type it out a few characters at a time
-      const step = Math.max(1, Math.ceil(text.length / 8));
-      for (let n = step; n < text.length + step; n += step) {
-        put('Type', [{ t: 'set', id, patch: { text: text.slice(0, n) } }]);
-        await sleep(45);
-      }
+      const step = Math.max(1, Math.ceil(text.length / 6));
+      for (let n = step; n < text.length + step; n += step) { put(a, 'Type', [{ t: 'set', id, patch: { text: text.slice(0, n) } }]); await sleep(50); }
     } else {
-      put('Draw', [{ t: 'create', shape: {
+      put(a, 'Draw', [{ t: 'create', shape: {
         id, kind: el.kind, name: el.name, x, y, w: 1, h: 1, radius: el.radius ?? 0,
-        fills: [{ type: 'solid', color: el.fill ?? '#e5e7eb' }], parent: frameId, index: keys[i], createdBy: AGENT.id, author: AGENT.id,
+        fills: [{ type: 'solid', color: el.fill ?? '#e5e7eb' }], parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
       } }]);
-      await grow(id, at.x + x, at.y + y, w, h, 5);
+      await grow(a, id, at.x + x, at.y + y, w, h, 4);
     }
   }
+  status(a, 'idle');
 }
-const clamp = (v: number, lo: number, hi: number) => (Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : lo);
 
-// ---- requests from chat ----
+// ---- requests ----
+function post(from: LocalActor, to: BoardMessageRow, body: string) {
+  remember(from.name, body);
+  return net.postMessage({ id: newId('m'), boardId: BOARD, threadId: to.threadId, kind: 'chat', author: from.id, toActor: to.author, body: body.slice(0, 4000) })
+    .catch((e: unknown) => console.error('[board-agent] post', e));
+}
+
+async function handle(m: BoardMessageRow) {
+  console.log(`[board-agent] request: ${m.body}`);
+  remember('Person', m.body);
+  status(ORCH, 'thinking', 'planning');
+  let plan: Plan;
+  try {
+    plan = (await nemo.decide<Plan>(`${context()}\n\nNew request from the person: ${m.body}`, PLAN_SCHEMA as unknown as Record<string, unknown>,
+      { purpose: 'design', system: PLAN_SYSTEM, onUsage: logUsage(ORCH.id) })).output;
+  } catch (e) {
+    status(ORCH, 'idle');
+    await post(ORCH, m, `Sorry, I couldn't plan that: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
+    return;
+  }
+  const briefs = plan.briefs.slice(0, TEAM_SIZE);
+  await post(ORCH, m, `${plan.reply} (${briefs.length} designer${briefs.length > 1 ? 's' : ''} on it)`);
+  status(ORCH, 'idle');
+  console.log(`[board-agent] ${briefs.length} briefs: ${briefs.map((b) => b.title).join(' · ')}`);
+
+  // reserve spots and z-order up front, then every designer works at once
+  const spots = reserveRow(briefs.length);
+  const st = doc.getState();
+  const top = st.children.get(null) ?? [];
+  const lastTop = top.length ? st.shapes.get(top[top.length - 1])?.index ?? null : null;
+  const indexes = keysBetween(briefs.length, lastTop, null);
+  const ctx = context();
+  await Promise.all(briefs.map(async (b, i) => {
+    const a = TEAM[i];
+    status(a, 'thinking', `designing ${b.title}`.slice(0, 40));
+    await glide(a, spots[i].x + 180, spots[i].y + 200, 300);
+    try {
+      const { output } = await claude.decide<Design>(`${ctx}\n\nYour brief: ${b.title}. ${b.brief}`, DESIGN_SCHEMA as unknown as Record<string, unknown>,
+        { purpose: 'design', system: DESIGN_SYSTEM, onUsage: logUsage(a.id) });
+      await draw(a, output, spots[i], indexes[i]);
+      remember(a.name, `designed "${output.frame.name}"`);
+    } catch (e) {
+      status(a, 'idle');
+      await post(a, m, `I couldn't finish "${b.title}": ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
+    }
+  }));
+  await post(ORCH, m, `Done: ${briefs.map((b) => b.title).join(', ')}.`);
+}
+
 const queue: BoardMessageRow[] = [];
 const seen = new Set<string>();
 let busy = false;
 let live = false;
-
-function reply(to: BoardMessageRow, body: string) {
-  return net.postMessage({ id: newId('m'), boardId: BOARD, threadId: to.threadId, kind: 'chat', author: AGENT.id, toActor: to.author, body: body.slice(0, 4000) });
-}
-
 async function work() {
   if (busy) return;
   busy = true;
-  try {
-    for (let m = queue.shift(); m; m = queue.shift()) {
-      console.log(`[board-agent] request from ${m.author}: ${m.body}`);
-      await reply(m, `On it: ${m.body}`);
-      say('thinking', 'designing');
-      try {
-        const { output } = await llm.decide<Design>(`Design request: ${m.body}`, SCHEMA as unknown as Record<string, unknown>, {
-          purpose: 'design', system: SYSTEM,
-          onUsage: (u) => net.logTokens({ agentId: AGENT.id, promptTokens: u.prompt_tokens, completionTokens: u.completion_tokens, costUsd: u.cost_usd })
-            .catch((e: unknown) => console.error('[board-agent] log_tokens', e)),
-        });
-        await draw(output);
-        await reply(m, output.reply);
-      } catch (e) {
-        console.error('[board-agent] request failed', e);
-        await reply(m, `Sorry, that failed: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
-      }
-      say('idle');
-    }
-  } finally { busy = false; }
+  try { for (let m = queue.shift(); m; m = queue.shift()) await handle(m); } finally { busy = false; }
 }
 
-net.onSynced(() => { live = true; say('idle'); console.log(`[board-agent] ${AGENT.name} (${AGENT.id}) is on board '${BOARD}'`); });
+net.onSynced(() => {
+  if (!live) console.log(`[board-agent] Nemo + ${TEAM_SIZE} Claude designers are on board '${BOARD}'`);
+  live = true;
+  for (const a of [ORCH, ...TEAM]) status(a, 'idle');
+});
 net.onMessages((c) => {
   for (const m of c.added) {
     if (seen.has(m.id)) continue;
     seen.add(m.id);
-    // history from before this process started is not a request; only new chat from people is
-    if (!live || m.kind !== 'chat' || !m.author.startsWith('human-')) continue;
-    if (m.toActor && m.toActor !== AGENT.id) continue;
+    if (m.kind !== 'chat') continue;
+    if (!live) { remember(m.author.startsWith('human-') ? 'Person' : 'Agent', m.body); continue; }   // earlier conversation
+    if (!m.author.startsWith('human-')) continue;
     queue.push(m);
   }
   void work();
 });
-setInterval(() => { if (live) net.heartbeat(AGENT.id).catch(() => {}); }, 20_000);
+setInterval(() => { if (live) for (const a of [ORCH, ...TEAM]) net.heartbeat(a.id).catch(() => {}); }, 20_000);

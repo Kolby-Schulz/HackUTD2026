@@ -64,7 +64,8 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const me = board.actors.get(board.me);
     const session = net ? connectBoard({
       boardId: 'playground', doc: board.doc, presence: board.presence, transport: net,
-      actors: [{ id: board.me, kind: 'human', name: me?.name ?? 'You', color: me?.color ?? '#3366ff' }],
+      // others see this name; your own list still shows you as "You"
+      actors: [{ id: board.me, kind: 'human', name: `Guest ${board.me.slice(-4)}`, color: me?.color ?? '#3366ff' }],
       onRemoteActor: (r) => {
         if (board.actors.get(r.actor)) return;
         const kind = r.kind === 'agent' ? 'agent' : r.kind === 'system' ? 'system' : 'human';
