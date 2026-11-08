@@ -1,7 +1,7 @@
 // Dashboard (spec section 13). Owner: dashboard + demo.
 // One screen, laid out like an editor workbench (storyboard "Frame 1 as an editor workbench"):
-// Agents side bar, editor (Code map, plus a Control tab for this laptop's processes), Savings /
-// Problems panel, Chat, status bar. Tables come from live subscriptions; Control and the chat's
+// Agents side bar, editor groups holding the Code map, Control and Chat tabs (drag to reorder,
+// move or split; Dock.tsx), Savings / Problems panel, status bar. Tables come from live subscriptions; Control and the chat's
 // assistant talk to the local control server (npm run control). ReplayTab.tsx stays, unmounted.
 import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
@@ -10,6 +10,7 @@ import { agentCards, cases, codeMap, coordFocus, coordinator, feed, latestRun, r
 import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
 import { CodeMap } from './CodeMap.tsx';
 import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
+import { DockArea, useDock, type ViewId } from './Dock.tsx';
 import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
 import { ChatView } from './Chat.tsx';
 import { Boundary } from './ui.tsx';
@@ -28,7 +29,7 @@ export function App() {
   const { layout, resize, toggle } = useLayout();
   const [picked, setPicked] = useState<string>();
   const [panelTab, setPanelTab] = useState<'savings' | 'problems'>('savings');
-  const [editorTab, setEditorTab] = useState<'map' | 'control'>('map');
+  const dock = useDock();
   const { repoLabel, machine } = useControlInfo();
 
   const view = useMemo(() => ({
@@ -51,6 +52,7 @@ export function App() {
   const STAGES = ['Plan', 'Code', 'Merge'] as const;
   const stageAt = STAGES.indexOf(view.stage);
   const { open, size } = layout;
+  const flip = (v: ViewId) => (dock.isOpen(v) ? dock.close(v) : dock.open(v));
 
   return (
     <div className="wb">
@@ -74,7 +76,9 @@ export function App() {
         <div className="tb-right">
           <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" title="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
           <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" title="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
-          <button type="button" className="iconbtn" aria-pressed={open.chat} aria-label="Toggle chat" title="Chat" onClick={() => toggle('chat')}>{ICON.chat}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('map')} aria-label="Toggle code map" title="Code map" onClick={() => flip('map')}>{ICON.map}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('control')} aria-label="Toggle control" title="Control" onClick={() => flip('control')}>{ICON.control}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('chat')} aria-label="Toggle chat" title="Chat" onClick={() => flip('chat')}>{ICON.chat}</button>
         </div>
       </header>
 
@@ -95,37 +99,43 @@ export function App() {
 
         <div className="center">
           <main className="pane" style={{ flex: 1 }} aria-label="Editor">
-            <div className="tabs" role="tablist" aria-label="Editor">
-              <button type="button" role="tab" className="etab" aria-selected={editorTab === 'map'} onClick={() => setEditorTab('map')}>{ICON.map}Code map</button>
-              <button type="button" role="tab" className="etab" aria-selected={editorTab === 'control'} onClick={() => setEditorTab('control')} title="Start and stop this laptop's processes (npm run control)">{ICON.panel}Control</button>
-            </div>
-            <nav className="crumbs" aria-label="Run stage">
-              <span>{repoLabel ?? 'demo-repo'}</span>
-              {STAGES.map((s, i) => <span key={s}>›&nbsp; <span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
-              <span className="grow" />
-              <span>dashed = planned · outline = claimed · click a symbol for details</span>
-            </nav>
             {!live.connected && (
               <div className="banner" role="status">
                 Not connected to SpacetimeDB at <span className="mono">{SPACETIME_HOST}</span> (database <span className="mono">{SPACETIME_DB_NAME}</span>).
                 {live.error ? ` ${live.error}.` : ''} Retrying. Check SPACETIME_HOST and SPACETIME_DB_NAME in the root .env, or start a local server with <span className="mono">spacetime start</span>.
               </div>
             )}
-            {editorTab === 'control' ? (
-              <div className="editor" style={{ overflow: 'auto' }}>
-                <Boundary name="Control"><div className="control-tab"><ControlTab openRun={openRun} chat={false} /></div></Boundary>
-              </div>
-            ) : (
-            <div className="editor">
-              <Boundary name="Code map">
-                {live.connected && !live.ready ? <div className="map-empty">Loading the code map…</div> : (
-                  <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked}
-                    widget={node && <SymbolWidget key={node.id} node={node} symbols={live.symbols} edges={live.edges} history={symbolHistory(live, w, node.id)}
-                      openCase={view.cases.find((c) => c.open && c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
-                )}
-              </Boundary>
-            </div>
-            )}
+            <DockArea dock={dock} views={{
+              map: { title: 'Code map', icon: ICON.map, render: () => (
+                <div className="view">
+                  <nav className="crumbs" aria-label="Run stage">
+                    <span>{repoLabel ?? 'demo-repo'}</span>
+                    {STAGES.map((s, i) => <span key={s}>›&nbsp; <span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
+                    <span className="grow" />
+                    <span className="ellipsis">dashed = planned · outline = claimed · click a symbol for details</span>
+                  </nav>
+                  <div className="editor">
+                    <Boundary name="Code map">
+                      {live.connected && !live.ready ? <div className="map-empty">Loading the code map…</div> : (
+                        <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked}
+                          widget={node && <SymbolWidget key={node.id} node={node} symbols={live.symbols} edges={live.edges} history={symbolHistory(live, w, node.id)}
+                            openCase={view.cases.find((c) => c.open && c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
+                      )}
+                    </Boundary>
+                  </div>
+                </div>
+              ) },
+              control: { title: 'Control', icon: ICON.control, hint: "Start and stop this laptop's processes (npm run control) · drag to move or split", render: () => (
+                <div className="view scroll"><Boundary name="Control"><div className="control-tab"><ControlTab openRun={openRun} chat={false} /></div></Boundary></div>
+              ) },
+              chat: { title: 'Chat', icon: ICON.chat, render: () => (
+                <div className="view chat-view">
+                  <Boundary name="Chat">
+                    <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
+                  </Boundary>
+                </div>
+              ) },
+            }} />
           </main>
           {open.panel && (
             <>
@@ -139,17 +149,6 @@ export function App() {
           )}
         </div>
 
-        {open.chat && (
-          <>
-            <Sash dir="v" label="Resize chat" size={size.chat} sign={-1} onSize={(px) => resize('chat', px)} onToggle={() => toggle('chat', false)} />
-            <aside className="pane chat" style={{ width: size.chat }} aria-label="Chat">
-              <PaneHead title="Chat" onClose={() => toggle('chat', false)}><span className="muted" style={{ fontSize: 12 }}>{run ? `run #${run.id}` : ''}</span></PaneHead>
-              <Boundary name="Chat">
-                <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
-              </Boundary>
-            </aside>
-          </>
-        )}
       </div>
 
       <footer className="statusbar" aria-label="Status bar">
