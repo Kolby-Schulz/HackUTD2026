@@ -8,9 +8,15 @@ import { startAgents } from '../agents/runtime';
 import type { AgentRuntime } from '../agents/runtime';
 import type { BoardKit } from '../core/commands';
 import { installDevtools } from '../core/devtools';
+import { camera } from '../core/camera';
+import { createPersistence, registerExtra } from '../core/persist';
+import { bindSnapSource } from '../core/snap/candidates';
+import { toast } from '../core/toast';
+import type { ChatStore } from '../chat/store';
+import { commentThreads } from '../comments/threads';
 import { install as installKeys } from '../core/keys';
 import { registerViewFallbacks } from './board/viewActions';
-import { HOST_AGENTS, viewCenter } from './kit';
+import { DEMO, HOST_AGENTS, viewCenter } from './kit';
 import type { ChatSink } from './kit';
 
 /** Boots the page; `rtRef` mirrors the returned runtime for callbacks that must not re-render on it. */
@@ -23,9 +29,24 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     // core/keys install() types its target with `(e: never)` listeners, which Window does not satisfy
     const offKeys = installKeys(window as unknown as Parameters<typeof installKeys>[0]);
     const offView = registerViewFallbacks();
-    // restore the saved board and chat before agents start (here, not in createKit, so a StrictMode remount's
-    // teardown cannot wipe what was just restored)
-    const loaded = sink.persistence?.load() ?? false;
+    // Global wiring happens here (with cleanup), never in createKit: StrictMode calls the kit factory twice.
+    // Snapping reads the live document, the shared spatial index and the camera.
+    bindSnapSource({
+      get view() { return board.doc.getState(); },
+      index: board.index,
+      zoom: () => camera.getCam().z,
+      viewport: () => camera.visibleRect(),
+    });
+    // Autosave: board, chat and comment threads survive a reload; `?demo=1` skips both load and save.
+    const persistence = createPersistence(board.doc, { boardId: 'playground', demo: DEMO, toast: (t, o) => toast(t, o) });
+    const offExtras = [
+      registerExtra('chat', { get: () => sink.chat.toJSON(), set: (v) => sink.chat.load(v as Parameters<ChatStore['load']>[0]) }),
+      registerExtra('comments', { get: () => commentThreads.toJSON(), set: (v) => commentThreads.load(v as Parameters<typeof commentThreads.load>[0]) }),
+    ];
+    sink.persistence = persistence;
+    sink.ui.set({ persistence });
+    // Restore before agents start (a remount's teardown has already run, so nothing wipes it afterwards).
+    const loaded = persistence.load();
     // only a board with live layers counts as restored (an autosaved empty board must not idle the agents)
     const restored = loaded && [...board.doc.getState().shapes.values()].some((sh) => !sh.deleted);
     const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text) });
@@ -49,6 +70,8 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       press: (id, down) => choreo(id).press(down),
     });
     return () => {
+      persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
+      sink.persistence = null; sink.ui.set({ persistence: null });
       offKeys(); offView(); offDev();
       for (const id of r.agentIds()) board.presence.remove(id);
       r.reset();
