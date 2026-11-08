@@ -205,3 +205,21 @@ describe('pipeline', () => {
     expect(env.ui.get().pop).toBeNull();
   });
 });
+
+describe('draw modifiers (WP-20)', () => {
+  it('click makes a 100 x 100 rect at the pointer', () => {
+    const env = makeEnv();
+    startCreate(env, pi(30, 40), 'rect').up(pi(30, 40));
+    expect(live(env)[0]).toMatchObject({ x: 30, y: 40, w: 100, h: 100 });
+  });
+  it('Shift makes a square, Alt grows from the centre', () => {
+    const env = makeEnv();
+    const m = startCreate(env, pi(100, 100), 'rect');
+    m.up(pi(160, 130, { shift: true }));
+    expect(live(env)[0]).toMatchObject({ x: 100, y: 100, w: 60, h: 60 });
+    const env2 = makeEnv();
+    const m2 = startCreate(env2, pi(100, 100), 'ellipse');
+    m2.up(pi(120, 110, { alt: true }));
+    expect(live(env2)[0]).toMatchObject({ x: 80, y: 90, w: 40, h: 20 });
+  });
+});
