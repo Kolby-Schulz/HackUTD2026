@@ -1,10 +1,13 @@
 // Chat column, in the spirit of the original web Claude Design: one conversation per agent,
 // a thread switcher on top, the conversation in the middle, a roomy composer at the bottom.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ChatMsg } from '../../chat/store';
 import '../../styles/chat.css';
+import { Messages } from './MessageView';
+import type { MessageEnv } from './MessageView';
 
-/** One chat line. `thread` is an agent id (one chat per agent) or 'general'; `from` 'you' marks the human. */
-export type Msg = { id: string; thread: string; from: string; name: string; color: string; text: string; ctx?: string; pin?: string; shapeId?: string; t: number };
+/** One chat line (see chat/store.ts). `thread` is an agent id (one chat per agent) or 'general'; `from` 'you' marks the human. */
+export type Msg = ChatMsg;
 
 export type Thread = { id: string; name: string; color: string; status: string; live: boolean };
 
@@ -13,7 +16,11 @@ export function ChatPanel(p: {
   active: string;
   onPick: (id: string) => void;
   flash: string | null;
-  messages: Msg[];
+  messages: readonly Msg[];
+  unread: Record<string, number>;
+  /** Tells the store which thread is on screen (null when the panel closes) so it counts as read. */
+  onActive: (id: string | null) => void;
+  env: MessageEnv;
   focusMsg: string | null;
   onFocused: () => void;
   attached?: { id: string; label: string; to?: Thread };
@@ -24,19 +31,11 @@ export function ChatPanel(p: {
   onCommentTool: () => void;
 }) {
   const [draft, setDraft] = useState('');
-  const [seen, setSeen] = useState<Record<string, number>>({});
   const listRef = useRef<HTMLDivElement>(null);
   const thread = p.threads.find((t) => t.id === p.active) ?? p.threads[0];
   const msgs = useMemo(() => p.messages.filter((m) => m.thread === thread.id), [p.messages, thread.id]);
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const m of p.messages) if (m.from !== 'you') c[m.thread] = (c[m.thread] ?? 0) + 1;
-    return c;
-  }, [p.messages]);
-
-  // the open thread is always "read"
-  useEffect(() => { setSeen((s) => (s[thread.id] === counts[thread.id] ? s : { ...s, [thread.id]: counts[thread.id] ?? 0 })); }, [thread.id, counts]);
+  useEffect(() => { p.onActive(thread.id); return () => p.onActive(null); }, [thread.id]);
 
   // stick to the bottom as messages arrive, unless the user scrolled up to read
   useEffect(() => {
@@ -68,7 +67,7 @@ export function ChatPanel(p: {
     <div className="pg-chat">
       <div className="pg-threads">
         {p.threads.map((t) => {
-          const unread = (counts[t.id] ?? 0) - (seen[t.id] ?? 0);
+          const unread = p.unread[t.id] ?? 0;
           return (
             <button key={t.id} className={'pg-thread' + (t.id === thread.id ? ' on' : '') + (p.flash === t.id ? ' flash' : '') + (t.live ? '' : ' gone')}
               style={{ ['--c' as string]: t.color }} onClick={() => p.onPick(t.id)}>
@@ -98,23 +97,7 @@ export function ChatPanel(p: {
             {!p.commentOn && <button onClick={p.onCommentTool}>Use the comment tool (C)</button>}
           </div>
         )}
-        {msgs.map((m) => (
-          m.from === 'you' ? (
-            <div key={m.id} id={`msg-${m.id}`} className="pg-msg you">
-              {m.ctx && <Ctx m={m} onShow={p.onShowShape} />}
-              <div className="bubble">{m.text}</div>
-            </div>
-          ) : (
-            <div key={m.id} id={`msg-${m.id}`} className="pg-msg agent">
-              <span className="av" style={{ background: m.color }}>{m.from === 'claude' ? '✳' : m.name[0]}</span>
-              <div className="body">
-                <b style={{ color: m.color }}>{m.name}</b>
-                {m.ctx && <Ctx m={m} onShow={p.onShowShape} />}
-                <p>{m.text}</p>
-              </div>
-            </div>
-          )
-        ))}
+        <Messages msgs={msgs} env={p.env} />
       </div>
 
       <div className="pg-compose">
@@ -135,13 +118,5 @@ export function ChatPanel(p: {
         </div>
       </div>
     </div>
-  );
-}
-
-function Ctx({ m, onShow }: { m: Msg; onShow: (id: string) => void }) {
-  return (
-    <button className="pg-ctx" onClick={() => m.shapeId && onShow(m.shapeId)} disabled={!m.shapeId} title="Show on board">
-      ◎ {m.ctx}
-    </button>
   );
 }

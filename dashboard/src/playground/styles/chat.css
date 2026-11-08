@@ -42,3 +42,26 @@
 .pg-mini-tool.on { color: var(--pg-accent); border-color: var(--pg-accent-line); background: var(--pg-accent-faint); }
 .pg-compose .send { width: 30px; height: 30px; border-radius: 9px; border: 0; background: var(--pg-accent); color: var(--pg-white); font-size: 15px; font-weight: 700; }
 .pg-compose .send:disabled { background: var(--pg-accent-disabled); cursor: default; }
+
+/* Message kinds (COMMENT-11) */
+.pg-msg.status { align-items: center; gap: 7px; color: var(--pg-muted); font-size: 12px; padding-left: 36px; margin-top: -8px; }
+.pg-msg.status i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.pg-more { align-self: flex-start; margin-left: 36px; border: 0; background: none; color: var(--pg-muted); font-size: 12px; text-decoration: underline; padding: 0; }
+.pg-more:hover { color: var(--pg-ink); }
+.pg-msg.system { justify-content: center; color: var(--pg-muted); font-size: 11.5px; text-align: center; }
+.pg-msg.routing { justify-content: center; }
+.pg-msg.routing .chip { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-muted); border-radius: 999px; padding: 2px 10px; font-size: 11.5px; }
+.pg-msg.error, .pg-msg.conflict { flex-direction: column; gap: 2px; background: var(--pg-danger-bg); border: 1px solid var(--pg-danger); border-radius: 10px; padding: 8px 12px; color: var(--pg-danger); font-size: 13px; }
+.pg-msg.conflict { background: var(--pg-accent-faint); border-color: var(--pg-accent-line); color: var(--pg-ink-body); }
+.pg-msg.error p, .pg-msg.conflict p { margin: 0; }
+.pg-msg.action .card { flex: 1; min-width: 0; border: 1px solid var(--pg-line); border-left: 3px solid var(--c); background: var(--pg-panel); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.pg-msg.action .sum { font-size: 13px; color: var(--pg-ink-body); display: flex; gap: 6px; align-items: baseline; }
+.pg-msg.action .sum .ic { color: var(--c); }
+.pg-msg.action .sum em { font-style: normal; margin-left: auto; font-size: 11px; color: var(--pg-muted); border: 1px solid var(--pg-line); border-radius: 999px; padding: 0 7px; }
+.pg-msg.action.undone .sum { color: var(--pg-muted); text-decoration: line-through; }
+.pg-msg.action .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.pg-msg.action .chips .more { color: var(--pg-muted); font-size: 11px; align-self: center; }
+.pg-msg.action .foot { display: flex; justify-content: space-between; align-items: center; color: var(--pg-muted); font-size: 11px; }
+.pg-msg.action .foot button { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 6px; padding: 1px 8px; font-size: 11.5px; color: var(--pg-ink); }
+.pg-msg.action .foot button:hover { border-color: var(--pg-line-hover); background: var(--pg-hover); }
+.pg-msg.agent b small { font-weight: 400; color: var(--pg-muted); }
