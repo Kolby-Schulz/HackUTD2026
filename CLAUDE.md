@@ -1,5 +1,7 @@
 # Contract — rules for coding agents
 
+Shared context for agents (status, decisions, pitfalls, per-part notes) lives in `vault/`; start at `vault/Home.md`.
+
 The full build spec is in `docs/SPEC.md` (text of Tyler's PDF; the PDF wins for tables
 and diagrams). The task list is `docs/TASKS.md`. Read your part's sections before coding.
 
