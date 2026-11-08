@@ -219,6 +219,53 @@ export class Pairer {
   }
 }
 
+// One daemon per machine (newest wins), from both sides:
+//  - TakeoverGuard: the OLDER daemon watches its `machine` row; register_machine stamps
+//    started_at, so when it moves past ours a newer daemon took over and this one stops.
+//  - takeOverPidFile: the NEWER daemon stops whatever pid the last daemon in this checkout left in
+//    `.contract/control-<machine>.pid`. The database guard only works if the older daemon runs code
+//    that has it (on 2026-11-08 a daemon started before the guard shipped outlived the new one and
+//    both cloned the repo); the pid file catches that daemon, and one that lost its connection.
+
+/** Decides, from the row's started_at (micros), whether a newer daemon re-registered this machine. */
+export class TakeoverGuard {
+  private done = false;
+  constructor(private registeredAt?: bigint) {}
+  /** True exactly once: the first time started_at moves past the value we registered with. */
+  check(startedAt: bigint | undefined): boolean {
+    if (this.done || startedAt === undefined) return false;
+    if (this.registeredAt === undefined || startedAt <= this.registeredAt) {
+      this.registeredAt ??= startedAt;
+      return false;
+    }
+    this.done = true;
+    return true;
+  }
+}
+
+/**
+ * Records `pid` in `file`, first stopping the daemon the file named if it is still a control
+ * daemon (`isDaemon`). Returns the pid it stopped, if any. Pure apart from the file.
+ */
+export function takeOverPidFile(
+  file: string,
+  pid: number,
+  isDaemon: (pid: number) => boolean,
+  stop: (pid: number) => void,
+  fs: { readFileSync: (p: string, enc: 'utf8') => string; writeFileSync: (p: string, data: string) => void; existsSync: (p: string) => boolean },
+): number | undefined {
+  let stopped: number | undefined;
+  if (fs.existsSync(file)) {
+    const old = Number(fs.readFileSync(file, 'utf8').trim());
+    if (Number.isInteger(old) && old > 0 && old !== pid && isDaemon(old)) {
+      stop(old);
+      stopped = old;
+    }
+  }
+  fs.writeFileSync(file, `${pid}\n`);
+  return stopped;
+}
+
 /** The argv that opens a URL in the default browser, without a shell (a URL's & would split a cmd line). */
 export function browserCommand(platform: string, url: string): [string, string[]] {
   if (platform === 'darwin') return ['open', [url]];

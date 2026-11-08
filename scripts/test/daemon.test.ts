@@ -3,7 +3,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { Registry } from '../control.ts';
-import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, type MachineCommand, type MachinePort, type ProcessRow } from '../daemon.ts';
+import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, TakeoverGuard, takeOverPidFile, type MachineCommand, type MachinePort, type ProcessRow } from '../daemon.ts';
 
 function fakeSpawn() {
   const calls: string[][] = [];
@@ -133,5 +133,43 @@ describe('browserCommand', () => {
     expect(browserCommand('darwin', url)).toEqual(['open', [url]]);
     expect(browserCommand('linux', url)).toEqual(['xdg-open', [url]]);
     expect(browserCommand('win32', url)).toEqual(['rundll32', ['url.dll,FileProtocolHandler', url]]);
+  });
+});
+
+describe('one daemon per machine', () => {
+  it('stops only when started_at moves past the value it registered with', () => {
+    const g = new TakeoverGuard(1_000n);
+    expect(g.check(undefined)).toBe(false); // row not in the cache yet
+    expect(g.check(1_000n)).toBe(false); // our own registration echoed back
+    expect(g.check(900n)).toBe(false); // an older value never counts
+    expect(g.check(1_001n)).toBe(true); // a newer daemon registered
+    expect(g.check(2_000n)).toBe(false); // reported once; the process is already stopping
+  });
+  it('learns its own started_at from the first update when the cache was empty', () => {
+    const g = new TakeoverGuard(undefined);
+    expect(g.check(500n)).toBe(false);
+    expect(g.check(500n)).toBe(false);
+    expect(g.check(501n)).toBe(true);
+  });
+  it('stops the daemon named in the pid file, but not a dead pid or itself', () => {
+    const files = new Map<string, string>();
+    const fs = {
+      existsSync: (p: string) => files.has(p),
+      readFileSync: (p: string) => files.get(p) ?? '',
+      writeFileSync: (p: string, d: string) => void files.set(p, d),
+    };
+    const stopped: number[] = [];
+    const stop = (pid: number) => stopped.push(pid);
+    const alive = (pid: number) => pid === 41 || pid === 42;
+    expect(takeOverPidFile('f', 42, alive, stop, fs)).toBeUndefined(); // first daemon: nothing to stop
+    expect(files.get('f')).toBe('42\n');
+    expect(takeOverPidFile('f', 42, alive, stop, fs)).toBeUndefined(); // same process again
+    expect(takeOverPidFile('f', 43, alive, stop, fs)).toBe(42); // newer daemon stops the older one
+    expect(files.get('f')).toBe('43\n');
+    expect(takeOverPidFile('f', 44, alive, stop, fs)).toBeUndefined(); // 43 is not alive: stale file
+    files.set('f', 'garbage');
+    expect(takeOverPidFile('f', 45, alive, stop, fs)).toBeUndefined();
+    expect(stopped).toEqual([42]);
+    expect(files.get('f')).toBe('45\n');
   });
 });
