@@ -106,8 +106,8 @@ export function App() {
               map: { title: 'Code map', icon: ICON.map, render: () => (
                 <div className="view">
                   <nav className="crumbs" aria-label="Run stage">
-                    <span>{repoLabel ?? 'demo-repo'}</span>
-                    {STAGES.map((s, i) => <span key={s}>›&nbsp; <span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
+                    {repoLabel && <span>{repoLabel}</span>}
+                    {STAGES.map((s, i) => <span key={s}>{(i > 0 || repoLabel) && <>›&nbsp; </>}<span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
                     <span className="grow" />
                     <span className="ellipsis">dashed = planned · outline = claimed · click a symbol for details</span>
                   </nav>

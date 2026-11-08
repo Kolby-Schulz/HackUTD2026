@@ -48,7 +48,7 @@ export function useControlInfo(): { repoLabel?: string; machine?: string } {
     const load = () =>
       fetch(`${CONTROL_URL}/status?tail=0`)
         .then((r) => r.json() as Promise<Status>)
-        .then((s) => { if (alive) { setInfo((p) => (p.repoLabel === (s.repoLabel ?? 'demo-repo') && p.machine === s.machine ? p : { repoLabel: s.repoLabel ?? 'demo-repo', machine: s.machine })); timer = setTimeout(load, 10_000); } })
+        .then((s) => { if (alive) { setInfo((p) => { const repoLabel = s.repo ? s.repoLabel : undefined; return p.repoLabel === repoLabel && p.machine === s.machine ? p : { repoLabel, machine: s.machine }; }); timer = setTimeout(load, 10_000); } })
         .catch(() => { if (alive) { setInfo((p) => (p.repoLabel || p.machine ? {} : p)); timer = setTimeout(load, 30_000); } });
     load();
     return () => { alive = false; clearTimeout(timer); };
@@ -258,7 +258,7 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
     <section className="card pad repo-picker" aria-label="Repository">
       <div className="row">
         <span className="cap muted">Repository</span>
-        <span className="mono">{demo ? 'Built-in demo (demo-repo)' : status?.repoLabel}</span>
+        <span className="mono">{demo ? <span className="muted">No repository chosen yet</span> : status?.repoLabel}</span>
         {!demo && cloning && <span className="label-wrap muted">{clone?.label === 'Clone repository' ? 'Cloning…' : 'Pulling latest…'}</span>}
         {!demo && !cloning && !failed && status?.repoInfo && <span className="repo-ok">✓ Ready</span>}
         <span className="grow" />
@@ -266,8 +266,6 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
           <>
             <button type="button" className="btn small ghost" disabled={busy || locked} title={locked ? 'Stop what is running first' : undefined}
               onClick={() => { setText(status?.repo ?? ''); setEditing(true); }}>Change</button>
-            <button type="button" className="btn small ghost" disabled={busy || locked} title={locked ? 'Stop what is running first' : undefined}
-              onClick={() => void use('')}>Use demo</button>
           </>
         )}
       </div>

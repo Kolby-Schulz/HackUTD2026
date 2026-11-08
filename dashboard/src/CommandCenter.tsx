@@ -74,7 +74,6 @@ function RepoSection({ openRun }: { openRun?: R.Run }) {
         <div className="cc-recent">
           <span className="muted">Recent</span>
           {others.map((r) => <button key={r} type="button" className="sym-chip" disabled={busy} title={r} onClick={() => void set(r)}>{shortName(r)}</button>)}
-          {status.repo && <button type="button" className="sym-chip" disabled={busy} onClick={() => void set('')}>demo-repo</button>}
         </div>
       )}
       {error && <div className="msg-error" role="alert">Set repository: {error}</div>}
@@ -101,7 +100,7 @@ export function CommandCenter({ repoLabel, runs, run, runPick, onPickRun, openRu
     <div className="cmd" ref={box} onKeyDown={(e) => { if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); button.current?.focus(); } }}>
       <button type="button" ref={button} className="cc-btn" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)} title="Repository and run">
         <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-        <span className="mono ellipsis cc-repo">{repoLabel ?? 'demo-repo'}</span>
+        {repoLabel ? <span className="mono ellipsis cc-repo">{repoLabel}</span> : <span className="cc-repo" style={{ fontWeight: 600 }}>Choose a repository</span>}
         <span className="muted">·</span>
         <span className="mono ellipsis">{runPick === 'latest' ? `latest · ${runLabel}` : runLabel}</span>
         <svg className="chev" style={{ marginLeft: 'auto', transform: open ? 'rotate(180deg)' : undefined }} width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
