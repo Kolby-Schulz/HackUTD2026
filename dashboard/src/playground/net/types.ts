@@ -44,6 +44,12 @@ export interface BoardTransport {
   identity(): IdentityLike | null;
   onStatus(cb: (s: NetStatus) => void): () => void;
 
+  /** An `agent` row for a board agent, so the dashboard and token logs see it. */
+  registerAgent(a: { id: string; name: string }): Promise<void>;
+  heartbeat(agentId: string): Promise<void>;
+  /** The `service` lock: claiming again while holding it is the heartbeat; it goes stale after 30 s. */
+  claimService(name: string, holder: string): Promise<void>;
+  releaseService(name: string, holder: string): Promise<void>;
   joinBoard(a: JoinArgs): Promise<void>;
   leaveBoard(boardId: string, actor: ActorId): Promise<void>;
   pushOps(boardId: string, ops: readonly PushOp[]): Promise<void>;

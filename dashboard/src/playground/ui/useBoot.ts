@@ -23,6 +23,8 @@ import { applyViewFromUrl } from '../actions/share';
 import { DEMO, HOST_AGENTS, LIVE, viewCenter } from './kit';
 import { connectBoard } from '../net/session';
 import { connectSpacetime } from '../net/spacetime';
+import { electHost, RENEW_MS } from '../net/host';
+import type { BoardTransport } from '../net/types';
 import { SPACETIME_DB_NAME, SPACETIME_HOST } from '../../data';
 import type { ChatSink } from './kit';
 
@@ -31,8 +33,23 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
   const [rt, setRt] = useState<AgentRuntime | null>(null);
   const teardown = useRef(onTeardown);
   teardown.current = onTeardown;
+  // Live board: one connection for the page, and the host election that decides whether this tab runs the agents.
+  const [net, setNet] = useState<(BoardTransport & { close(): void }) | null>(null);
+  const [hosting, setHosting] = useState(false);
+  useEffect(() => {
+    if (!LIVE) return;
+    const t = connectSpacetime({ uri: SPACETIME_HOST, database: SPACETIME_DB_NAME, boardId: 'playground', boardName: 'Design board' });
+    setNet(t);
+    const election = electHost(t, board.me, (h) => {
+      setHosting(h);
+      if (h) toast('Agents are running in this tab', { key: 'net.host', ttlMs: 6000 });
+    });
+    return () => { election.dispose(); t.close(); setNet(null); setHosting(false); };
+  }, [board]);
 
   useEffect(() => {
+    if (LIVE && !net) return;
+    const hostAgents = HOST_AGENTS || hosting;
     // core/keys install() types its target with `(e: never)` listeners, which Window does not satisfy
     const offKeys = installKeys(window as unknown as Parameters<typeof installKeys>[0]);
     const offView = registerViewFallbacks();
@@ -47,7 +64,6 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     // Autosave: board, chat and comment threads survive a reload; `?demo=1` skips both load and save.
     // The live board's state lives in SpacetimeDB, so it neither loads nor autosaves a local copy.
     const persistence = createPersistence(board.doc, { boardId: 'playground', demo: DEMO || LIVE, toast: (t, o) => toast(t, o) });
-    const net = LIVE ? connectSpacetime({ uri: SPACETIME_HOST, database: SPACETIME_DB_NAME, boardId: 'playground', boardName: 'Design board' }) : null;
     const me = board.actors.get(board.me);
     const session = net ? connectBoard({
       boardId: 'playground', doc: board.doc, presence: board.presence, transport: net,
@@ -69,7 +85,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const loaded = persistence.load();
     // only a board with live layers counts as restored (an autosaved empty board must not idle the agents)
     const restored = loaded && [...board.doc.getState().shapes.values()].some((sh) => !sh.deleted);
-    const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text), ...agentChatHooks(sink.chat) });
+    const r = startAgents(board, { host: hostAgents, onSay: (a, text) => sink.say?.(a.id, text), ...agentChatHooks(sink.chat) });
     rtRef.current = r;
     setRt(r);
     // Claim contention rulings (WP-68). Started here, stopped in cleanup (StrictMode runs this effect twice).
@@ -80,13 +96,25 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     });
     // The agent host (this peer) writes the measured size of agent text after it is created or changed (WP-60).
     // Viewers never do; writeMeasuredSize itself only accepts agent-made text. Its own write comes from system-measure, so it cannot loop.
-    const offMeasure = HOST_AGENTS ? board.subscribe({ kinds: ['shape.created', 'shape.updated'] }, (e) => {
+    const offMeasure = hostAgents ? board.subscribe({ kinds: ['shape.created', 'shape.updated'] }, (e) => {
       if (!e.actor.startsWith('agent-') || !('ids' in e)) return;
       for (const id of e.ids) writeMeasuredSize(board, id, { role: 'host' }, true);
     }) : () => {};
     // a restored board: agents build in cells that saved work does not touch
     if (restored) r.occupy(board.doc.getState());
-    if (HOST_AGENTS) for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
+    if (hostAgents) for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
+    // On the live board the host tab's agents are SpacetimeDB actors: each one registers as an `agent` row and
+    // joins the board, and its edits, cursor and presence go through the same session as a person's.
+    const joinAgents = () => {
+      if (!session) return;
+      for (const id of r.agentIds()) {
+        const a = board.actors.get(id);
+        if (a) session.join({ id, kind: 'agent', name: a.name, color: a.color, agentId: id });
+      }
+    };
+    joinAgents();
+    const offAgents = session ? board.actors.subscribe(joinAgents) : () => {};
+    const beat = net && hostAgents ? setInterval(() => { for (const id of r.agentIds()) net.heartbeat(id).catch(() => {}); }, RENEW_MS) : null;
     // a shared link (#/playground?x=&y=&z=&sel=) moves the camera there and selects the ids that exist
     const offUrl = applyViewFromUrl(board, camera);
 
@@ -104,7 +132,8 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       press: (id, down) => choreo(id).press(down),
     });
     return () => {
-      session?.dispose(); net?.close();
+      offAgents(); if (beat) clearInterval(beat);
+      session?.dispose();
       persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
       sink.persistence = null; sink.ui.set({ persistence: null });
       offCoord(); offMeasure(); offUrl(); offKeys(); offView(); offDev();
@@ -113,7 +142,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       rtRef.current = null;
       teardown.current();
     };
-  }, [board, sink, rtRef]);
+  }, [board, sink, rtRef, net, hosting]);
 
   return rt;
 }

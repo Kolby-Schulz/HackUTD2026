@@ -5,6 +5,8 @@ import type { DocStore, Op, Shape } from '../core/types';
 import { createPresenceBus } from '../presence/bus';
 import type { MemoryPresenceBus } from '../presence/bus';
 import { connectBoard, CURSOR_MS } from './session';
+import { electHost, RENEW_MS } from './host';
+import type { HostTimers } from './host';
 import type { BoardSession, LocalActor, NetError, Timers } from './session';
 import { MAX_OPS_PER_PUSH, MAX_OP_BODY_BYTES } from './types';
 import type {
@@ -21,6 +23,9 @@ class FakeServer {
   pushes: number[] = [];
   nextSeq = 1n;
   clients = new Set<FakeClient>();
+  agents = new Map<string, string>();                       // agent id -> identity hex
+  services = new Map<string, { hex: string; holder: string; at: number }>();
+  now = 0;                                                  // seconds, for service staleness
 
   push(c: FakeClient, boardId: string, ops: readonly { opId: string; tx: string; body: string }[]) {
     if (ops.length > MAX_OPS_PER_PUSH) throw new Error('too many ops');
@@ -64,6 +69,25 @@ class FakeClient implements BoardTransport {
   onPresence(cb: Cb<RowChange<BoardPresenceRow>>) { return this.add(this.subs.presence, cb); }
   onCursor(cb: Cb<BoardCursorEvent>) { return this.add(this.subs.cursor, cb); }
 
+  async registerAgent(a: { id: string }) {
+    this.live();
+    const prev = this.server.agents.get(a.id);
+    if (prev && prev !== this.hex) throw new Error('agent linked to another identity');
+    this.server.agents.set(a.id, this.hex);
+  }
+  async heartbeat() { this.live(); }
+  async claimService(name: string, holder: string) {
+    this.live();
+    const row = this.server.services.get(name);
+    const mine = row && row.holder === holder && row.hex === this.hex;
+    if (row && !mine && this.server.now - row.at <= 30) throw new Error(`${name} is already running`);
+    this.server.services.set(name, { hex: this.hex, holder, at: this.server.now });
+  }
+  async releaseService(name: string, holder: string) {
+    this.live();
+    const row = this.server.services.get(name);
+    if (row && row.holder === holder && row.hex === this.hex) this.server.services.delete(name);
+  }
   async joinBoard(a: { boardId: string; actor: string; kind: string; name: string; color: string }) {
     this.live();
     const prev = this.server.actors.get(a.actor);
@@ -334,5 +358,46 @@ describe('presence', () => {
     host.doc.dispatch('agent-9', 'Draw', [rect('a9', 'agent-9')]);
     await settle();
     expect(server.ops.map((r) => r.actor)).toEqual(['agent-9']);
+  });
+});
+
+describe('agent host', () => {
+  class Intervals implements HostTimers {
+    fns = new Map<number, () => void>(); n = 0;
+    setInterval(f: () => void) { const id = ++this.n; this.fns.set(id, f); return id; }
+    clearInterval(h: unknown) { this.fns.delete(h as number); }
+    tick() { [...this.fns.values()].forEach((f) => f()); }
+  }
+
+  it('exactly one tab becomes host, and another takes over once the host is gone', async () => {
+    const a = new FakeClient(server, 'aa'); const b = new FakeClient(server, 'bb');
+    a.connect(); b.connect();
+    const ta = new Intervals(); const tb = new Intervals();
+    const roles: Record<string, boolean> = {};
+    const ea = electHost(a, 'tab-a', (h) => { roles.a = h; }, ta);
+    await settle();
+    const eb = electHost(b, 'tab-b', (h) => { roles.b = h; }, tb);
+    await settle();
+    expect([ea.isHost(), eb.isHost()]).toEqual([true, false]);
+    a.disconnect();                     // the host tab drops without releasing
+    expect(ea.isHost()).toBe(false);
+    server.now += 10; tb.tick(); await settle();
+    expect(eb.isHost()).toBe(false);    // the lock is not stale yet
+    server.now += 25; tb.tick(); await settle();
+    expect(eb.isHost()).toBe(true);
+    expect(RENEW_MS).toBeLessThan(30_000);
+    ea.dispose(); eb.dispose();
+  });
+
+  it('an agent on the host tab registers, joins and its edits reach a viewer', async () => {
+    const host = peer(server, 'hh', [human('human-h')]);
+    const viewer = peer(server, 'vv', [human('human-v')]);
+    host.client.connect(); viewer.client.connect(); await settle();
+    host.session.join({ id: 'agent-k1', kind: 'agent', name: 'Kit', color: '#f60', agentId: 'agent-k1' });
+    host.doc.dispatch('agent-k1', 'Draw', [rect('k', 'agent-k1')]);
+    await settle(); await settle();
+    expect(server.agents.get('agent-k1')).toBe('hh');
+    expect(server.actors.get('agent-k1')?.kind).toBe('agent');
+    expect(ids(viewer.doc)).toEqual(['k']);
   });
 });

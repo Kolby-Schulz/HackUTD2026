@@ -208,7 +208,8 @@ export function connectBoard(o: BoardSessionOpts): BoardSession {
   // ---- actors ----
   function joinOne(a: LocalActor) {
     if (!live()) return;
-    transport.joinBoard({ boardId, actor: a.id, kind: a.kind, name: a.name, color: a.color, ...(a.agentId ? { agentId: a.agentId } : {}) })
+    const registered = a.kind === 'agent' && a.agentId ? transport.registerAgent({ id: a.agentId, name: a.name }) : Promise.resolve();
+    registered.then(() => transport.joinBoard({ boardId, actor: a.id, kind: a.kind, name: a.name, color: a.color, ...(a.agentId ? { agentId: a.agentId } : {}) }))
       .catch((e: unknown) => report({ kind: 'join-refused', actor: a.id, message: errText(e) }));
   }
   function onActors(c: RowChange<BoardActorRow>) {
