@@ -6,6 +6,7 @@ import { norm, union } from '../../core/geom';
 import { isHandle, resizeBoxFlip, scaleInto } from '../../core/resize';
 import type { Handle, ResizeOpts } from '../../core/resize';
 import { snapResize, snapResult } from '../../core/snap';
+import { resetResizeSnapMemory } from '../../core/snap/resize';
 import { absRect, descendants, toLocal } from '../../core/tree';
 import type { Command, Gesture, Pt, Rect, ShapeId } from '../../core/types';
 import { selectedIds } from '../board/state';
@@ -84,10 +85,11 @@ export function startResize(env: BoardEnv, p0: PointerInfo): Mode | null {
     move: apply,
     up(p) {
       snapResult.clear();
-      if (!g && p.clientX === p0.clientX && p.clientY === p0.clientY) return;   // click on a handle: no change
+      if (!g && p.clientX === p0.clientX && p.clientY === p0.clientY) { resetResizeSnapMemory(board.me); return; }   // click on a handle: no change
       apply(p);
       g!.commit();
+      resetResizeSnapMemory(board.me);
     },
-    cancel() { snapResult.clear(); g?.abort(); },
+    cancel() { snapResult.clear(); g?.abort(); resetResizeSnapMemory(board.me); },
   };
 }

@@ -12,7 +12,11 @@ import type { CameraStore } from '../../core/camera';
 import { scheduler } from '../../core/raf';
 import type { FrameSub } from '../../core/raf';
 import { useChildren } from '../../core/react';
-import type { Cam } from '../../core/types';
+import { union } from '../../core/geom';
+import { tweenCam } from '../../core/tween';
+import { worldBounds } from '../../core/tree';
+import type { Cam, Rect } from '../../core/types';
+import { DEFAULT_CAM, planFitAll } from '../../actions/view';
 import { createPipeline, shapeAt } from '../gestures/pipeline';
 import { enterAt } from '../gestures/select';
 import { cursorFor } from './cursor';
@@ -24,14 +28,16 @@ import { Hover } from '../overlays/Hover';
 import type { DescribeTarget } from '../overlays/Hover';
 import { Marquee } from '../overlays/Marquee';
 import { Measure } from '../overlays/Measure';
+import { EmptyHint } from '../overlays/EmptyHint';
 import { OffscreenChips } from '../overlays/OffscreenChips';
+import { Pulse } from '../overlays/Pulse';
 import { Readout } from '../overlays/Readout';
 import { RemoteSelections } from '../overlays/RemoteSelections';
 import { SelectionBox } from '../overlays/SelectionBox';
 import { SmartGuides } from '../overlays/SmartGuides';
 import { BoardEnvContext, useBoardEnv } from './context';
 import { DotGrid } from './DotGrid';
-import { isVisible } from './culling';
+import { useVisible } from './culling';
 import { ShapeView } from './ShapeView';
 import { setActiveBoard } from './state';
 import type { BoardEnv, Painter, UiStore } from './state';
@@ -68,7 +74,25 @@ function createPainter(camera: CameraStore, world: () => HTMLElement | null): Pa
 function RootShapes() {
   const env = useBoardEnv();
   const ids = useChildren(env.board.doc, null);
-  return <>{ids.filter(isVisible).map((id) => <ShapeView key={id} id={id} depth={0} />)}</>;
+  const visible = useVisible(null, ids);
+  return <>{visible.map((id) => <ShapeView key={id} id={id} depth={0} />)}</>;
+}
+
+const fitted = new WeakSet<object>();
+/** First load: fit the content once, unless the camera was already placed (shared view URL, restored camera). */
+function fitOnFirstLoad(env: BoardEnv) {
+  if (fitted.has(env.camera)) return;
+  const view = env.camera.getViewSize();
+  if (view.w <= 0 || view.h <= 0) return;
+  fitted.add(env.camera);
+  const cam = env.camera.getCam();
+  if (cam.x !== DEFAULT_CAM.x || cam.y !== DEFAULT_CAM.y || cam.z !== DEFAULT_CAM.z) return;
+  const st = env.board.doc.getState();
+  const boxes = (st.children.get(null) ?? []).map((id) => worldBounds(st, id)).filter((r): r is Rect => !!r);
+  const content = union(boxes);
+  if (!content) return;
+  const dest = planFitAll(content, view);
+  tweenCam(env.camera, dest, { duration: 260, onDone: (ok) => { if (ok) env.camera.fitRect(content, { margin: 80, maxZoom: 2 }); } });
 }
 
 export function Board(props: {
@@ -99,7 +123,7 @@ export function Board(props: {
     const { board, camera, ui, paint } = env;
     setActiveBoard(env);
     env.painter.start();
-    const measure = () => camera.setViewRect(view.getBoundingClientRect());
+    const measure = () => { camera.setViewRect(view.getBoundingClientRect()); fitOnFirstLoad(env); };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(view);
@@ -193,6 +217,8 @@ export function Board(props: {
           <Measure />
           <Readout />
           <OffscreenChips />
+          <Pulse />
+          <EmptyHint />
           {props.children}
         </div>
       </div>

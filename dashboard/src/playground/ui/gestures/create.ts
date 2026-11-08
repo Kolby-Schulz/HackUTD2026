@@ -4,6 +4,7 @@
 import { newId } from '../../core/ids';
 import type { Rect } from '../../core/types';
 import { snapCreate, snapResult } from '../../core/snap';
+import { resetResizeSnapMemory } from '../../core/snap/resize';
 import { frameAt, toLocal } from '../../core/tree';
 import type { Command, Gesture, Kind, Pt, ShapeId, ShapeProps } from '../../core/types';
 import { selectIds } from '../board/state';
@@ -69,10 +70,11 @@ export function startCreate(env: BoardEnv, p0: PointerInfo, kind: DrawKind): Mod
     up(p) {
       g.update(cmd(p, true));
       snapResult.clear();
+      resetResizeSnapMemory(board.me);
       const r = g.commit();
       if (r.ok) selectIds(board, [id]);
       env.ui.set({ tool: 'select' });
     },
-    cancel() { snapResult.clear(); g.abort(); env.ui.set({ tool: 'select' }); },
+    cancel() { snapResult.clear(); resetResizeSnapMemory(board.me); g.abort(); env.ui.set({ tool: 'select' }); },
   };
 }

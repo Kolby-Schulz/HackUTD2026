@@ -1,12 +1,15 @@
 // The layer tree: nested rows in z-order (top first), expand/collapse, kind icons, click to select.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { goToShape } from '../../core/goto';
 import { useDoc } from '../../core/react';
 import type { ShapeId } from '../../core/types';
 import { selectIds } from '../board/state';
 import { useSelection } from '../hooks';
 import type { SlotProps } from '../slotProps';
-import { LayerRow } from './LayerRow';
-import { flattenTree, hiddenSelectionParents, isExpanded, subtreeParents, type ExpandedMap } from './treeView';
+import { LayerRow, ROW_HEIGHT } from './LayerRow';
+import { flattenTree, hiddenSelectionParents, isExpanded, rowActivity, subtreeParents, type ExpandedMap } from './treeView';
+import { VirtualList } from './VirtualList';
+import type { VirtualListHandle } from './VirtualList';
 import '../../styles/layers.css';
 
 // Expand/collapse choices live for the browser session (per viewer, not synced).
@@ -21,9 +24,12 @@ export function LayersPanel({ board, cursors }: SlotProps) {
   const selSet = useMemo(() => new Set(selected), [selected]);
   const hidden = useMemo(() => hiddenSelectionParents(rows, st.shapes, selected), [rows, st.shapes, selected]);
   const colors = new Map(cursors.map((a) => [a.id, a.color]));
-  const locks = new Map(board.locks.list().map((l) => [l.shapeId, colors.get(l.holder)]));
+  const activity = rowActivity(board.locks.list(), st.shapes, (h) => colors.get(h));
+  /** For WP-54: `listRef.current?.scrollToIndex(rows.findIndex(r => r.id === id), 'auto')`. */
+  const listRef = useRef<VirtualListHandle>(null);
 
   const onPick = useCallback((id: ShapeId) => selectIds(board, [id]), [board]);
+  const onJump = useCallback((id: ShapeId) => { goToShape(board.doc.getState(), id); }, [board]);
   const onToggle = useCallback((id: ShapeId, deep: boolean) => {
     const s = st.shapes.get(id);
     if (!s) return;
@@ -35,12 +41,12 @@ export function LayersPanel({ board, cursors }: SlotProps) {
   }, [st.children, st.shapes]);
 
   return (
-    <div className="pg-layers">
-      {rows.map((row) => (
-        <LayerRow key={row.id} row={row} selected={selSet.has(row.id)} hiddenSelected={hidden.has(row.id)}
-          lockColor={locks.get(row.id)} onPick={onPick} onToggle={onToggle} />
-      ))}
-      {!rows.length && <div className="pg-empty">Agents are warming up…</div>}
-    </div>
+    <VirtualList ref={listRef} className="pg-layers" items={rows} rowHeight={ROW_HEIGHT} getKey={(r) => r.id} aria-label="Layers"
+      empty={<div className="pg-empty">Agents are warming up…</div>}
+      renderRow={(row) => (
+        <LayerRow row={row} selected={selSet.has(row.id)} hiddenSelected={hidden.has(row.id)}
+          lockColors={activity.own.get(row.id)} belowColors={activity.below.get(row.id)}
+          onPick={onPick} onToggle={onToggle} onJump={onJump} />
+      )} />
   );
 }

@@ -36,18 +36,18 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - done (wire/chat): `agents/scripted.ts` (~line 87) card label uses `edit.summary.join(', ')`.
 
 ## C. Snapping (WP-52)
-- todo: `core/snap/move.ts` wraps candidates with `withParent(...)` from `./parent` (parent-frame snapping for moves).
-- todo: resize and create gestures call `resetResizeSnapMemory()` on pointer-up and abort.
+- done (wire/board): `core/snap/move.ts` wraps candidates with `withParent(...)` from `./parent` (parent-frame snapping for moves).
+- done (wire/board): resize and create gestures call `resetResizeSnapMemory()` on pointer-up and abort.
 
 ## D. Culling (WP-32)
-- todo: `ui/board/ShapeView.tsx` `useVisible(id, kids)` after `useChildren`; map `visible`.
-- todo: `ui/board/Board.tsx` `RootShapes` uses `useVisible(null, ids)`.
+- done (wire/board): `ui/board/ShapeView.tsx` `useVisible(id, kids)` after `useChildren`; map `visible`.
+- done (wire/board): `ui/board/Board.tsx` `RootShapes` uses `useVisible(null, ids)`.
 - check: `await board.bench([500, 2000, 5000])`: p95 under 16.7 ms at 2k, under 25 ms at 5k; DOM under 600 shapes.
 
 ## E. Camera (WP-29)
-- todo: pulse-ring overlay in `ui/board` subscribing to `onPulse` from `core/goto.ts`.
-- todo: first load fits content (`tweenCam(env.camera, planFitAll(content, view))`); empty-board hint.
-- todo: layer chips and presence jump use `goToShape(view, id)`.
+- done (wire/board): pulse-ring overlay in `ui/board` subscribing to `onPulse` from `core/goto.ts`.
+- done (wire/board): first load fits content (`tweenCam(env.camera, planFitAll(content, view))`); empty-board hint.
+- done (wire/board): layer chips and presence jump use `goToShape(view, id)`.
 
 ## F. Comment threads (WP-43)
 - done (wire/chat): layer comments create threads in `commentThreads` instead of the old `Pin` list in `useChat`.
@@ -62,22 +62,22 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - todo (wire/core could not: placement is in `agents/scripted.ts`, W-chat file; see report): agents snap their placements through `agentSnapMove` (WP-24).
 
 ## H. Selection, undo, inspector, layers, export
-- todo: Shift-click deselect and narrowing a multi-selection happen on pointer-up without movement (`pipeline.onClick`,
+- done (wire/board): Shift-click deselect and narrowing a multi-selection happen on pointer-up without movement (`pipeline.onClick`,
   WP-13/14).
 - done (wire/core): exec/gesture set it, undo/redo reselect: set `Tx.sel` when transactions are created so undo restores selection exactly (WP-34; core).
 - done (wire/core): `actions/align.ts` Alt+A/D/W/S/H/V align shortcuts (WP-24).
 - done (wire/core): in `actions/layers.ts`: opacity keys 1-9 and 0 in an actions file (WP-56).
 - done (wire/core): Share menu and inspector export entries call `exportSelection(board, 1|2|3)` (WP-64).
-- todo: layers panel feeds LayerRow the data for ancestor owner rings and "+n" dots (WP-55).
+- done (wire/board): layers panel feeds LayerRow the data for ancestor owner rings and "+n" dots (WP-55).
 - done (wire/core): store API; `ui/shell/Toasts.tsx` hover must call `toasts.pause/resume`: toasts pause/resume and sticky (WP-45; `core/toast.ts`).
 
 ## I. Remaining Wave 1 seams
-- todo (WP-28): `ui/layers/LayersPanel.tsx` renders rows through `VirtualList` (import `VirtualList`, `ROW_HEIGHT` from
+- done (wire/board) (WP-28): `ui/layers/LayersPanel.tsx` renders rows through `VirtualList` (import `VirtualList`, `ROW_HEIGHT` from
   `LayerRow`): `<VirtualList className="pg-layers" items={rows} rowHeight={ROW_HEIGHT} getKey={(r) => r.id}
   empty={...} renderRow={(row) => <LayerRow .../>} />`; keep a ref for WP-54's `scrollToIndex`.
 - WP-30: no seam.
 - WP-16, WP-50: no seam (WP-50 write-back of measured text sizes is WP-60's job, Wave 2).
-- todo (WP-46): `ui/gestures/pipeline.ts` `down()` ignores `button === 2` so a right-click opens the context menu without
+- done (wire/board) (WP-46): `ui/gestures/pipeline.ts` `down()` ignores `button === 2` so a right-click opens the context menu without
   starting a select/move gesture.
 - done (wire/core) (WP-33): `actions/view.ts` adds `{ id: 'view.toggleDebug', title: 'Toggle debug HUD', group: 'View', contexts: ctx,
   run: () => toggleDebug() }` (import `toggleDebug` from `../core/perf`); `core/devtools.ts` adds

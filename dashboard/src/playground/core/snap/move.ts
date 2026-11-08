@@ -4,6 +4,7 @@ import type { SnapCtx, SnapLine, SnapResult } from '../snap';
 import type { Rect, ShapeId } from '../types';
 import { collectCandidates, getSnapSource } from './candidates';
 import type { Candidate } from './candidates';
+import { withParent } from './parent';
 
 const NONE: SnapResult = { dx: 0, dy: 0, lines: [], gaps: [] };
 const EPS = 0.01;
@@ -91,7 +92,7 @@ export function snapMoveImpl(box: Rect, ctx: SnapCtx): SnapResult {
   const region: Rect = vp
     ? { x: vp.x - t, y: vp.y - t, w: vp.w + 2 * t, h: vp.h + 2 * t }
     : { x: -FAR, y: -FAR, w: 2 * FAR, h: 2 * FAR };
-  const cands = collectCandidates(src, region, ctx.ignore as Set<ShapeId>, ctx.parent, box);
+  const cands = withParent(collectCandidates(src, region, ctx.ignore as Set<ShapeId>, ctx.parent, box), src, ctx.parent, ctx.ignore);
 
   const sig = [...ctx.ignore].sort().join(',') + '|' + (ctx.parent ?? '');
   let mem = memory.get(ctx.actor);

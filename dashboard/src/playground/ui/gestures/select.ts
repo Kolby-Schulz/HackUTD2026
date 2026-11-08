@@ -54,15 +54,35 @@ function setSel(env: BoardEnv, ids: ShapeId[], scope: ShapeId | null) {
   env.board.selection.set(env.board.me, ids, scope);
 }
 
-/** Updates the human's selection for a click at `p`; returns the hit shape (null on empty canvas). */
+/** What the last press hit, so a release without movement can finish the click (Shift-deselect, narrowing). */
+let press: { id: ShapeId; scope: ShapeId | null; was: boolean } | null = null;
+
+/**
+ * Pointer-up without movement (SELECT-12/13): Shift-click on a selected layer removes it; a plain click on a layer
+ * of a multi-selection narrows the selection to it. Both wait for the release so a drag still moves the whole set.
+ */
+export function finishClick(env: BoardEnv, p: PointerInfo): void {
+  const pr = press;
+  press = null;
+  if (!pr || !pr.was) return;
+  const cur = selectedIds(env.board);
+  if (!cur.includes(pr.id)) return;
+  if (p.shift) setSel(env, cur.filter((id) => id !== pr.id), pr.scope);
+  else if (cur.length > 1) setSel(env, [pr.id], pr.scope);
+}
+export function clearPress(): void { press = null; }
+
+/** Updates the human's selection for a press at `p`; returns the hit shape (null on empty canvas). */
 export function selectAt(env: BoardEnv, p: PointerInfo): ShapeId | null {
   const view = env.board.doc.getState();
   const leaf = leafAt(env, p.world);
   const cur = selectedIds(env.board);
   const scope = env.board.selection.get(env.board.me).scope;
+  press = null;
   if (!leaf) { if (!p.shift && cur.length) setSel(env, [], scope); return null; }
   const t = p.mod ? { id: leaf, scope: view.shapes.get(leaf)?.parent ?? null } : clickTarget(view, leaf, scope);
-  if (p.shift) setSel(env, cur.includes(t.id) ? cur.filter((id) => id !== t.id) : [...cur, t.id], t.scope);
+  press = { id: t.id, scope: t.scope, was: cur.includes(t.id) };
+  if (p.shift) { if (!cur.includes(t.id)) setSel(env, [...cur, t.id], t.scope); }   // removing waits for the release
   else if (!cur.includes(t.id) || t.scope !== scope) setSel(env, cur.includes(t.id) ? [...cur] : [t.id], t.scope);
   return t.id;
 }

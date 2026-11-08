@@ -10,7 +10,7 @@ import { startMarquee } from './marquee';
 import { startMove } from './move';
 import { startPan } from './pan';
 import { startResize } from './resize';
-import { selectAt } from './select';
+import { clearPress, finishClick, selectAt } from './select';
 import { commitText, startTextTool } from './text';
 import { selectIds, selectedIds } from '../board/state';
 
@@ -94,6 +94,8 @@ export function createPipeline(env: BoardEnv) {
     const prev = mode;
     end();
     prev?.cancel();
+    clearPress();
+    if (p.button === 2) return;   // right-click only opens the context menu: no select / move / pan gesture
     const { tool, space } = env.ui.get();
     if (p.button === 1 || tool === 'hand' || space) { begin(startPan(env, p), p); return; }
     if (p.button !== 0) return;
@@ -124,8 +126,9 @@ export function createPipeline(env: BoardEnv) {
     const m = mode, d0 = downAt, wasDrag = dragging;
     end();
     if (!m) return;
-    if (wasDrag || !d0) { m.up(p); return; }
+    if (wasDrag || !d0) { clearPress(); m.up(p); return; }
     m.up(d0);                                // a click: release exactly where it was pressed
+    finishClick(env, p);
     const now = Date.now();
     const n = lastClick && now - lastClick.t <= DBL_MS && Math.hypot(p.clientX - lastClick.x, p.clientY - lastClick.y) <= DBL_PX ? lastClick.n + 1 : 1;
     lastClick = { t: now, x: p.clientX, y: p.clientY, n: n >= 2 ? 0 : n };   // a third click starts over
@@ -137,6 +140,7 @@ export function createPipeline(env: BoardEnv) {
     if (!mode) return false;
     const m = mode;
     end();
+    clearPress();
     m.cancel();
     return true;
   }

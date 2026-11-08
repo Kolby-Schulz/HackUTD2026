@@ -68,3 +68,29 @@ export function hiddenSelectionParents(rows: readonly LayerRowData[], shapes: Sh
   }
   return out;
 }
+
+export interface RowActivity {
+  /** Colours of the agents editing this very layer (stacked dots). */
+  own: Map<ShapeId, string[]>;
+  /** Colours of agents editing a descendant, per ancestor (hollow ring on a collapsed row). */
+  below: Map<ShapeId, string[]>;
+}
+/** Group active locks into per-row editor colours (LAYERS-16). `colorOf` returns undefined for unknown holders. */
+export function rowActivity(
+  locks: readonly { shapeId: ShapeId; holder: string }[], shapes: Shapes, colorOf: (holder: string) => string | undefined,
+): RowActivity {
+  const own = new Map<ShapeId, string[]>();
+  const below = new Map<ShapeId, string[]>();
+  const add = (m: Map<ShapeId, string[]>, id: ShapeId, c: string) => {
+    const l = m.get(id);
+    if (!l) m.set(id, [c]); else if (!l.includes(c)) l.push(c);
+  };
+  for (const { shapeId, holder } of locks) {
+    const c = colorOf(holder);
+    if (!c) continue;
+    add(own, shapeId, c);
+    let p = shapes.get(shapeId)?.parent ?? null;
+    for (let n = 0; p && n < 1000; n++) { add(below, p, c); p = shapes.get(p)?.parent ?? null; }
+  }
+  return { own, below };
+}

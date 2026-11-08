@@ -3,6 +3,7 @@
 // pointer-down, then a reparent (keepWorld) when the pointer is over another frame than the one
 // the shape sits in. Commit = one undo entry; Escape aborts. Mod while dropping = do not reparent.
 import { snapMove, snapResult } from '../../core/snap';
+import { resetSnapMemory } from '../../core/snap/move';
 import { ancestors, descendants, frameAt, toLocal, toWorld, worldBounds } from '../../core/tree';
 import type { Command, Gesture, Pt, Rect, ShapeId } from '../../core/types';
 import { selectedIds } from '../board/state';
@@ -98,7 +99,8 @@ export function startMove(env: BoardEnv, p0: PointerInfo): Mode | null {
       move(p);
       g?.commit();   // a click without motion opened no gesture: nothing recorded
       snapResult.clear();
+      resetSnapMemory(board.me);
     },
-    cancel() { g?.abort(); snapResult.clear(); },
+    cancel() { g?.abort(); snapResult.clear(); resetSnapMemory(board.me); },
   };
 }
