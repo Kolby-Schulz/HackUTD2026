@@ -107,7 +107,8 @@ describe('resolve_conflict', () => {
   });
 
   it('rejects an agent squatting on the coordinator id from another identity', () => {
-    // Arrange: the real coordinator is registered; worker-c tries to impersonate it.
+    // Arrange: the real coordinator is registered and holds the coordinator lock; worker-c tries to impersonate it.
+    t.as('coordinator', (ctx) => mod.claim_service(ctx, { name: 'coordinator', machine: 'laptop-1', holder: 'p1' }));
     const act0 = () =>
       t.as('worker-c', (ctx) =>
         mod.register_agent(ctx, {
@@ -124,7 +125,7 @@ describe('resolve_conflict', () => {
     const act = () => resolve(t, conflictId, 'worker-c');
 
     // Assert
-    expect(act0).toThrow(/already linked/);
+    expect(act0).toThrow(/coordinator is already running on laptop-1/);
     expect(act).toThrow(/only the coordinator/);
   });
 

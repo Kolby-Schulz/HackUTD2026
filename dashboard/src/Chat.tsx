@@ -11,7 +11,7 @@ import { reducers } from '@bindings/index.ts';
 import type * as R from '@bindings/types.ts';
 import type { AgentCard, FeedEvent } from './model.ts';
 import { defaultRecipient, fmtClock, sameMachine } from './model.ts';
-import { EXAMPLES, useAssistant, type ChatMessage } from './ControlTab.tsx';
+import { useAssistant, type ChatMessage } from './ControlTab.tsx';
 import { useMachine } from './machine.tsx';
 
 function sentence(e: FeedEvent): string {
@@ -72,13 +72,13 @@ export function ChatView({ events, agents, openRun, connected, runStart, machine
         {ordered.map((x) => (x.t === 'e' ? <Message key={x.e.key} e={x.e} /> : <AssistantMessage key={'a' + x.m.id} m={x.m} start={runStart} />))}
         {assistant.busy && <div className="cmsg"><div className="bubble assistant typing" aria-label="InSync is thinking"><span /><span /><span /></div></div>}
       </div>
-      <Composer agents={agents} openRun={openRun} connected={connected} assistant={assistant} empty={ordered.length === 0} machine={machine} />
+      <Composer agents={agents} openRun={openRun} connected={connected} assistant={assistant} machine={machine} />
     </>
   );
 }
 
-function Composer({ agents, openRun, connected, assistant, empty, machine }: {
-  agents: AgentCard[]; openRun?: R.Run; connected: boolean; assistant: ReturnType<typeof useAssistant>; empty: boolean; machine?: string;
+function Composer({ agents, openRun, connected, assistant, machine }: {
+  agents: AgentCard[]; openRun?: R.Run; connected: boolean; assistant: ReturnType<typeof useAssistant>; machine?: string;
 }) {
   const send = useReducer(reducers.sendInstruction);
   const createTask = useReducer(reducers.createTask);
@@ -149,9 +149,6 @@ function Composer({ agents, openRun, connected, assistant, empty, machine }: {
   return (
     <form className="composer" onSubmit={(e) => { e.preventDefault(); void submit(); }} aria-label="Prompt your agents">
       <div className="cbox">
-        {toAssistant && empty && (
-          <div className="chips">{EXAMPLES.map((e) => <button key={e} type="button" className="example" onClick={() => setText(e)}>{e}</button>)}</div>
-        )}
         <div className="to-row">
           <label htmlFor="chat-to" className="muted">To</label>
           {target && <span className="dot" style={{ background: target.person.color }} />}

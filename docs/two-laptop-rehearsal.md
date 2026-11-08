@@ -11,7 +11,7 @@ Run this top to bottom before the demo, then twice more. Everything should take 
 ## Before each run (one laptop: the "operator" laptop)
 - [ ] `npm run reset` on **both** laptops (removes old worktrees and agent branches).
 - [ ] `npm run session -- start` (ends old runs, maps the repo, opens a run).
-- [ ] `npm run coordinator` on the operator laptop **only**. A second one refuses to start ("coordinator is already running on …"); that's the lock working.
+- [ ] `npm run coordinator` on the operator laptop. Starting one on the other laptop too is fine: it prints "coordinator is running on …; standing by" and takes over if the first stops. Only one is active at a time.
 - [ ] Optional: `npm run mapper -- --watch` on the operator laptop only (same lock).
 - [ ] Dashboard open on both laptops (`npm run dashboard`, or the hosted URL).
 
@@ -31,5 +31,5 @@ Run this top to bottom before the demo, then twice more. Everything should take 
 - No internet at all: one laptop runs `spacetime start` and `npm run publish -w @contract/server`, both laptops set `SPACETIME_HOST=ws://<that laptop's LAN IP>:3000` and `SPACETIME_DB_NAME=contract` (hotspot LAN works). Claude Code still needs internet for the agents, so keep the backup video ready.
 
 ## Known limits
-- Exactly one coordinator and one watching mapper per database (service lock). After a crash, another laptop can take over 30 s after the last heartbeat; the same laptop can restart straight away.
+- Exactly one active coordinator and one watching mapper per database (service lock). A second coordinator stands by: it takes over within ~10 s after the first is stopped (Ctrl-C or the dashboard's Stop), or ~40 s after it crashes. `COORDINATOR_STANDBY=off` makes it fail fast instead. The mapper still refuses to start twice.
 - `CONTRACT_MACHINE=<name>` overrides the machine name shown on the dashboard and used by the lock.

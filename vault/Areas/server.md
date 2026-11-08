@@ -2,7 +2,7 @@
 title: Server (SpacetimeDB module)
 area: server
 sources: [server/]
-verified: issue-62-operators
+verified: issue-62-operators+standby
 ---
 Summary: The whole backend is one SpacetimeDB TypeScript module (`server/src/index.ts`, 1140 lines) with pure rule helpers in `server/src/rules.ts`. All state changes go through reducers; Rule 1-3 conflict checks run inline inside `report_change`, `publish_plan` and `claim_symbol`. Reducers that act for an agent check the caller's identity; run bookkeeping and the reset take operators only (`requireOperator`: an agent, machine or machine_access identity), and the code map takes the mapper lock holder only (`requireMapper`); see Identity and auth.
 
@@ -35,7 +35,7 @@ Summary: The whole backend is one SpacetimeDB TypeScript module (`server/src/ind
 ## Reducers
 Arguments are abbreviated; see the code for exact types.
 - `init()` (lifecycle): inserts the 30 s schedule row for `expire_claims`. index.ts:544
-- `register_agent(id, name, owner_dev, machine, model, token_budget)`: insert, or relink identity. A different identity can take over only after 60 s without heartbeat. index.ts:555
+- `register_agent(id, name, owner_dev, machine, model, token_budget)`: insert, or relink identity. A different identity can take over only after 60 s without heartbeat (message names the machine and the wait). Exception: the `coordinator` id follows the `coordinator` service lock: refused ("coordinator is already running on <machine>") while another identity holds a live lock, otherwise taken over at once. index.ts:697
 - `heartbeat(agent_id)`: updates last_heartbeat. Caller must own the agent. index.ts:601
 - `start_run(mode, seed)` / `end_run(run_id)`: operators only. Refuses to open a second run while one is open.
 - `reset_demo_state()`: deletes symbol_edge, symbol, plan, plan_item and claim rows; acks undelivered instructions; dismisses open conflicts; sets agents idle. Operators only. Refused while a run is open, and while any agent is working or paused with a heartbeat under 60 s (`isLiveWorker`): stop the workers first. Keeps change, conflict, decision and token history.
@@ -85,7 +85,7 @@ Arguments are abbreviated; see the code for exact types.
 - Operator gating (#62) means a plain `DbConnection` with a fresh identity can no longer reset, open or close runs, or create tasks: tests use `asOperator(t, ...)` (registers machine `laptop` as the `daemon` identity) and `asMapper(t, ...)` (takes the `mapper` lock) from `test/helpers.ts`; a new script must go through `adminConnect`. `upsert_symbols` from a connection without the `mapper` lock fails with `only the mapper can write the code map`, so a one-shot `npm run mapper` fails while a `--watch` mapper runs elsewhere (`mapper is already running on <machine>`). reset_demo_state also refuses while a worker is live (`isLiveWorker`). Still open to any identity: send_instruction (by design) and the registration reducers.
 - No client-disconnect lifecycle reducer, on purpose: every hook process (`hook.ts`, `claim-guard.ts`, `summary-hook.ts`) opens a short connection with the agent's identity, and a wifi blip drops the worker's socket while it keeps running. Presence is heartbeat (15 s) plus the 30 s sweep (`expire_claims`, 60 s timeout). Expect 60 to 90 s before a dead worker shows idle.
 - claim_symbol does not reject on contention. It returns without throwing, so the conflict row survives. Callers must read the claim row to learn the outcome. Spec section 7 says "Reject". This is deliberate per index.ts:1-14 header comment.
-- register_agent allows identity takeover after 60 s of silence. Spec says "already linked to another identity" rejects. Also deliberate per header comment.
+- register_agent allows identity takeover after 60 s of silence. Spec says "already linked to another identity" rejects. Also deliberate per header comment. For `coordinator` the lock decides instead, so a standby coordinator on the other laptop takes over without the 60 s wait.
 - Rule 2 on a pre-existing mapper symbol only sends an instruction and opens no conflict (index.ts:476-500). Spec section 8 says a match inserts conflict(kind='duplicate'). Deliberate per comment.
 - Rule 1 step 3 includes callers with `depend` plan items. Spec says only "modifies or creates" (index.ts:812-903, Rule 1 block). Minor mismatch.
 - checkDuplicates scans the full symbol table, and creatorOf (index.ts:464) scans the full change table for each symbol. That is O(symbols x changes) per plan. (unverified: performance impact at demo scale)

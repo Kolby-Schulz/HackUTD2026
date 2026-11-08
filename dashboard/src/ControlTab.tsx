@@ -289,12 +289,6 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
 }
 
 
-export const EXAMPLES = [
-  'Add a late fee to overdue invoices',
-  'Add late fees to invoices, and have another agent show dates as YYYY-MM-DD on receipts',
-  "What's happening right now?",
-];
-
 /** The chat: type what you want built; the assistant (scripts/assistant.ts) runs everything. */
 /** The paired laptop's assistant (scripts/assistant.ts, mirrored through machine_chat).
  *  `up` is false when no paired laptop is running `npm run control`. */
@@ -348,9 +342,6 @@ function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; on
           <div className="chat-empty">
             <h2>What should the agents build?</h2>
             <p className="muted">Describe it like you'd prompt a coding agent. Contract starts the coordinator and a session, splits the work across agents, keeps them from colliding, then merges and runs the tests.</p>
-            <div className="chips">
-              {(demo ? EXAMPLES : EXAMPLES.slice(-1)).map((e) => <button key={e} type="button" className="example" onClick={() => setText(e)}>{e}</button>)}
-            </div>
           </div>
         )}
         {messages.map((m) => (

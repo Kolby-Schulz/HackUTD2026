@@ -245,8 +245,9 @@ npm run join -- --agent agent-b --name "Agent B" --owner Bob
 ```
 
 Checks Node, `.env`, the `claude` login and git, registers the agent, and prints the worker
-command. Only one coordinator and one watching mapper run per database (a second one
-refuses to start). Rehearsal steps and network fallbacks: `docs/two-laptop-rehearsal.md`.
+command. Only one coordinator is active per database: a second one stands by and takes over
+if the first stops (a second watching mapper refuses to start). Rehearsal steps and network
+fallbacks: `docs/two-laptop-rehearsal.md`.
 
 To join from your own Claude Code, Cursor or Codex session instead of our worker:
 `npm run join -- --agent dana --client claude-code` (see `docs/join-contract.md`).

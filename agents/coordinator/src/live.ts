@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connect, DbConnection, holdService, type rows, type SymbolContext } from '@contract/client';
+import { connect, DbConnection, holdService, SERVICE_HEARTBEAT_MS, type rows, type SymbolContext } from '@contract/client';
 import type { LLM, Usage } from '@contract/llm';
 import { decideConflict, fallbackDecision, type ConflictContext, type Decision } from './decide.ts';
 
@@ -224,43 +224,76 @@ export async function runLive(llm: LLM, opts: { model?: string } = {}): Promise<
   const host = process.env.SPACETIME_HOST;
   const dbName = process.env.SPACETIME_DB_NAME;
   if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
+  const db = { host, dbName }; // narrowed to strings here, for the closure below
 
-  const agent = { id: 'coordinator', name: 'coordinator', ownerDev: '', machine: hostname(), model: opts.model ?? 'claude-code', tokenBudget: 0 };
+  const machine = process.env.CONTRACT_MACHINE || hostname();
+  const agent = { id: 'coordinator', name: 'coordinator', ownerDev: '', machine, model: opts.model ?? 'claude-code', tokenBudget: 0 };
   // Reuse the saved identity so a restart isn't rejected as "linked to another identity"
   // for the 60 s heartbeat timeout. Keyed by host + db: a token from one server is a 401 on another.
   const key = `${host}|${dbName}`;
-  // COORDINATOR_TOKEN: for hosts that wipe the disk on redeploy (docs/nemotron-coordinator-plan.md).
-  const saved = process.env.COORDINATOR_TOKEN || readTokens()[key];
-  let client;
-  try {
-    client = await connect({ host, dbName, agent, ...(saved ? { token: saved } : {}) });
-  } catch (e) {
-    if (!saved) throw e;
-    console.warn(`[coordinator] saved token rejected (${(e as Error).message}); connecting with a new identity`);
-    client = await connect({ host, dbName, agent });
+
+  /** Connects, registers as `coordinator` and takes the coordinator lock. Throws the server's refusal while another coordinator is live. */
+  async function acquire() {
+    // COORDINATOR_TOKEN: for hosts that wipe the disk on redeploy (docs/nemotron-coordinator-plan.md).
+    const saved = process.env.COORDINATOR_TOKEN || readTokens()[key];
+    let client;
+    try {
+      client = await connect({ ...db, agent, ...(saved ? { token: saved } : {}) });
+    } catch (e) {
+      if (!saved || takenBy(e)) throw e;
+      console.warn(`[coordinator] saved token rejected (${(e as Error).message}); connecting with a new identity`);
+      client = await connect({ ...db, agent });
+    }
+    if (client.token !== saved) writeTokens({ ...readTokens(), [key]: client.token });
+    const conn = await rawConnect(client.token, [
+      'SELECT * FROM conflict', // all of them: earlier decisions need their conflict rows
+      'SELECT * FROM decision',
+      'SELECT * FROM plan',
+      'SELECT * FROM plan_item',
+      'SELECT * FROM task',
+      'SELECT * FROM change',
+      'SELECT * FROM run',
+    ]);
+    // Exactly one active coordinator per database (issue #19), even with two laptops.
+    try {
+      const lock = await holdService(conn.reducers, 'coordinator', machine, (why) => {
+        console.error(`[coordinator] lost the coordinator lock (${why}); stopping`);
+        process.exit(1);
+      });
+      return { client, conn, lock };
+    } catch (e) {
+      conn.disconnect();
+      await client.disconnect();
+      throw e;
+    }
   }
-  if (client.token !== saved) writeTokens({ ...readTokens(), [key]: client.token });
-  const conn = await rawConnect(client.token, [
-    'SELECT * FROM conflict', // all of them: earlier decisions need their conflict rows
-    'SELECT * FROM decision',
-    'SELECT * FROM plan',
-    'SELECT * FROM plan_item',
-    'SELECT * FROM task',
-    'SELECT * FROM change',
-    'SELECT * FROM run',
-  ]);
-  // Exactly one coordinator per database (issue #19), even with two laptops.
-  let lock;
-  try {
-    lock = await holdService(conn.reducers, 'coordinator', process.env.CONTRACT_MACHINE || hostname(), (why) => {
-      console.error(`[coordinator] lost the coordinator lock (${why}); stopping`);
-      process.exit(1);
-    });
-  } catch (e) {
-    conn.disconnect();
-    await client.disconnect();
-    throw new Error(`${e instanceof Error ? e.message : String(e)}`);
+
+  // Standby: while another laptop's coordinator is live, wait and retry instead of failing, and
+  // take over as soon as it stops (the server hands the `coordinator` row to whoever may hold the
+  // lock). COORDINATOR_STANDBY=off restores the old fail-fast exit.
+  const standby = (process.env.COORDINATOR_STANDBY ?? 'on') !== 'off';
+  const stopWhileWaiting = () => {
+    console.log('[coordinator] stopping');
+    process.exit(0);
+  };
+  for (const sig of STOP_SIGNALS) process.once(sig, stopWhileWaiting);
+  let acquired: Awaited<ReturnType<typeof acquire>> | undefined;
+  let waitingOn: string | undefined;
+  while (!acquired) {
+    try {
+      acquired = await acquire();
+    } catch (e) {
+      const other = takenBy(e);
+      if (!other || !standby) throw e;
+      // Logged on every retry so the dashboard's "last line" for this process stays meaningful.
+      console.log(`[coordinator] coordinator is running on ${other}; standing by (takes over if it stops)`);
+      waitingOn = other;
+      await new Promise((r) => setTimeout(r, SERVICE_HEARTBEAT_MS));
+    }
   }
+  for (const sig of STOP_SIGNALS) process.off(sig, stopWhileWaiting);
+  if (waitingOn) console.log(`[coordinator] took over from ${waitingOn}`);
+  const { client, conn, lock } = acquired;
 
   const deps: Deps = {
     llm,
@@ -285,13 +318,31 @@ export async function runLive(llm: LLM, opts: { model?: string } = {}): Promise<
   for (const c of open) queue.enqueue(c);
   console.log(`[coordinator] connected to ${dbName}; ${open.length} open conflict(s) queued; waiting for conflicts (Ctrl-C to stop)`);
 
-  process.once('SIGINT', async () => {
+  // Ctrl-C, or the control daemon's stop (SIGTERM): release the lock so a standby takes over at once.
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
     console.log('[coordinator] stopping');
     await lock.release();
     conn.disconnect();
     await client.disconnect();
     process.exit(0);
-  });
+  };
+  for (const sig of STOP_SIGNALS) process.once(sig, stop);
+}
+
+const STOP_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+
+/**
+ * The machine another live coordinator runs on, when `e` is the server refusing us for that
+ * reason (from register_agent or claim_service); undefined for any other error. An older server
+ * module says only "already linked to another identity", so the machine falls back to a generic name.
+ */
+export function takenBy(e: unknown): string | undefined {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (!/already running on |already linked to another identity/.test(msg)) return undefined;
+  return /already running on (.+?);/.exec(msg)?.[1] ?? /registered from (.+?),/.exec(msg)?.[1] ?? 'another laptop';
 }
 
 /** .contract/coordinator-tokens.json at the repo root (gitignored), mode 0600. */
