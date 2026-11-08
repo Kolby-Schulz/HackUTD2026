@@ -4,11 +4,106 @@ Live coordination for AI coding agents. A shared SpacetimeDB server lets a team'
 coding agents see each other's plans as they work, so conflicting changes are caught
 while code is being written, not at merge time. A coordinator agent resolves
 conflicts and a live dashboard shows everything. Every model call goes through one
-provider switch (`LLM_PROVIDER`); today that is Claude Code, and NVIDIA Nemotron is planned.
+provider switch: workers run on Claude Code, and the coordinator runs on NVIDIA Nemotron
+or Claude (`COORDINATOR_PROVIDER`).
 
 > Contract isn't another coding agent. It's what lets your team's coding agents work like a team.
 
 Built at HackUTD 2026. Full spec: [docs/SPEC.md](docs/SPEC.md).
+
+![Contract dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
+
+## 60-second quickstart
+
+One laptop, the built-in demo repo, driven from the dashboard:
+
+```bash
+npm install
+cp .env.example .env     # set SPACETIME_HOST=wss://maincloud.spacetimedb.com, SPACETIME_DB_NAME=contract-hackutd26
+npm run control          # opens the dashboard, paired to this laptop
+```
+
+In the dashboard's **Chat** tab, type what you want built, the way you'd prompt a coding agent:
+
+> Add late fees to invoices, and have another agent format receipt dates.
+
+Contract plans it, starts a coordinator and a session, puts one agent on each independent
+piece, catches the conflicts between them while they type, and merges and runs the checks when
+they finish. A second laptop joins the same run with `npm run control` and the same `.env`.
+
+## Architecture
+
+Agents never talk to each other. Everything goes through one SpacetimeDB module: agents write
+plans, claims and change reports with reducers, and every other process (the other agents, the
+coordinator, the dashboard) gets the result pushed to it through a subscription.
+
+```mermaid
+flowchart LR
+    subgraph L1[Laptop 1]
+        A[Agent A<br/>Claude Code in a worktree]
+        MA[Contract MCP server<br/>+ edit hooks]
+        A <--> MA
+    end
+    subgraph L2[Laptop 2]
+        B[Agent B<br/>Claude Code in a worktree]
+        MB[Contract MCP server<br/>+ edit hooks]
+        B <--> MB
+    end
+    subgraph DB[SpacetimeDB module · server/]
+        R[Reducers<br/>publish_plan · claim_symbol<br/>report_change · resolve_conflict]
+        T[(Tables<br/>symbol · plan · claim<br/>conflict · decision · instruction<br/>token_usage · saving)]
+        R --> T
+        R -.->|Rules 1-3 run inside<br/>the reducer, in ms| R
+    end
+    MA -->|reducer calls| R
+    MB -->|reducer calls| R
+    T -.->|subscriptions| MA
+    T -.->|subscriptions| MB
+    M[Code mapper<br/>repo → symbol rows] -->|upsert_symbols| R
+    C[Coordinator<br/>one decide call per conflict] -->|resolve_conflict| R
+    T -.->|conflict WHERE status='open'| C
+    T -.->|every table, live| D[Dashboard<br/>React · hosted or local]
+    D -->|create_task · send_instruction| R
+    LLM[packages/llm<br/>Claude Code today · Nemotron] --- A
+    LLM --- B
+    LLM --- C
+```
+
+- **Reducers can't reach the network**, so anything that calls a model or reads files (agents,
+  coordinator, mapper) is a Node process that connects as a client.
+- **Detection is free and instant.** The three rules below run inside `publish_plan`,
+  `claim_symbol` and `report_change`. The coordinator model is only called after a rule fires,
+  and its tokens are logged against Contract on the scoreboard.
+- **Every panel is a subscription.** The dashboard writes nothing except new tasks and
+  operator messages; two laptops and a hosted dashboard all see the same rows.
+
+The end-to-end story, in order:
+
+1. The mapper loads the repo's symbols and call edges into `symbol` and `symbol_edge`.
+2. Agent A publishes a plan to change how `calculateFee` rounds, and claims it.
+3. Agent B is midway through checkout code that calls `calculateFee`; its plan lists it as a dependency.
+4. A's edit hook sees the signature change and calls `report_change`. Rule 1 finds B's dependency,
+   opens a `conflict` row, sets B to `paused` and inserts an `instruction` for B.
+5. B's MCP server gets the push and stops B mid-task. The coordinator gets the same push.
+6. The coordinator makes one `decide()` call: A owns `calculateFee`, B updates to the new rounding.
+   It writes a `decision` row with the reason and resolves the conflict.
+7. B resumes with the new instruction. Both branches merge cleanly and the tests pass.
+
+## How the rules work
+
+All three are deterministic, run inside the reducer that receives the write, and never open a
+second `open` conflict for the same kind, symbol and agent pair.
+
+| Rule | Fires in | Trigger | What happens |
+| --- | --- | --- | --- |
+| 1. Broken dependency | `report_change` | X changes symbol S's signature or behavior, and Y's active plan depends on S, or modifies or creates a caller of S (`symbol_edge`, up to 3 hops) | `broken_dependency` conflict, Y paused, instruction to Y to wait for the coordinator |
+| 2. Duplicate implementation | `publish_plan`, `report_change('created')` | X plans to create N and an existing symbol or another agent's planned create has the same normalized name, or the same parameter and return types plus a shared name token (`formatDate` vs `dateToString`) | `duplicate` conflict; if the match already exists, instruction to X: reuse it |
+| 3. Claim contention | `claim_symbol`, `publish_plan` | X claims or plans to modify S while Y holds an unexpired claim | claim refused, `claim_contention` conflict |
+
+Claims expire when an agent stops heartbeating (a scheduled reducer runs every 30 s), so a
+crashed laptop never holds a symbol forever. An edit hook in each worker's Claude Code session
+enforces the protocol locally: no edit to a mapped file without a declared plan, no edit to a
+mapped symbol without a claim.
 
 ## Layout
 
@@ -26,10 +121,11 @@ scripts/             run-demo.ts, reset.ts, seed.ts
 
 ## Setup
 
-1. Node 20+ and the [SpacetimeDB CLI](https://spacetimedb.com/install).
+1. Node 22+ and the [SpacetimeDB CLI](https://spacetimedb.com/install).
 2. `npm install`
 3. `cp .env.example .env`, and log in to Claude Code on this laptop (`claude -p "hi"` should
-   answer). `NVIDIA_API_KEY` is only needed once the Nemotron provider lands.
+   answer). `NVIDIA_API_KEY` (free, from build.nvidia.com) is only needed if you set
+   `COORDINATOR_PROVIDER=nemotron`; everything runs on Claude Code without it.
 4. `spacetime start`, then publish `server/` and generate bindings into
    `packages/client/src/bindings` (see the SpacetimeDB TypeScript quickstart).
 
@@ -200,3 +296,7 @@ npm run demo -- --mode without_contract --seed 7
 npm run reset
 npm run typecheck
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
