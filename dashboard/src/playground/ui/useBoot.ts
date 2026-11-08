@@ -9,6 +9,7 @@ import { startAgents } from '../agents/runtime';
 import type { AgentRuntime } from '../agents/runtime';
 import { startCoordinator } from '../agents/coordinator';
 import { writeMeasuredSize } from './text/autosize';
+import { newId } from '../core/ids';
 import type { BoardKit } from '../core/commands';
 import { installDevtools } from '../core/devtools';
 import { camera } from '../core/camera';
@@ -85,7 +86,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const loaded = persistence.load();
     // only a board with live layers counts as restored (an autosaved empty board must not idle the agents)
     const restored = loaded && [...board.doc.getState().shapes.values()].some((sh) => !sh.deleted);
-    const r = startAgents(board, { host: hostAgents, onSay: (a, text) => sink.say?.(a.id, text), ...agentChatHooks(sink.chat) });
+    const r = startAgents(board, { host: hostAgents, ...(LIVE ? { idTag: newId('').slice(-6) + '-' } : {}), onSay: (a, text) => sink.say?.(a.id, text), ...agentChatHooks(sink.chat) });
     rtRef.current = r;
     setRt(r);
     // Claim contention rulings (WP-68). Started here, stopped in cleanup (StrictMode runs this effect twice).

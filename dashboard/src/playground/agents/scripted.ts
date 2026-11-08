@@ -149,8 +149,8 @@ export function createScriptedDriver(o: { slots: Slots; templates?: Tpl[] }): Ag
       await gate();
       const slot = o.slots.claim();
       if (slot < 0) {
-        // board is full: wander and "review" other designs
-        ctx.setState('thinking', 'reviewing');
+        // board is full: nothing to build, so the agent is idle (no made-up activity on its cursor)
+        ctx.setState('idle');
         const k = Math.floor(ctx.rng() * MAX_SLOTS);
         await ctx.intent({ t: 'move', x: (k % COLS) * CELL_W + 100 + ctx.rng() * 300, y: Math.floor(k / COLS) * CELL_H + 60 + ctx.rng() * 400 });
         await idle(800 + ctx.rng() * 1500);

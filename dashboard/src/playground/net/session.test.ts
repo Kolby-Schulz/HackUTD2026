@@ -62,11 +62,12 @@ class FakeClient implements BoardTransport {
   status() { return this.st; }
   identity() { return { toHexString: () => this.hex }; }
   onStatus(cb: Cb<NetStatus>) { return this.add(this.subs.status, cb); }
-  onSynced(cb: Cb<void>) { return this.add(this.subs.synced, cb); }
-  onOps(cb: Cb<RowChange<BoardOpRow>>) { return this.add(this.subs.ops, cb); }
-  onSnapshot(cb: Cb<RowChange<BoardSnapshotRow>>) { return this.add(this.subs.snap, cb); }
-  onActors(cb: Cb<RowChange<BoardActorRow>>) { return this.add(this.subs.actors, cb); }
-  onPresence(cb: Cb<RowChange<BoardPresenceRow>>) { return this.add(this.subs.presence, cb); }
+  // like the live transport: a listener added after the initial sync gets the current rows and `synced` at once
+  onSynced(cb: Cb<void>) { if (this.st === 'live') queueMicrotask(() => cb()); return this.add(this.subs.synced, cb); }
+  onOps(cb: Cb<RowChange<BoardOpRow>>) { if (this.st === 'live') cb({ added: [...this.server.ops], removed: [] }); return this.add(this.subs.ops, cb); }
+  onSnapshot(cb: Cb<RowChange<BoardSnapshotRow>>) { if (this.st === 'live' && this.server.snapshot) cb({ added: [this.server.snapshot], removed: [] }); return this.add(this.subs.snap, cb); }
+  onActors(cb: Cb<RowChange<BoardActorRow>>) { if (this.st === 'live') cb({ added: [...this.server.actors.values()], removed: [] }); return this.add(this.subs.actors, cb); }
+  onPresence(cb: Cb<RowChange<BoardPresenceRow>>) { if (this.st === 'live') cb({ added: [...this.server.presence.values()], removed: [] }); return this.add(this.subs.presence, cb); }
   onCursor(cb: Cb<BoardCursorEvent>) { return this.add(this.subs.cursor, cb); }
 
   async registerAgent(a: { id: string }) {
@@ -282,6 +283,26 @@ describe('ops', () => {
     await settle();
     expect(server.ops).toHaveLength(0);
     expect(a.errors.map((e) => e.kind)).toContain('actor-taken');
+  });
+});
+
+describe('late sessions', () => {
+  it('a session started on an already-synced connection loads the board and can send', async () => {
+    const a = peer(server, 'aa', [human('human-a')]);
+    a.client.connect(); await settle();
+    a.doc.dispatch('human-a', 'Draw', [rect('r1', 'human-a')]);
+    await settle();
+    // a second session on a connection that synced before it existed (the tab just became the agent host)
+    const client = new FakeClient(server, 'cc');
+    client.connect(); await settle();
+    const doc = createDocStore({ boardId: BOARD });
+    const session = connectBoard({ boardId: BOARD, doc, presence: createPresenceBus({ schedule: (f) => f() }), transport: client, actors: [human('human-c')] });
+    await settle(); await settle();
+    expect(ids(doc)).toEqual(['r1']);
+    doc.dispatch('human-c', 'Draw', [rect('r2', 'human-c')]);
+    await settle(); await settle();
+    expect(ids(a.doc)).toEqual(['r1', 'r2']);
+    session.dispose();
   });
 });
 

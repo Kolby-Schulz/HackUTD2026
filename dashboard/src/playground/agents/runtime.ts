@@ -29,6 +29,9 @@ export interface RuntimeOpts {
   onSay?: (agent: Actor, text: string) => void;
   /** false = this browser does not host agents: spawn/request do nothing (see startAgents). */
   host?: boolean;
+  /** Added to every agent id (`agent-<tag><n>`). A networked host passes a new tag per run, so each run's agents
+   *  are new actors on the server: op ids are per actor, and a reused actor would collide with its earlier ops. */
+  idTag?: string;
   /** An agent committed a batch or build: post an action card (COMMENT-12). `tx` is what `board.revert` takes. */
   onAction?: (agent: Actor, card: ActionInfo) => void;
   /** A note started (`on: true`) or the agent has now replied / finished it (`on: false`): the thinking placeholder (COMMENT-16). */
@@ -262,7 +265,7 @@ export function createRuntime(opts: RuntimeOpts) {
     if (agents.size >= (opts.maxAgents ?? 200)) throw new Error('agent roster is full');
     const n = spawned++;
     const kind = o.driver ?? 'scripted';
-    const id = `agent-${n.toString(36)}`;
+    const id = `agent-${opts.idTag ?? ''}${n.toString(36)}`;
     const lap = Math.floor(n / NAMES.length);
     const actor: Actor = {
       id, kind: 'agent', driver: kind, role: o.role,

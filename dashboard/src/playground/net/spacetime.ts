@@ -14,6 +14,7 @@ const sql = (s: string) => `'${s.replace(/'/g, "''")}'`;
 export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): void } {
   let status: NetStatus = 'connecting';
   let me: Identity | null = null;
+  let synced = false;   // a listener added after the initial sync gets the current rows and `synced` at once
   const L = {
     status: new Set() as Listener<NetStatus>, synced: new Set() as Listener<void>,
     ops: new Set() as Listener<RowChange<BoardOpRow>>, snap: new Set() as Listener<RowChange<BoardSnapshotRow>>,
@@ -37,6 +38,7 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
         fire(L.actors, { added: [...conn.db.boardActor.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
         fire(L.ops, { added: [...conn.db.boardOp.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
         fire(L.presence, { added: [...conn.db.boardPresence.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
+        synced = true;
         fire(L.synced, undefined);
       })
       .subscribe([
@@ -56,7 +58,7 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
     .withAutomaticReconnect()
     .onConnect(onLive)
     .onAutomaticReconnect(onLive)
-    .onDisconnect(() => setStatus('offline'))
+    .onDisconnect(() => { synced = false; setStatus('offline'); })
     .onConnectError(() => setStatus('offline'))
     .build();
 
@@ -72,15 +74,21 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
   conn.db.boardCursor.onInsert((_c, e) => { if (e.boardId === o.boardId) fire(L.cursor, e); });
 
   const sub = <T>(set: Listener<T>, cb: (v: T) => void) => { set.add(cb); return () => { set.delete(cb); }; };
+  const mine = <R extends { boardId: string }>(rows: Iterable<R>): RowChange<R> => ({ added: [...rows].filter((r) => r.boardId === o.boardId), removed: [] });
+  /** Subscribe, and when the initial sync is already done, hand over the current rows first. */
+  const subRows = <R extends { boardId: string }>(set: Listener<RowChange<R>>, cb: (v: RowChange<R>) => void, rows: () => Iterable<R>) => {
+    if (synced) cb(mine(rows()));
+    return sub(set, cb);
+  };
   return {
     status: () => status,
     identity: () => me,
     onStatus: (cb) => sub(L.status, cb),
-    onSynced: (cb) => sub(L.synced, cb),
-    onOps: (cb) => sub(L.ops, cb),
-    onSnapshot: (cb) => sub(L.snap, cb),
-    onActors: (cb) => sub(L.actors, cb),
-    onPresence: (cb) => sub(L.presence, cb),
+    onSynced: (cb) => { if (synced) queueMicrotask(() => { if (synced) cb(); }); return sub(L.synced, cb); },
+    onOps: (cb) => subRows(L.ops, cb, () => conn.db.boardOp.iter()),
+    onSnapshot: (cb) => subRows(L.snap, cb, () => conn.db.boardSnapshot.iter()),
+    onActors: (cb) => subRows(L.actors, cb, () => conn.db.boardActor.iter()),
+    onPresence: (cb) => subRows(L.presence, cb, () => conn.db.boardPresence.iter()),
     onCursor: (cb) => sub(L.cursor, cb),
     registerAgent: (a) => conn.reducers.registerAgent({ id: a.id, name: a.name, ownerDev: '', machine: 'design-board', model: 'scripted', tokenBudget: 0n }),
     heartbeat: (agentId) => conn.reducers.heartbeat({ agentId }),
