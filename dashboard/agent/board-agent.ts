@@ -157,7 +157,7 @@ async function grow(a: LocalActor, id: ShapeId, x: number, y: number, w: number,
   for (let i = 1; i <= steps; i++) {
     const t = i / steps, e = 1 - (1 - t) ** 3;
     put(a, 'Draw', [{ t: 'set', id, patch: { w: Math.max(1, w * e), h: Math.max(1, h * e) } }]);
-    await glide(a, x + w * e, y + h * e, 60);
+    await glide(a, x + w * e, y + h * e, 30);
   }
 }
 
@@ -178,19 +178,19 @@ async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, inde
   const frameId = newId('s');
   const fw = clamp(d.frame.w, 200, 1600), fh = clamp(d.frame.h, 200, 1600);
   status(a, 'drawing', `frame ${d.frame.name}`.slice(0, 40));
-  await glide(a, at.x, at.y, 400);
+  await glide(a, at.x, at.y, 200);
   put(a, 'Draw frame', [{ t: 'create', shape: {
     id: frameId, kind: 'frame', name: d.frame.name, x: at.x, y: at.y, w: 1, h: 1, clip: true,
     fills: [{ type: 'solid', color: d.frame.fill || '#ffffff' }], parent: null, index, createdBy: a.id, author: a.id,
   } }]);
-  await grow(a, frameId, at.x, at.y, fw, fh, 8);
+  await grow(a, frameId, at.x, at.y, fw, fh, 6);
   const keys = keysBetween(d.elements.length);
   for (const [i, el] of d.elements.entries()) {
     const x = clamp(el.x, 0, fw - 1), y = clamp(el.y, 0, fh - 1);
     const w = clamp(el.w, 1, fw - x), h = clamp(el.h, 1, fh - y);
     const id = newId('s');
     status(a, 'drawing', `${el.kind === 'text' ? 'typing' : 'drawing'} ${el.name}`.slice(0, 40));
-    await glide(a, at.x + x, at.y + y, 200);
+    await glide(a, at.x + x, at.y + y, 80);
     if (el.kind === 'text') {
       const text = el.text ?? el.name;
       put(a, 'Add text', [{ t: 'create', shape: {
@@ -200,8 +200,8 @@ async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, inde
         ...(el.opacity !== undefined ? { opacity: clamp(el.opacity, 0, 1) } : {}),
         parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
       } }]);
-      const step = Math.max(1, Math.ceil(text.length / 6));
-      for (let n = step; n < text.length + step; n += step) { put(a, 'Type', [{ t: 'set', id, patch: { text: text.slice(0, n) } }]); await sleep(50); }
+      const step = Math.max(1, Math.ceil(text.length / 4));
+      for (let n = step; n < text.length + step; n += step) { put(a, 'Type', [{ t: 'set', id, patch: { text: text.slice(0, n) } }]); await sleep(25); }
     } else {
       put(a, 'Draw', [{ t: 'create', shape: {
         id, kind: el.kind, name: el.name, x, y, w: 1, h: 1, radius: el.radius ?? 0,
@@ -211,7 +211,7 @@ async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, inde
         ...(el.opacity !== undefined ? { opacity: clamp(el.opacity, 0, 1) } : {}),
         parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
       } }]);
-      await grow(a, id, at.x + x, at.y + y, w, h, 4);
+      await grow(a, id, at.x + x, at.y + y, w, h, 3);
     }
   }
   status(a, 'idle');
@@ -270,7 +270,9 @@ async function handle(m: BoardMessageRow) {
       const t0 = Date.now();
       const output = await design(a, `${ctx}\n\nYour brief: ${b.title}. ${b.brief}`);
       console.log(`[board-agent] ${a.name} designed "${output.frame.name}" (${output.elements.length} layers) in ${Math.round((Date.now() - t0) / 1000)} s`);
+      const t1 = Date.now();
       await draw(a, output, spots[i], indexes[i]);
+      console.log(`[board-agent] ${a.name} drew it in ${Math.round((Date.now() - t1) / 1000)} s`);
       remember(a.name, `designed "${output.frame.name}"`);
     } catch (e) {
       status(a, 'idle');
