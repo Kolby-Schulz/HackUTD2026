@@ -206,7 +206,13 @@ export interface AgentCard {
   waitingOn?: string; // conflict number the agent is paused on
   note?: string; // latest instruction it received
   messages: OperatorMsg[]; // operator messages sent to it this run, oldest first (issue #11)
+  offline: boolean; // no heartbeat for OFFLINE_AFTER_MS: its laptop dropped off (issue #19)
+  lastSeen: number; // ms timestamp of the last heartbeat
+  lastEdit?: { file: string; ago: number }; // newest file_edit this run (issue #19 / #24)
 }
+
+/** Workers heartbeat every 15 s; three missed beats and the laptop counts as offline. */
+export const OFFLINE_AFTER_MS = 45_000;
 
 /** Operator messages are instruction rows from send_instruction, marked by this prefix. */
 export const OPERATOR_PREFIX = 'Operator: ';
@@ -245,6 +251,12 @@ export function agentCards(t: Tables, run: R.Run | undefined, now: number): Agen
           .filter((i) => i.agentId === a.id && isOperator(i) && inWin(w, ms(i.createdAt)))
           .sort((p, q) => Number(p.id - q.id))
           .map((i) => ({ id: String(i.id), text: i.text.slice(OPERATOR_PREFIX.length), acked: i.acknowledged, at: ms(i.createdAt) })),
+        offline: now - ms(a.lastHeartbeat) > OFFLINE_AFTER_MS,
+        lastSeen: ms(a.lastHeartbeat),
+        lastEdit: (() => {
+          const e = (t.fileEdits ?? []).filter((x) => x.agentId === a.id && inWin(w, ms(x.createdAt))).sort((p, q) => Number(q.id - p.id))[0];
+          return e ? { file: e.file.split('/').pop() ?? e.file, ago: Math.max(0, now - ms(e.createdAt)) } : undefined;
+        })(),
       };
     });
 }

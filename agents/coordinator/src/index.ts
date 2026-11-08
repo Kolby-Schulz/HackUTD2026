@@ -50,5 +50,8 @@ if (values.demo && positionals[0] === 'duplicate') {
   const r = await decideConflict(llm, c, (u) => console.log('usage', u));
   console.log(r.source, JSON.stringify(r.decision, null, 2));
 } else {
-  await runLive(llm);
+  await runLive(llm).catch((e: unknown) => {
+    console.error(`[coordinator] ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  });
 }

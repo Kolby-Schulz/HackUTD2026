@@ -209,3 +209,13 @@ describe('live code (issue #24)', () => {
     expect(ev).toMatchObject({ kind: 'edit', verb: 'edited fees.ts (calculateFee)', sub: '+2 −1' });
   });
 });
+
+describe('offline laptops (issue #19)', () => {
+  it('marks an agent offline after 45 s without a heartbeat, and shows its last edit', () => {
+    const t = story();
+    t.fileEdits = [{ id: 1n, agentId: 'agent-a', file: 'src/billing/fees.ts', diff: '+x', symbolIds: [], createdAt: ts(20) }] as unknown as Tables['fileEdits'];
+    const at = (n: number) => agentCards(t, t.runs[1], n).find((c) => c.id === 'agent-a')!;
+    expect(at(T0 + 30_000)).toMatchObject({ offline: false, lastEdit: { file: 'fees.ts', ago: 10_000 } });
+    expect(at(T0 + 46_000).offline).toBe(true);
+  });
+});

@@ -83,6 +83,16 @@ spacetime sql --server maincloud contract-hackutd26 "SELECT id, machine, status,
 After a change to `server/`, the owner republishes with `npm run publish:cloud -w @contract/server`.
 Keep live tests local (they wipe their database); they default to `ws://localhost:3000`.
 
+## Joining from a new laptop
+
+```bash
+npm run join -- --agent agent-b --name "Agent B" --owner Bob
+```
+
+Checks Node, `.env`, the `claude` login and git, registers the agent, and prints the worker
+command. Only one coordinator and one watching mapper run per database (a second one
+refuses to start). Rehearsal steps and network fallbacks: `docs/two-laptop-rehearsal.md`.
+
 ## Your own repo
 
 Contract works on any git repository, not only `demo-repo/` (issue #18). Pick it with

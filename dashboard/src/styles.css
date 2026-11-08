@@ -186,3 +186,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .diff .add { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--text); }
 .diff .del { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--text); }
 .diff .hunk { color: var(--text2); }
+
+/* Laptop offline (issue #19) */
+.offline { font-size: 12px; font-weight: 600; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius); padding: 3px 8px; }
