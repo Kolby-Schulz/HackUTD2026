@@ -1,7 +1,7 @@
 // Unit tests for the table -> panel derivations, using the demo story from spec section 3.
 import { describe, expect, it } from 'vitest';
 import type { Tables } from '../src/model.ts';
-import { agentCards, cases, codeMap, coordinator, edits, feed, modeSummary, replayAt, replayMarks, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
+import { agentCards, cases, codeMap, coordinator, edits, feed, fmtSecs, modeSummary, replayAt, replayMarks, resolveTimes, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
 
 const T0 = 1_800_000_000_000;
 const ts = (sec: number) => ({ toMillis: () => BigInt(T0 + Math.round(sec * 1000)) });
@@ -110,6 +110,16 @@ describe('conflicts', () => {
     const open = cs.find((c) => c.key === '2')!;
     expect(open.open).toBe(true);
     expect(open.steps.map((s) => s.state)).toEqual(['done', 'running', 'waiting']);
+  });
+  it('times resolved conflicts from detection to the last push, and skips open ones', () => {
+    const t = story();
+    const cs = cases(t, runWindow(t.runs[1], NOW));
+    const done = cs.find((c) => c.key === '1')!;
+    expect(done.resolvedMs).toBeGreaterThanOrEqual(2600);
+    expect(cs.find((c) => c.key === '2')!.resolvedMs).toBeUndefined();
+    expect(resolveTimes(cs)).toEqual({ n: 1, avgMs: done.resolvedMs, fastestMs: done.resolvedMs, slowestMs: done.resolvedMs });
+    expect(resolveTimes([])).toBeUndefined();
+    expect([fmtSecs(19_940), fmtSecs(65_000)]).toEqual(['19.9s', '1m 05s']);
   });
   it('folds a conflict, its decision and its pushes into one thread', () => {
     const t = story();

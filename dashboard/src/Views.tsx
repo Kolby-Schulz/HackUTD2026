@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type * as R from '@bindings/types.ts';
 import type { AgentCard, CaseView, CoordView, FeedEvent, HistoryItem, MapNode, Savings, TokenStats } from './model.ts';
-import { fmtK, symbolName } from './model.ts';
+import { fmtK, fmtSecs, resolveTimes, symbolName } from './model.ts';
 import { ICON } from './Workbench.tsx';
 
 const STATUS_BADGE: Record<string, [string, string]> = {
@@ -163,7 +163,7 @@ export type CaseFilter = 'all' | 'open' | 'resolved';
 const CASE_FILTERS: { id: CaseFilter; label: string; test: (c: CaseView) => boolean }[] = [
   { id: 'all', label: 'All', test: () => true },
   { id: 'open', label: 'Open', test: (c) => c.open },
-  { id: 'resolved', label: 'Avoided', test: (c) => c.status === 'Resolved' },
+  { id: 'resolved', label: 'Resolved', test: (c) => c.status === 'Resolved' },
 ];
 
 /** A big number that opens the list behind it. */
@@ -184,6 +184,8 @@ export function BottomPanel({ savings, tokens, cases, tab, setTab, filter, setFi
 }) {
   const open = cases.filter((c) => c.open);
   const resolved = cases.filter((c) => c.status === 'Resolved').length;
+  const dismissed = cases.filter((c) => c.status === 'Dismissed').length;
+  const times = resolveTimes(cases);
   const maxBar = Math.max(1, savings.base ?? 0, savings.current);
   const shown = cases.filter(CASE_FILTERS.find((f) => f.id === filter)!.test);
   const list = useRef<HTMLDivElement>(null);
@@ -214,18 +216,21 @@ export function BottomPanel({ savings, tokens, cases, tab, setTab, filter, setFi
               </span>
               <span className="muted stat-note">{savings.base !== undefined ? 'Against the last run without InSync, at the same point in the run.' : savings.current === 0 ? 'Counts from this run’s first tokens.' : 'Run once without InSync (npm run demo -- --mode without_contract) to measure against.'}</span>
             </Stat>
-            <Stat label="Conflicts caught" cta={cases.length ? 'Show all' : 'Open problems'} onOpen={() => onShowProblems('all')}>
-              <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span className={'num' + (cases.length ? '' : ' zero')}>{cases.length}</span>
-                {open.length > 0 && <span className="badge" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{open.length} open</span>}
+            <Stat label="Conflicts caught" cta={cases.length ? 'Show them' : 'Open problems'} onOpen={() => onShowProblems(open.length ? 'open' : 'all')}>
+              <span className={'num' + (cases.length ? '' : ' zero')}>{cases.length}</span>
+              <span className="stat-note">
+                {cases.length ? <>
+                  <span style={{ color: 'var(--ok)', fontWeight: 600 }}>{resolved} resolved</span>
+                  <span className="muted"> · </span><span style={open.length ? { color: 'var(--danger)', fontWeight: 600 } : { color: 'var(--text2)' }}>{open.length} open</span>
+                  {dismissed > 0 && <span className="muted"> · {dismissed} dismissed</span>}
+                </> : <span className="muted">Caught while the agents were still coding, not at merge.</span>}
               </span>
-              {cases[0] && <span className="ellipsis stat-note">
-                <span className="mono" style={{ fontWeight: 700 }}>#{cases[0].key} {cases[0].symbol}</span> <span style={{ color: cases[0].open ? 'var(--warn)' : 'var(--ok)', fontWeight: 600 }}>{cases[0].open ? 'deciding' : cases[0].status.toLowerCase()}</span>
-              </span>}
             </Stat>
-            <Stat label="Merge failures avoided" cta={resolved ? 'Show the ones avoided' : 'Open problems'} onOpen={() => onShowProblems('resolved')}>
-              <span className={'num' + (resolved ? '' : ' zero')} style={resolved ? { color: 'var(--ok)' } : undefined}>{resolved}</span>
-              <span className="muted stat-note">Conflicts resolved while coding instead of at merge.</span>
+            <Stat label="Avg time to resolve" cta={times ? 'Show the resolved ones' : 'Open problems'} onOpen={() => onShowProblems('resolved')}>
+              <span className={'num' + (times ? '' : ' zero')} style={times ? { color: 'var(--ok)' } : undefined}>{times ? fmtSecs(times.avgMs) : '—'}</span>
+              <span className="muted stat-note">{times
+                ? <>From detection until both agents were told{times.n > 1 ? <>, over {times.n} conflicts · fastest {fmtSecs(times.fastestMs)}, slowest {fmtSecs(times.slowestMs)}</> : ''}.</>
+                : 'From detection until both agents are told. Shows once the coordinator resolves a conflict.'}</span>
             </Stat>
           </div>
         )}
@@ -242,7 +247,7 @@ export function BottomPanel({ savings, tokens, cases, tab, setTab, filter, setFi
               <span className="muted" style={{ fontSize: 11.5 }}>Click a problem to see it on the code map and in Changes</span>
             </div>
             {!cases.length && <div className="empty">No problems. A conflict appears here the moment a plan or a change breaks one of the rules.</div>}
-            {cases.length > 0 && !shown.length && <div className="empty">None {filter === 'open' ? 'open' : 'avoided yet'}.</div>}
+            {cases.length > 0 && !shown.length && <div className="empty">None {filter === 'open' ? 'open' : 'resolved yet'}.</div>}
             {shown.map((c) => {
               const on = expanded === c.key;
               return (
