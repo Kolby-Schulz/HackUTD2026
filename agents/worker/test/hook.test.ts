@@ -1,0 +1,63 @@
+import { describe, it, expect } from 'vitest';
+import { signatureHash, type MappedSymbol } from '@contract/mapper';
+import { detectChanges, editedFile, type SymbolRow } from '../src/hook.ts';
+
+const OLD = 'export function calcFee(amount: number): number';
+const NEW = 'export function calcFee(amount: number, currency: string): number';
+const ID = 'src/billing/fees.ts#calcFee';
+
+const mapped = (signature: string, id = ID): MappedSymbol => ({
+  id,
+  name: id.split('#')[1],
+  kind: 'function',
+  signature,
+  signatureHash: signatureHash(signature),
+  behaviorNote: '',
+});
+const row = (signature: string, hash = signatureHash(signature), id = ID): SymbolRow => ({ id, signature, signatureHash: hash });
+
+describe('detectChanges', () => {
+  it('reports nothing when the signature is unchanged', () => {
+    expect(detectChanges([mapped(OLD)], [row(OLD)])).toEqual([]);
+  });
+
+  it('reports a changed signature', () => {
+    expect(detectChanges([mapped(NEW)], [row(OLD)])).toEqual([
+      { symbolId: ID, kind: 'signature', newSignature: NEW, description: `contract-hook: signature changed to ${NEW}` },
+    ]);
+  });
+
+  it('does not re-report a change already sent (signature updated, hash not)', () => {
+    expect(detectChanges([mapped(NEW)], [row(NEW, signatureHash(OLD))])).toEqual([]);
+  });
+
+  it('reports a new symbol as created', () => {
+    const id = 'src/billing/fees.ts#refundFee';
+    const sig = 'export function refundFee(amount: number): number';
+    expect(detectChanges([mapped(OLD), mapped(sig, id)], [row(OLD)])).toEqual([
+      { symbolId: id, kind: 'created', newSignature: sig, description: `contract-hook: created ${sig}` },
+    ]);
+  });
+
+  it('does not re-report a created symbol (row inserted with an empty hash)', () => {
+    expect(detectChanges([mapped(NEW)], [row(NEW, '')])).toEqual([]);
+  });
+
+  it('reports a symbol missing from the file as removed', () => {
+    expect(detectChanges([], [row(OLD)])).toEqual([{ symbolId: ID, kind: 'removed', description: `contract-hook: removed ${ID}` }]);
+  });
+});
+
+describe('editedFile', () => {
+  const repo = '/wt/demo-repo';
+  const input = (file_path: string) => ({ cwd: repo, tool_input: { file_path } });
+  it('returns the repo-relative path of a source file', () => {
+    expect(editedFile(input(`${repo}/src/billing/fees.ts`), repo)).toBe('src/billing/fees.ts');
+  });
+  it('ignores non-source and out-of-repo files', () => {
+    expect(editedFile(input(`${repo}/README.md`), repo)).toBeUndefined();
+    expect(editedFile(input('/elsewhere/x.ts'), repo)).toBeUndefined();
+    expect(editedFile(input(`${repo}/node_modules/a/index.ts`), repo)).toBeUndefined();
+    expect(editedFile({ cwd: repo, tool_input: {} }, repo)).toBeUndefined();
+  });
+});

@@ -65,6 +65,17 @@ export async function endOpenRuns(conn: DbConnection): Promise<bigint[]> {
   return open;
 }
 
+/**
+ * Ends any open run, then clears per-run server state (code map, plans, claims, pending
+ * instructions; see reset_demo_state) so nothing from the last run leaks into the next.
+ * `conn` must subscribe to the run table.
+ */
+export async function resetServerState(conn: DbConnection): Promise<bigint[]> {
+  const ended = await endOpenRuns(conn);
+  await conn.reducers.resetDemoState({});
+  return ended;
+}
+
 /** Waits until `check()` is true after reducer results reach the local cache. */
 export async function waitFor<T>(check: () => T | undefined, what: string, timeoutMs = 5_000): Promise<T> {
   const until = Date.now() + timeoutMs;

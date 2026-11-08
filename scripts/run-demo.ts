@@ -24,7 +24,7 @@ import { createLLM } from '@contract/llm';
 import { demoRepoChanges, resetFiles, resetRuns } from './reset.ts';
 import { seed } from './seed.ts';
 import {
-  adminConnect, AGENTS, git, log, MODES, REPO, RESULTS_DIR, savedToken, saveToken, TSX, WORKTREES, type Mode,
+  adminConnect, AGENTS, git, log, MODES, REPO, resetServerState, RESULTS_DIR, savedToken, saveToken, TSX, WORKTREES, type Mode,
 } from './lib.ts';
 
 const { values } = parseArgs({
@@ -83,7 +83,15 @@ process.exit(0);
 async function runOnce() {
   const startedAt = new Date().toISOString();
 
-  // 1. Fresh code map (the mapper only sends files that changed).
+  // 1. Fresh code map. Clear the last run's server state first: the mapper only sends files
+  //    that changed and keeps agent-reported signatures, so stale symbols would otherwise
+  //    survive (and leftover instructions would reach the new agents).
+  {
+    const conn = await adminConnect(['SELECT * FROM run']);
+    await resetServerState(conn);
+    conn.disconnect();
+    log('demo', 'cleared server state from the last run');
+  }
   if (mode === 'with_contract') {
     const code = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts')], REPO, 5 * 60_000);
     if (code.exitCode !== 0) die('mapper failed; is the server reachable?');

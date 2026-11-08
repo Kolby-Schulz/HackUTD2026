@@ -1,9 +1,14 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
+import { SpacetimeDBProvider } from 'spacetimedb/react';
+import { connectionBuilder } from './data.ts';
+import { App } from './App.tsx';
+import './styles.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <SpacetimeDBProvider connectionBuilder={connectionBuilder}>
+      <App />
+    </SpacetimeDBProvider>
   </StrictMode>,
 );

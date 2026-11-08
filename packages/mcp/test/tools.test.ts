@@ -85,6 +85,22 @@ describe('contract mcp tools', () => {
     expect(again.text).toMatch(/No new instructions/);
   });
 
+  it('declare_plan forwards the signature of a planned create', async () => {
+    // Act
+    await t.call('declare_plan', {
+      summary: 'receipt',
+      items: [{ symbol_id: 'src/r.ts#formatOrderDate', intent: 'create', signature: 'formatOrderDate(d: Date): string' }],
+    });
+
+    // Assert
+    expect(t.calls[0]).toEqual([
+      'publishPlan',
+      7n,
+      'receipt',
+      [{ symbolId: 'src/r.ts#formatOrderDate', intent: 'create', signature: 'formatOrderDate(d: Date): string' }],
+    ]);
+  });
+
   it('claim_symbol reports who holds a taken symbol as a tool error', async () => {
     // Act
     const r = await t.call('claim_symbol', { symbol_id: 'taken' });

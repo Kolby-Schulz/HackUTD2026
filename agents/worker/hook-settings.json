@@ -18,7 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/hook.ts\""
+            "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/hook.ts\"",
+            "timeout": 15
           }
         ]
       }

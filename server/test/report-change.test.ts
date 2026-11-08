@@ -220,16 +220,18 @@ describe('report_change: Rule 1 (broken dependency)', () => {
     expect(status(t, 'agent-b')).toBe('paused');
   });
 
-  it('does not flag an agent that only depends on a caller of S', () => {
+  it('flags an agent that depends on a caller of S (B relies on computeTotal, which calls calculateFee)', () => {
     // Arrange
-    plan(t, 'agent-b', [{ symbol_id: CHECKOUT, intent: 'depend' }]);
+    plan(t, 'agent-b', [{ symbol_id: TOTAL, intent: 'depend' }]);
 
     // Act
     reportChange(t, 'agent-a', FEES);
 
     // Assert
-    expect(conflicts(t)).toHaveLength(0);
-    expect(status(t, 'agent-b')).toBe('idle');
+    const [c] = conflicts(t);
+    expect(c).toMatchObject({ kind: 'broken_dependency', symbol_id: FEES, agent_a: 'agent-a', agent_b: 'agent-b' });
+    expect(c.details).toContain(`depends on ${TOTAL}, which calls ${FEES}`);
+    expect(status(t, 'agent-b')).toBe('paused');
   });
 
   it('never flags the reporting agent itself', () => {
@@ -251,7 +253,7 @@ describe('report_change: Rule 1 (broken dependency)', () => {
   it("ignores an agent's inactive (replaced) plan", () => {
     // Arrange
     plan(t, 'agent-b', [{ symbol_id: FEES, intent: 'depend' }]);
-    plan(t, 'agent-b', [{ symbol_id: INVOICE, intent: 'depend' }]); // replaces the first plan
+    plan(t, 'agent-b', [{ symbol_id: 'src/checkout/receipt.ts#buildReceipt', intent: 'create' }]); // replaces the first plan
 
     // Act
     reportChange(t, 'agent-a', FEES);

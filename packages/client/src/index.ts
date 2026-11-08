@@ -53,6 +53,8 @@ export interface ConnectOptions {
 export interface PlanItem {
   symbolId: string;
   intent: Intent;
+  /** For intent 'create': the signature you will write, so duplicates are caught by type at plan time. */
+  signature?: string;
 }
 
 export interface Instruction {
@@ -285,7 +287,7 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
 
     async publishPlan(taskId, summary, items) {
       live();
-      await r.publishPlan({ agentId, taskId, summary, items: items.map((i) => ({ symbolId: i.symbolId, intent: i.intent })) });
+      await r.publishPlan({ agentId, taskId, summary, items: items.map((i) => ({ symbolId: i.symbolId, intent: i.intent, signature: i.signature?.trim() || undefined })) });
     },
 
     async claim(symbolId, ttlSecs = DEFAULT_CLAIM_TTL_SECS) {

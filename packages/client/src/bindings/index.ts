@@ -50,6 +50,7 @@ import RecordCacheHitReducer from "./record_cache_hit_reducer";
 import RegisterAgentReducer from "./register_agent_reducer";
 import ReleaseClaimReducer from "./release_claim_reducer";
 import ReportChangeReducer from "./report_change_reducer";
+import ResetDemoStateReducer from "./reset_demo_state_reducer";
 import ResolveConflictReducer from "./resolve_conflict_reducer";
 import SetTaskStatusReducer from "./set_task_status_reducer";
 import StartRunReducer from "./start_run_reducer";
@@ -290,6 +291,7 @@ const reducersSchema = __reducers(
   __reducerSchema("register_agent", RegisterAgentReducer),
   __reducerSchema("release_claim", ReleaseClaimReducer),
   __reducerSchema("report_change", ReportChangeReducer),
+  __reducerSchema("reset_demo_state", ResetDemoStateReducer),
   __reducerSchema("resolve_conflict", ResolveConflictReducer),
   __reducerSchema("set_task_status", SetTaskStatusReducer),
   __reducerSchema("start_run", StartRunReducer),

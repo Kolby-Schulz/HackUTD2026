@@ -13,6 +13,8 @@ export interface ConflictContext {
   description?: string;
   /** Agent that claimed the symbol first, for the fallback rule. */
   firstClaimant?: string;
+  /** Decisions already made this run for either agent, oldest first, so rulings stay consistent. */
+  priorDecisions?: string[];
 }
 
 export interface Decision {
@@ -36,13 +38,24 @@ export const DECISION_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+/** Earlier decisions block for the prompt ('' when there are none). */
+function priorBlock(c: ConflictContext): string {
+  if (!c.priorDecisions?.length) return '';
+  return (
+    'Earlier decisions this run (stay consistent: do not reverse an owner already chosen, and\n' +
+    'do not tell an agent to reuse something another decision told it to drop):\n' +
+    c.priorDecisions.map((d) => `- ${d}`).join('\n') +
+    '\n'
+  );
+}
+
 export function buildPrompt(c: ConflictContext): string {
   return `You coordinate AI coding agents on one repo. Two agents have a conflict.
 Conflict: ${c.kind} on ${c.symbolId}
 Agent A (${c.agentA}) plan: ${c.planA}
 Agent B (${c.agentB}) plan: ${c.planB}
 Change: ${c.oldSignature ?? '(none)'} -> ${c.newSignature ?? '(none)'}; ${c.description ?? ''}
-Decide who owns ${c.symbolId} and give each agent one short, concrete instruction
+${priorBlock(c)}Decide who owns ${c.symbolId} and give each agent one short, concrete instruction
 that lets both tasks finish without duplicate or conflicting code.
 Prefer: reuse over new code, the smallest change, and keeping the change already made.
 Reply with JSON only.`;

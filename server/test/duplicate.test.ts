@@ -18,23 +18,24 @@ describe('Rule 2 in publish_plan: against existing symbols', () => {
     for (const id of ['agent-a', 'agent-b', 'coordinator']) register(t, id);
   });
 
-  it('flags a planned create whose normalized name matches an existing symbol, and says reuse it', () => {
-    // Arrange: calculateFee exists; B plans computeFee ("fee" after dropping verbs).
+  it('points at a matching pre-existing symbol with an instruction, without a conflict', () => {
+    // Arrange: calculateFee exists (mapper, no agent created it); B plans computeFee.
     const items = [{ symbol_id: 'src/checkout/fees.ts#computeFee', intent: 'create' }];
 
     // Act
     plan(t, 'agent-b', items);
 
-    // Assert
-    const [c] = duplicates(t);
-    expect(c).toMatchObject({ kind: 'duplicate', symbol_id: FEES, agent_a: 'agent-b', agent_b: 'agent-b', status: 'open' });
-    expect(c.details).toContain("same normalized name 'fee'");
+    // Assert: no conflict with B on both sides; just a hint to B.
+    expect(duplicates(t)).toHaveLength(0);
     expect(instructionsFor(t, 'agent-b')).toEqual([
-      expect.objectContaining({ text: `${FEES} already does this; reuse it.`, conflict_id: c.id }),
+      expect.objectContaining({
+        text: `${FEES} may already do this (same normalized name 'fee'); reuse it if it fits instead of writing src/checkout/fees.ts#computeFee.`,
+        conflict_id: undefined,
+      }),
     ]);
   });
 
-  it('flags planning to create a symbol id that already exists', () => {
+  it('tells the agent when it plans to create a symbol id that already exists', () => {
     // Arrange
     const items = [{ symbol_id: FEES, intent: 'create' }];
 
@@ -42,8 +43,8 @@ describe('Rule 2 in publish_plan: against existing symbols', () => {
     plan(t, 'agent-b', items);
 
     // Assert
-    expect(duplicates(t)).toHaveLength(1);
-    expect(duplicates(t)[0].details).toContain('it already exists');
+    expect(duplicates(t)).toHaveLength(0);
+    expect(instructionsFor(t, 'agent-b')[0].text).toContain('it already exists');
   });
 
   it('names the agent that created the existing symbol as agent_a', () => {
@@ -92,7 +93,7 @@ describe('Rule 2 in publish_plan: against existing symbols', () => {
     expect(duplicates(t)).toHaveLength(0);
   });
 
-  it('dedupes: republishing the same plan adds no conflict or instruction', () => {
+  it('dedupes: republishing the same plan adds no second instruction', () => {
     // Arrange
     plan(t, 'agent-b', [{ symbol_id: 'src/checkout/fees.ts#computeFee', intent: 'create' }]);
 
@@ -100,8 +101,21 @@ describe('Rule 2 in publish_plan: against existing symbols', () => {
     plan(t, 'agent-b', [{ symbol_id: 'src/checkout/fees.ts#computeFee', intent: 'create' }], 1n, 'v2');
 
     // Assert
-    expect(duplicates(t)).toHaveLength(1);
+    expect(duplicates(t)).toHaveLength(0);
     expect(instructionsFor(t, 'agent-b')).toHaveLength(1);
+  });
+
+  it('still opens a conflict when another agent created the matching symbol', () => {
+    // Arrange: agent-a created computeFee this run.
+    reportChange(t, 'agent-a', 'src/billing/late.ts#computeFee', 'created', 'late fee', 'computeFee(c: number): number');
+
+    // Act
+    plan(t, 'agent-b', [{ symbol_id: 'src/checkout/fees.ts#makeFee', intent: 'create' }]);
+
+    // Assert
+    expect(duplicates(t)).toEqual([
+      expect.objectContaining({ symbol_id: 'src/billing/late.ts#computeFee', agent_a: 'agent-a', agent_b: 'agent-b' }),
+    ]);
   });
 
   it('a rejected plan leaves no duplicate conflict behind', () => {
@@ -155,6 +169,32 @@ describe("Rule 2 in publish_plan: against other agents' planned creates", () => 
     // Assert
     expect(duplicates(t)).toHaveLength(1);
     expect(duplicates(t)[0].details).toContain('the same symbol');
+  });
+
+  it('matches planned creates by signature when the names differ', () => {
+    // Arrange: A re-plans with a signature; B plans a differently named helper of the same type.
+    plan(t, 'agent-a', [{ symbol_id: A_DATE, intent: 'create', signature: 'formatDate(d: Date): string' }], 1n, 'v2');
+    const items = [{ symbol_id: B_DISPLAY, intent: 'create', signature: 'toDisplayDate(date: Date): string' }];
+
+    // Act
+    plan(t, 'agent-b', items);
+
+    // Assert
+    expect(duplicates(t)).toEqual([
+      expect.objectContaining({ symbol_id: A_DATE, agent_a: 'agent-a', agent_b: 'agent-b', status: 'open' }),
+    ]);
+    expect(duplicates(t)[0].details).toContain("shared name 'date'");
+    expect(all(t.db.planItem.iter()).find((i) => i.symbol_id === B_DISPLAY)?.signature).toBe(
+      'toDisplayDate(date: Date): string',
+    );
+  });
+
+  it('opens nothing for differently named planned creates without signatures', () => {
+    // Act
+    plan(t, 'agent-b', [{ symbol_id: B_DISPLAY, intent: 'create' }]);
+
+    // Assert
+    expect(duplicates(t)).toHaveLength(0);
   });
 
   it("ignores an agent's own other planned creates", () => {

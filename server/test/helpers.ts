@@ -116,11 +116,12 @@ export function seedCodeMap(t: Harness) {
 export function plan(
   t: Harness,
   agentId: string,
-  items: { symbol_id: string; intent: string }[],
+  items: { symbol_id: string; intent: string; signature?: string }[],
   taskId = 1n,
   summary = 'plan',
 ) {
-  t.as(AGENT_OF[agentId], (ctx) => mod.publish_plan(ctx, { agent_id: agentId, task_id: taskId, summary, items }));
+  const withSig = items.map((i) => ({ ...i, signature: i.signature }));
+  t.as(AGENT_OF[agentId], (ctx) => mod.publish_plan(ctx, { agent_id: agentId, task_id: taskId, summary, items: withSig }));
 }
 
 export function claim(t: Harness, agentId: string, symbolId: string, ttl = 120) {

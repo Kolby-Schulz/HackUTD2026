@@ -103,7 +103,7 @@ describe('publish_plan', () => {
 
   it("rejects a plan published for another identity's agent", () => {
     // Arrange
-    const items = [{ symbol_id: FEES, intent: 'modify' }];
+    const items = [{ symbol_id: FEES, intent: 'modify', signature: undefined }];
 
     // Act
     const act = () =>

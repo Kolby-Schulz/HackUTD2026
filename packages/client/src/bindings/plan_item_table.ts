@@ -16,4 +16,5 @@ export default __t.row({
   agentId: __t.string().name("agent_id"),
   symbolId: __t.string().name("symbol_id"),
   intent: __t.string(),
+  signature: __t.option(__t.string()),
 });

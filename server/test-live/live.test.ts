@@ -161,13 +161,13 @@ describe('Rule 1 pushes end to end', () => {
       agentId: id('agent-a'),
       taskId: 1n,
       summary: 'half-up fees',
-      items: [{ symbolId: FEES, intent: 'modify' }],
+      items: [{ symbolId: FEES, intent: 'modify', signature: undefined }],
     });
     await b.conn.reducers.publishPlan({
       agentId: id('agent-b'),
       taskId: 2n,
       summary: 'receipt',
-      items: [{ symbolId: CHECKOUT, intent: 'modify' }],
+      items: [{ symbolId: CHECKOUT, intent: 'modify', signature: undefined }],
     });
     const pushed: string[] = [];
     b.conn.db.instruction.onInsert((_ctx, row) => {
@@ -237,7 +237,7 @@ describe('Rule 2 over the wire', () => {
       agentId: id('agent-a'),
       taskId: 1n,
       summary: 'due date',
-      items: [{ symbolId: aDate, intent: 'create' }],
+      items: [{ symbolId: aDate, intent: 'create', signature: undefined }],
     });
 
     // Act
@@ -245,7 +245,7 @@ describe('Rule 2 over the wire', () => {
       agentId: id('agent-b'),
       taskId: 2n,
       summary: 'receipt date',
-      items: [{ symbolId: bDate, intent: 'create' }],
+      items: [{ symbolId: bDate, intent: 'create', signature: undefined }],
     });
 
     // Assert
@@ -267,8 +267,8 @@ describe('transactions over the wire', () => {
       taskId: 1n,
       summary: 'bad',
       items: [
-        { symbolId: FEES, intent: 'modify' },
-        { symbolId: 'src/nope.ts#ghost', intent: 'depend' },
+        { symbolId: FEES, intent: 'modify', signature: undefined },
+        { symbolId: 'src/nope.ts#ghost', intent: 'depend', signature: undefined },
       ],
     });
 

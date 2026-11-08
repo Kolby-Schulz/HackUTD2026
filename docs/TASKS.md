@@ -13,7 +13,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **Early-stop estimate.** An aborted run reports estimated usage (input exact, output ≈ streamed chars / 4, hidden thinking not counted). Fine for the per-feature "estimated" savings; just know the waste number is a lower bound. **Accepted.**
 - [x] **`claim_symbol` "reject + insert conflict" (BE).** A reducer that throws rolls back everything, including the conflict row. So `claim_symbol` records the `claim_contention` conflict and returns without taking the claim; `ContractClient.claim()` must check the `claim` row afterwards and throw "already claimed" itself (AG). **Done both sides;** `ContractClient.claim()` reads the `claim` row and throws `ClaimedError`.
 - [x] **Marking a conflict `resolving` (BE + CM).** Coordinator step 1 marks a conflict `resolving`, but section 7 has no reducer for it. `resolve_conflict`/`dismiss_conflict` accept `open` or `resolving`. **Done:** `mark_conflict_resolving(conflict_id)`, coordinator only, `open` → `resolving` (rejects anything not `open`, so two coordinators never both take one); bindings regenerated (`conn.reducers.markConflictResolving`).
-- [ ] **Signatures on planned creates (BE + AG).** Rule 2's type match (same params + return, shared name token) needs a signature, but plan items are only `symbol_id` + `intent`. Today the type match runs when `report_change('created', new_signature)` arrives; at plan time only names match (`formatDate` vs `format_date` yes, `formatDate` vs `toDisplayDate` no). Proposal: optional `signature` on `publish_plan` items (+ `plan_item.signature` column) so the demo's duplicate is caught before any code is written.
+- [x] **Signatures on planned creates (BE + AG).** Rule 2's type match (same params + return, shared name token) needs a signature, but plan items are only `symbol_id` + `intent`. Today the type match runs when `report_change('created', new_signature)` arrives; at plan time only names match (`formatDate` vs `format_date` yes, `formatDate` vs `toDisplayDate` no). Proposal: optional `signature` on `publish_plan` items (+ `plan_item.signature` column) so the demo's duplicate is caught before any code is written. **Done:** optional `signature` on `PlanItemInput` and `plan_item.signature`; `publish_plan` passes it to `checkDuplicates`, which also compares it against other agents' planned-create signatures. Client `PlanItem.signature?`, MCP `declare_plan` item `signature`, worker rules ask for it on creates.
 - [ ] Open questions from spec section 19 (track rules, deadline, scheduled-reducer syntax, 8090, Jev key). **Answered:** Claude Code JSON token fields are `usage.input_tokens`, `usage.cache_creation_input_tokens`, `usage.cache_read_input_tokens`, `usage.output_tokens`, `total_cost_usd`, `session_id`.
 
 ## Milestone 1: Contracts agreed
@@ -43,18 +43,18 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 
 ## Milestone 3: Rule 1 end to end
 
-- [x] **BE:** `report_change` with Rule 1 (depend items + `symbol_edge` callers), pause affected agents, insert instructions; dedupe open conflicts
+- [x] **BE:** `report_change` with Rule 1 (depend items + `symbol_edge` callers), pause affected agents, insert instructions; dedupe open conflicts **Extended:** a plan that depends on a caller of S is also affected (live demo: B depended on computeTotal, never on calculateFee, so Rule 1 missed it).
 - [x] **BE:** `resolve_conflict` / `dismiss_conflict` (coordinator only), `acknowledge_instruction`
 - [x] **CM:** coordinator decision logic: section 12 prompt, JSON schema, validation, retry once, claimed-first fallback (`agents/coordinator/src/decide.ts`). `npm run coordinator -- --demo` verified: owner agent-a, B told not to round again.
-- [ ] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens
-- [ ] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0
+- [x] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens **Done** (`agents/coordinator/src/live.ts`, 6 tests). Not yet run against a live server.
+- [x] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0 **Done** (`detectChanges` + 6 tests; removed symbols reported once per session). Not yet run against a live server.
 - [ ] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors
 
 ## Milestone 4: Rule 2 end to end
 
 - [x] **BE:** Rule 2 in `publish_plan` (normalized names, same types + shared token), reuse instruction; Rule 3 in `claim_symbol`/`publish_plan` (Rule 2 also re-runs on `report_change('created')` once the signature is known)
 - [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings. **Client part done** (`context_slice` and `cache_hit` savings logged); **MCP tools done;** `find_existing` logs one `reuse` saving per matched symbol (score ≥ 0.8; estimate `CONTRACT_REUSE_EST_TOKENS`, default 1500, until a baseline measures it). `get_summary` / `put_summary` MCP tools added so workers can read and fill `summary_cache` (`cache_hit` is now reachable from real runs); rules rewritten as an ordered workflow with the symbol id format. A summary hook (`agents/worker/src/summary-hook.ts`) caches file outlines on read, serves them to later agents and counts a `cache_hit` only when the file isn't read anyway. See `docs/spec-additions-summary-tools.md`.
-- [ ] **CM:** check the duplicate-formatter scenario resolves to "reuse A's"
+- [x] **CM:** check the duplicate-formatter scenario resolves to "reuse A's" **Checked with the model** (`npm run coordinator -- --demo duplicate`): owner agent-a, B told to import A's `formatDate`. Not yet seen in a full live `npm run demo`.
 
 ## Milestone 5: Without/with runs
 

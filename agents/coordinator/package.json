@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
-  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit" },
-  "dependencies": { "@contract/client": "*", "@contract/llm": "*", "dotenv": "^18.0.9" }
+  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "dependencies": { "@contract/client": "*", "@contract/llm": "*", "dotenv": "^18.0.9" },
+  "devDependencies": { "vitest": "^3.2.7" }
 }
