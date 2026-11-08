@@ -565,3 +565,58 @@ export function edits(t: Tables, w: Window, symbolId?: string): EditView[] {
       diff: e.diff, at: ms(e.createdAt), time: fmtClock(ms(e.createdAt) - w.start), stat: diffStat(e.diff),
     }));
 }
+
+/* ---------------- replay (issue #27) ---------------- */
+
+/**
+ * The tables as they stood at time `at` (ms) in `run`: rows created later are dropped,
+ * conflicts resolved later are open again, and agents' status is rebuilt from what had
+ * happened by then (paused on an open Rule 1 conflict, working once active, done at the
+ * end). Plans, claims and symbols are kept as stored: reset_demo_state clears them between
+ * runs, so for older runs only the history tables (changes, conflicts, decisions, pushes,
+ * tokens, edits) replay. Feed every panel the result with now = `at`.
+ */
+export function replayAt(t: Tables, run: R.Run, at: number): Tables {
+  const start = ms(run.startedAt);
+  const end = run.endedAt ? ms(run.endedAt) : Infinity;
+  const upTo = <T extends { createdAt: TimestampLike }>(rows: Rows<T>) => rows.filter((r) => ms(r.createdAt) <= at && ms(r.createdAt) >= start);
+  const conflicts = upTo(t.conflicts).map((c) =>
+    c.resolvedAt && ms(c.resolvedAt) <= at ? c : { ...c, status: c.status === 'resolved' || c.status === 'dismissed' ? 'resolving' : c.status, resolvedAt: undefined },
+  );
+  const usage = t.usage.filter((u) => u.runId === run.id && ms(u.createdAt) <= at);
+  const instructions = upTo(t.instructions);
+  const active = new Set([...usage.map((u) => u.agentId), ...upTo(t.changes).map((c) => c.agentId), ...upTo(t.fileEdits ?? []).map((e) => e.agentId)]);
+  const runTasks = t.tasks.filter((x) => x.runId === run.id);
+  const agents = t.agents.map((a) => {
+    if (SYSTEM_IDS.has(a.id)) return a;
+    const paused = conflicts.some((c) => (c.status === 'open' || c.status === 'resolving') && c.agentB === a.id && c.kind === 'broken_dependency');
+    const task = runTasks.filter((x) => x.agentId === a.id).sort((p, q) => Number(q.id - p.id))[0];
+    const status = paused ? 'paused' : at >= end && task?.status === 'done' ? 'done' : active.has(a.id) ? 'working' : 'idle';
+    return { ...a, status, currentTaskId: task?.id ?? a.currentTaskId, lastHeartbeat: { toMillis: () => BigInt(Math.round(at)) } as unknown as typeof a.lastHeartbeat };
+  });
+  return {
+    ...t,
+    agents,
+    plans: upTo(t.plans),
+    planItems: t.planItems.filter((i) => upTo(t.plans).some((p) => p.id === i.planId)),
+    claims: t.claims.filter((c) => ms(c.claimedAt) <= at && ms(c.expiresAt) > at),
+    changes: upTo(t.changes),
+    conflicts,
+    decisions: upTo(t.decisions),
+    instructions: instructions.map((i) => ({ ...i, acknowledged: i.acknowledged && at >= end })),
+    runs: t.runs.map((r) => (r.id === run.id && r.endedAt && ms(r.endedAt) > at ? { ...r, endedAt: undefined } : r)),
+    usage,
+    savings: t.savings.filter((s) => s.runId === run.id && ms(s.createdAt) <= at),
+    fileEdits: upTo(t.fileEdits ?? []),
+  };
+}
+
+/** Moments worth jumping to in a run: each conflict opening, ms since the run started. */
+export function replayMarks(t: Tables, run: R.Run): { at: number; label: string }[] {
+  const start = ms(run.startedAt);
+  const end = run.endedAt ? ms(run.endedAt) : Infinity;
+  return t.conflicts
+    .filter((c) => ms(c.createdAt) >= start && ms(c.createdAt) <= end)
+    .sort((a, b) => Number(a.id - b.id))
+    .map((c) => ({ at: ms(c.createdAt) - start, label: `#${c.id} ${CONFLICT_KIND[c.kind]?.label ?? c.kind}` }));
+}

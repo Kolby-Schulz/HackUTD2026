@@ -197,3 +197,20 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .judge textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .judge button { background: var(--accent); color: var(--on-agent); border: none; border-radius: var(--radius); padding: 5px 14px; font-weight: 600; cursor: pointer; }
 .judge button:disabled { opacity: 0.5; cursor: default; }
+
+/* Replay (issue #27) */
+.replay { display: flex; flex-direction: column; gap: 14px; }
+.replay-bar { padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; }
+.replay-bar select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 3px 6px; font: inherit; margin-left: 6px; }
+.replay-bar button { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 3px 10px; cursor: pointer; font: inherit; }
+.replay-bar button.on { border-color: var(--accent); color: var(--accent); }
+.replay-bar input[type=range] { accent-color: var(--accent); }
+.replay-cols { display: grid; gap: 14px; }
+.replay-col { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.replay-kpis { display: flex; flex-wrap: wrap; gap: 8px 28px; }
+.replay-kpis > div { display: flex; flex-direction: column; font-size: 12px; }
+.replay-kpis b { font-size: 20px; }
+.replay-feed { display: flex; flex-direction: column; gap: 3px; min-height: 110px; }
+.chip.agent-paused { border-color: var(--warn); color: var(--warn); }
+.chip.agent-working { border-color: var(--ok); }
+.replay-col .map { height: 100%; }

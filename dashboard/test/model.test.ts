@@ -1,7 +1,7 @@
 // Unit tests for the table -> panel derivations, using the demo story from spec section 3.
 import { describe, expect, it } from 'vitest';
 import type { Tables } from '../src/model.ts';
-import { agentCards, cases, codeMap, coordinator, edits, feed, modeSummary, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
+import { agentCards, cases, codeMap, coordinator, edits, feed, modeSummary, replayAt, replayMarks, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
 
 const T0 = 1_800_000_000_000;
 const ts = (sec: number) => ({ toMillis: () => BigInt(T0 + Math.round(sec * 1000)) });
@@ -217,5 +217,34 @@ describe('offline laptops (issue #19)', () => {
     const at = (n: number) => agentCards(t, t.runs[1], n).find((c) => c.id === 'agent-a')!;
     expect(at(T0 + 30_000)).toMatchObject({ offline: false, lastEdit: { file: 'fees.ts', ago: 10_000 } });
     expect(at(T0 + 46_000).offline).toBe(true);
+  });
+});
+
+describe('replay (issue #27)', () => {
+  const ended = () => {
+    const t = story();
+    t.runs = [t.runs[0], { ...t.runs[1], endedAt: ts(60) }] as unknown as Tables['runs'];
+    t.conflicts = [t.conflicts[0], { ...t.conflicts[1], status: 'resolved', resolvedAt: ts(40) }] as unknown as Tables['conflicts'];
+    return t;
+  };
+  it('drops rows created after T and reopens conflicts resolved later', () => {
+    const t = ended();
+    const at = (s: number) => replayAt(t, t.runs[1], T0 + s * 1000);
+    expect(at(7).conflicts.map((c) => [String(c.id), c.status])).toEqual([['1', 'resolving']]);
+    expect(at(30).conflicts.map((c) => [String(c.id), c.status])).toEqual([['1', 'resolved'], ['2', 'resolving']]);
+    expect(at(45).conflicts.map((c) => c.status)).toEqual(['resolved', 'resolved']);
+    expect(at(11).usage.map((u) => Number(u.id))).toEqual([10]);
+    expect(at(13).usage.map((u) => Number(u.id))).toEqual([10, 12, ]);
+  });
+  it('rebuilds agent states: paused on an open Rule 1 conflict, running before the end', () => {
+    const t = ended();
+    const cards = (s: number) => agentCards(replayAt(t, t.runs[1], T0 + s * 1000), replayAt(t, t.runs[1], T0 + s * 1000).runs[1], T0 + s * 1000);
+    expect(cards(30).find((c) => c.id === 'agent-b')!.status).toBe('Paused');
+    expect(cards(45).find((c) => c.id === 'agent-b')!.status).toBe('Working');
+    expect(replayAt(t, t.runs[1], T0 + 30_000).runs[1].endedAt).toBeUndefined();
+  });
+  it('lists conflicts as jump marks', () => {
+    const t = ended();
+    expect(replayMarks(t, t.runs[1])).toEqual([{ at: 6000, label: '#1 Duplicate implementation' }, { at: 28000, label: '#2 Broken dependency' }]);
   });
 });
