@@ -1,0 +1,24 @@
+/* Colour picker (PROPS-12). Chrome colours are --pg-* tokens; the hue/colour gradients are painted inline (data). */
+.pg-cp { display: flex; flex-direction: column; gap: 10px; width: 232px; padding: 10px; background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 10px; box-shadow: var(--pg-shadow-pop); color: var(--pg-ink); font-size: 12px; }
+.pg-cp-sq { position: relative; height: 150px; border-radius: 6px; cursor: crosshair; touch-action: none; outline: none; }
+.pg-cp-sq:focus-visible, .pg-cp-bar:focus-visible { box-shadow: 0 0 0 2px var(--pg-sel); }
+.pg-cp-knob { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid var(--pg-white); box-shadow: var(--pg-shadow-pin); pointer-events: none; }
+.pg-cp-bar .pg-cp-knob { top: 50%; background: var(--pg-white); }
+.pg-cp-sliders { display: flex; gap: 10px; align-items: center; }
+.pg-cp-sw { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--pg-line-strong); flex-shrink: 0; }
+.pg-cp-bars { flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.pg-cp-bar { position: relative; height: 10px; border-radius: 5px; cursor: pointer; touch-action: none; outline: none; }
+.pg-cp-checker { background: repeating-conic-gradient(var(--pg-line) 0% 25%, var(--pg-panel) 0% 50%) 0 0 / 8px 8px; }
+.pg-cp-fade { position: absolute; inset: 0; border-radius: 5px; }
+.pg-cp-fields { display: flex; gap: 8px; }
+.pg-cp-fields label { display: flex; align-items: center; gap: 6px; border: 1px solid var(--pg-line); border-radius: 6px; padding: 0 6px; background: var(--pg-panel); }
+.pg-cp-fields label:first-child { flex: 1; }
+.pg-cp-fields label:focus-within { border-color: var(--pg-line-focus); }
+.pg-cp-fields span { color: var(--pg-muted); font-size: 11px; }
+.pg-cp-fields input { width: 100%; min-width: 0; border: 0; outline: 0; background: none; font: inherit; font-family: ui-monospace, Menlo, monospace; padding: 5px 0; color: var(--pg-ink); }
+.pg-cp-fields label:last-child { width: 62px; }
+.pg-cp-row > span { display: block; color: var(--pg-muted); font-size: 11px; margin-bottom: 4px; }
+.pg-cp-row > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.pg-cp-chip { width: 20px; height: 20px; padding: 0; border-radius: 5px; border: 1px solid var(--pg-line-strong); cursor: pointer; }
+.pg-cp-chip:hover { border-color: var(--pg-line-hover); transform: scale(1.1); }
+.pg-cp-chip:focus-visible { outline: 2px solid var(--pg-sel); outline-offset: 1px; }
