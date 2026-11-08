@@ -11,7 +11,7 @@
 // Any repo: `npm run control -- --repo <owner/name | git URL | path>` (or CONTRACT_TARGET, or
 // the dashboard's Repository field) picks the repository. Every process it starts gets it as
 // CONTRACT_TARGET, which the worker, session, mapper, judge and reset scripts all honor
-// (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<name>.
+// (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<owner>/<name>.
 //
 // Safety: nothing listens on a port. Only dashboards paired with this machine (machine_access,
 // which only this daemon writes) can queue commands, every command goes through toCommand's
@@ -380,6 +380,7 @@ function connectDaemon(id: string): Promise<DbConnection> {
             `SELECT * FROM machine_access WHERE machine_id = '${q(id)}'`,
             `SELECT * FROM machine_command WHERE machine_id = '${q(id)}'`,
             `SELECT * FROM machine_pair_request WHERE machine_id = '${q(id)}'`,
+            `SELECT * FROM machine_process WHERE machine_id = '${q(id)}'`,
             'SELECT * FROM run',
             'SELECT * FROM agent',
             'SELECT * FROM task',
@@ -458,6 +459,10 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
     if (++ticks % 10 === 0) daemon.touch();
     queue = queue.then(() => daemon.sync()).catch((e: unknown) => console.error(`[control] sync: ${e instanceof Error ? e.message : String(e)}`));
   }, 1000);
+  // Rows an earlier daemon left at 'running' (it was killed before it could report) are marked stopped.
+  await daemon.adopt([...conn.db.machineProcess.iter()].filter((p) => p.machineId === id).map((p) => ({
+    procKey: p.procKey, label: p.label, long: p.long, status: p.status, code: p.code, startedAtMs: p.startedAtMs, endedAtMs: p.endedAtMs, log: p.log,
+  })));
   await daemon.sync();
   const paired = [...conn.db.machineAccess.iter()].length;
   console.log(`[control] online as machine "${id}" on ${process.env.SPACETIME_HOST} (${process.env.SPACETIME_DB_NAME}); ${paired} paired dashboard${paired === 1 ? '' : 's'}`);
@@ -497,7 +502,12 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   conn.db.machinePairRequest.onInsert((_ctx, row) => answer(row));
   for (const row of [...conn.db.machinePairRequest.iter()]) answer(row); // queued while the daemon was off: the code is new, so these fail
 
-  const quit = () => { reg.stopAll(); setTimeout(() => process.exit(0), 300); };
+  // Report the stopped processes before exiting (the 1 s tick may not run again), else the next
+  // daemon finds them at 'running'. The timer is a backstop for a database that doesn't answer.
+  const quit = () => {
+    setTimeout(() => process.exit(0), 2000).unref();
+    daemon.shutdown().catch(() => undefined).finally(() => process.exit(0));
+  };
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
 
@@ -510,8 +520,8 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   const checkTakeover = (startedAt: bigint | undefined) => {
     if (!guard.check(startedAt)) return;
     console.error(`[control] another npm run control just registered as machine "${id}"; stopping this one so only one answers the dashboard. If you meant this one, stop the other and start this again.`);
-    reg.stopAll();
-    setTimeout(() => process.exit(1), 300);
+    setTimeout(() => process.exit(1), 2000).unref();
+    daemon.shutdown().catch(() => undefined).finally(() => process.exit(1));
   };
   conn.db.machine.onUpdate((_ctx, _old, row) => { if (row.id === id) checkTakeover(row.startedAt.microsSinceUnixEpoch); });
   setInterval(() => checkTakeover(conn.db.machine.id.find(id)?.startedAt.microsSinceUnixEpoch), 1000);

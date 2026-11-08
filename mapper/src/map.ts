@@ -12,8 +12,10 @@
 //   - their methods (static too, and arrow-function
 //     properties; not getters/setters or #private names)   kind 'method'
 // Interfaces, type aliases, enums, let/var and re-exports are not symbols.
-// JavaScript (.js/.jsx/.mjs/.cjs) follows the same rules: ES module exports only, so
-// CommonJS `module.exports = ...` / `exports.f = ...` files map to no symbols.
+// JavaScript (.js/.jsx/.mjs/.cjs) follows the same rules, with one addition: a JS file
+// with no exports at all (no `export`, no `module.exports` / `exports.f =`) is a browser
+// script or an entry module, so its top-level declarations are its surface and are mapped
+// by the same rules as if exported. CommonJS files still map to no symbols.
 //
 // Signatures are the declaration's own text with the body removed and whitespace
 // collapsed: "calculateFee(amount: number, rate: number): number". Nothing is inferred
@@ -235,10 +237,26 @@ function exportListNames(sf: SourceFile): Set<string> {
   return names;
 }
 
+/**
+ * A JavaScript file that exports nothing: a browser script (`<script type="module">` entry,
+ * plain script) or an entry module. Everything at its top level is reachable from the page,
+ * so the mapper treats its declarations as exported. A file with any ES export, or CommonJS
+ * `module.exports` / `exports.f =`, is a library module and keeps the exports-only rule.
+ * TypeScript files always keep the exports-only rule.
+ */
+const COMMONJS_EXPORT = /\bmodule\.exports\b|\bexports\.[A-Za-z_$][\w$]*\s*=/;
+function isPlainScript(sf: SourceFile, file: string): boolean {
+  if (!/\.[mc]?jsx?$/.test(file)) return false;
+  if (sf.getExportDeclarations().length || sf.getExportAssignments().length) return false;
+  if (sf.getStatements().some((st) => Node.isExportable(st) && st.hasExportKeyword())) return false;
+  return !COMMONJS_EXPORT.test(sf.getFullText());
+}
+
 function collectDecls(sf: SourceFile, file: string): Decl[] {
   const listed = exportListNames(sf);
+  const scriptMode = isPlainScript(sf, file);
   const exported = (stmt: { hasExportKeyword(): boolean }, name: string | undefined) =>
-    stmt.hasExportKeyword() || (name !== undefined && listed.has(name));
+    scriptMode || stmt.hasExportKeyword() || (name !== undefined && listed.has(name));
   const out: Decl[] = [];
   const seen = new Set<string>();
   const push = (d: Decl) => {
@@ -471,7 +489,8 @@ function inSkippedDir(parts: string[]): boolean {
 /**
  * Whether a repo-relative path is TypeScript/JavaScript app source that ts-morph maps:
  * not tests, tooling, configs, .d.ts or minified bundles. JS files go through the same
- * rules as TS (ES module exports only; CommonJS `module.exports = ...` is not mapped).
+ * rules as TS (ES module exports; CommonJS `module.exports = ...` is not mapped), except
+ * that a JS file with no exports at all maps its top-level declarations (see isPlainScript).
  */
 export function isTsMappable(relPath: string): boolean {
   const parts = relPath.split(/[\\/]/);

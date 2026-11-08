@@ -91,7 +91,7 @@ describe('any repo', () => {
     const { fn } = fakeSpawn();
     const spy = ((bin: string, args: string[], o: { env: Record<string, string> }) => { bins.push(bin); env.push(o.env.CONTRACT_TARGET); return (fn as unknown as (...a: unknown[]) => unknown)(bin, args, o); }) as never;
     const reg = new Registry(spy, 'tsx', root);
-    expect(cloneCommand('https://github.com/acme/shop.git', root)?.args).toEqual(['clone', 'https://github.com/acme/shop.git', join(root, '.contract', 'repos', 'shop')]);
+    expect(cloneCommand('https://github.com/acme/shop.git', root)?.args).toEqual(['clone', 'https://github.com/acme/shop.git', join(root, '.contract', 'repos', 'acme', 'shop')]);
     const { clone } = reg.setRepo('acme/shop');
     expect(clone?.key).toBe('clone');
     expect(bins[0]).toBe('git');
@@ -112,8 +112,8 @@ describe('any repo', () => {
 describe('switching repos safely', () => {
   it('pulls an existing clone instead of cloning again', () => {
     const root = mkdtempSync(join(tmpdir(), 'control-'));
-    mkdirSync(join(root, '.contract', 'repos', 'shop', '.git'), { recursive: true });
-    expect(cloneCommand('https://github.com/acme/shop.git', root)).toMatchObject({ label: 'Update repository', args: ['-C', join(root, '.contract', 'repos', 'shop'), 'pull', '--ff-only'] });
+    mkdirSync(join(root, '.contract', 'repos', 'acme', 'shop', '.git'), { recursive: true });
+    expect(cloneCommand('https://github.com/acme/shop.git', root)).toMatchObject({ label: 'Update repository', args: ['-C', join(root, '.contract', 'repos', 'acme', 'shop'), 'pull', '--ff-only'] });
   });
 
   it('needs a new session only when the open run mapped another repo', async () => {

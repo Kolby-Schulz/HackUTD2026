@@ -133,6 +133,27 @@ export class Daemon {
   touch() {
     this.lastState = '';
   }
+
+  /**
+   * Called once at start with this machine's machine_process rows. The server keeps them across
+   * a restart of the same daemon, so one that was killed (closed terminal, crash, a stop that
+   * never got synced) leaves its long processes at 'running' for good: the dashboard then
+   * disables Change and offers a Stop that fails with "not running". Rows this daemon doesn't own
+   * are marked stopped (finished ones stay as history), so the dashboard can clear them.
+   */
+  async adopt(rows: ProcessRow[]): Promise<void> {
+    for (const r of rows) {
+      if (r.status !== 'running' || this.reg.procs.has(r.procKey)) continue;
+      const note = '[control] started by an earlier npm run control that has since exited; no longer tracked';
+      await this.port.putProcess({ ...r, status: 'stopped', endedAtMs: this.now(), log: r.log ? `${r.log}\n${note}` : note });
+    }
+  }
+
+  /** Stops every process and pushes their final state, so a restart doesn't find them 'running'. */
+  async shutdown(): Promise<void> {
+    this.reg.stopAll();
+    await this.sync();
+  }
 }
 
 function parseArgs(json: string): Record<string, unknown> {
