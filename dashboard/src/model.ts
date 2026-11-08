@@ -140,6 +140,8 @@ export interface CaseView {
   instructionsA?: string;
   instructionsB?: string;
   durationText?: string;
+  /** Resolved conflicts only: ms from detection until both agents were told (the last push), else until the decision. */
+  resolvedMs?: number;
   steps: Step[];
 }
 
@@ -175,9 +177,27 @@ export function cases(t: Tables, w: Window): CaseView[] {
         opened: rel(openedAt), openedAt, decidedAt,
         owner: d ? person(ppl, d.ownerAgent) : undefined, reason: d?.reason, instructionsA: d?.instructionsA, instructionsB: d?.instructionsB,
         durationText: decidedAt !== undefined && !open ? ((decidedAt - openedAt) / 1000).toFixed(1) + 's' : undefined,
+        resolvedMs: c.status === 'resolved' && decidedAt !== undefined ? Math.max(pushedAt ?? decidedAt, decidedAt) - openedAt : undefined,
         steps,
       };
     });
+}
+
+export interface ResolveTimes { n: number; avgMs: number; fastestMs: number; slowestMs: number }
+
+/** How fast conflicts get settled: detection to agents told, over the resolved ones. */
+export function resolveTimes(cs: CaseView[]): ResolveTimes | undefined {
+  const xs = cs.map((c) => c.resolvedMs).filter((x): x is number => x !== undefined);
+  if (!xs.length) return undefined;
+  return { n: xs.length, avgMs: sum(xs) / xs.length, fastestMs: Math.min(...xs), slowestMs: Math.max(...xs) };
+}
+
+/** 19.9s, or 1m 05s once it passes a minute. */
+export function fmtSecs(msv: number): string {
+  const s = msv / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const whole = Math.round(s);
+  return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, '0')}s`;
 }
 
 function statusLabel(s: string): string {
