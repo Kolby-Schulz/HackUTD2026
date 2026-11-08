@@ -362,3 +362,10 @@ button { cursor: pointer; }
 @keyframes intro-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 /* the title card keeps its dark stage: its line art is drawn in near-white */
 .intro { --bg: #0d1117; --text: #f0f6fc; --text2: #9198a1; --border: #3d444d; color: var(--text); }
+
+.confirm-dialog { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); padding: 16px 18px; width: min(420px, calc(100vw - 32px)); box-shadow: 0 12px 32px rgba(0,0,0,0.18); }
+.confirm-dialog::backdrop { background: rgba(0,0,0,0.3); }
+.confirm-dialog h3 { font-size: 14px; margin: 0 0 6px; }
+.confirm-dialog p { margin: 0 0 8px; font-size: 13px; line-height: 1.45; }
+.confirm-dialog ul { margin: 0 0 12px; padding-left: 18px; font-size: 13px; }
+.confirm-dialog .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
