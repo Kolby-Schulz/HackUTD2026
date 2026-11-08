@@ -115,6 +115,20 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - todo (WP-62/44): one document title: `(N) <file name> · Playground` (WP-44 sets the file-name title, WP-62 the unread
   count; today whichever runs last wins).
 - WP-57, WP-59: no seam.
+- todo (WP-68): `ui/useBoot.ts` starts the coordinator next to `startAgents` (and stops it in cleanup):
+  `startCoordinator({ board, chat: sink.chat, pickSlot, freeSlot, onRedirect })` wired to the runtime's slot API
+  (check the real `occupy`/slot signatures in `agents/runtime.ts`).
+- todo (WP-71): `ui/shell/TopBar.tsx` `AvatarStack onPick={toggleFollow}` (follow an agent from its avatar).
+- todo (WP-73): `core/snap/move.ts` runs `snapSpacing(final, cands, t, round, axes)` from `./spacing` on axes without an
+  edge snap and builds lines from the spaced box (equal-gap snap + pink gap labels). Note: no hysteresis yet.
+- todo (WP-70): register `view.minimap` (Shift+KeyM) in `actions/view.ts` and remove the minimap's private window
+  keydown handler (one key dispatcher, D7).
+- todo (WP-74): `ui/gestures/pipeline.ts` `down()`: `if (p.handle?.startsWith('rot-')) { const m = startRotate(env, p);
+  if (m) { begin(m, p); return; } }` before `startResize` (+ import). Check `rotate.ts` setting `document.body.style.cursor`
+  does not fight the board's cursor handling.
+- todo (WP-77): `core/commands.ts` `BoardKit.reapply(by, txId)` (gate check, `undoManager.reapply`, `afterUndo`), and
+  `actions/edit.ts` skips "Nothing to undo" when `undoManager.last()?.outcome.skipped.length` (fields were superseded).
+- WP-65, WP-69, WP-75: no seam.
 
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).
