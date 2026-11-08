@@ -5,11 +5,18 @@
 // an Edit: report_change for created/removed/re-signed symbols (so Rule 1 fires even if the
 // model forgets) and report_edit with the diff (dashboard Code tab). Uses the agent's saved
 // identity from `npm run join`.
+//
+// It keeps one SpacetimeDB connection open (reports take ~100 ms, not a reconnect per file), and
+// serves the same connection to this agent's Claude Code hooks as its sidecar (sidecar.ts), so a
+// joined Claude Code session with the watcher running gets fast hooks too.
+import { hostname } from 'node:os';
 import { resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import { watch } from 'chokidar';
+import { connect } from '@contract/client';
 import { isMappable, SKIP_DIRS } from '@contract/mapper';
-import { hookAgent, reportFile } from './hook.ts';
+import { hookAgent } from './report.ts';
+import { startSidecar } from './sidecar.ts';
 import { repoFile } from './summary-hook.ts';
 
 const { values } = parseArgs({ options: { agent: { type: 'string' }, dir: { type: 'string', default: process.cwd() } } });
@@ -21,8 +28,20 @@ if (!agent) {
 }
 const repoDir = resolve(process.env.INIT_CWD ?? process.cwd(), values.dir!);
 const log = (m: string) => console.log(`[watch] ${m}`);
-const DEBOUNCE_MS = 400;
+const DEBOUNCE_MS = 150;
 const sessionKey = `watch-${agent.agentId}-${process.pid}`;
+
+// No register/heartbeat: `npm run join` registered this agent; the editor is what's working.
+const client = await connect({
+  host: agent.host,
+  dbName: agent.dbName,
+  token: agent.token,
+  repoDir,
+  noHeartbeat: true,
+  reconnect: true,
+  agent: { id: agent.agentId, name: agent.agentId, ownerDev: '', machine: hostname(), model: 'watch', tokenBudget: 0 },
+});
+const sidecar = await startSidecar({ agentId: agent.agentId, getConn: () => client.raw?.(), log });
 
 const pending = new Map<string, ReturnType<typeof setTimeout>>();
 let queue = Promise.resolve();
@@ -33,8 +52,8 @@ const onChange = (path: string) => {
   pending.set(rel, setTimeout(() => {
     pending.delete(rel);
     queue = queue
-      .then(() => reportFile({ ...agent, repoDir, rel, sessionKey, log }))
-      .catch((e: unknown) => log(`${rel}: ${e instanceof Error ? e.message : String(e)}`));
+      .then(() => sidecar.report(repoDir, rel, sessionKey))
+      .then(() => undefined, (e: unknown) => log(`${rel}: ${e instanceof Error ? e.message : String(e)}`));
   }, DEBOUNCE_MS));
 };
 
@@ -50,5 +69,7 @@ watcher.on('ready', () => log(`watching ${repoDir} as ${agent.agentId} (Ctrl-C t
 process.on('SIGINT', async () => {
   await watcher.close();
   await queue;
+  sidecar.close();
+  await client.disconnect();
   process.exit(0);
 });

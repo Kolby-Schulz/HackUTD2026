@@ -131,6 +131,8 @@ export function cleanPlan(raw: unknown): Plan {
 export class Assistant {
   messages: ChatMessage[] = [];
   busy = false;
+  /** Called whenever messages or busy change (the daemon pushes them right away). */
+  onChange?: () => void;
   private nextId = 1;
   /** Worker keys started from the chat that haven't been merged yet. */
   private pending = new Set<string>();
@@ -141,6 +143,7 @@ export class Assistant {
   say(role: ChatMessage['role'], text: string) {
     this.messages.push({ id: this.nextId++, role, text, at: Date.now() });
     if (this.messages.length > 200) this.messages.splice(0, this.messages.length - 200);
+    this.onChange?.();
   }
 
   view(after = 0) {
@@ -154,6 +157,7 @@ export class Assistant {
     if (body.length > 4000) throw new Error('message is longer than 4000 characters');
     if (this.busy) throw new Error('still working on your last message');
     this.busy = true;
+    this.onChange?.();
     const history = this.messages.slice();
     this.say('user', body);
     try {
@@ -166,6 +170,7 @@ export class Assistant {
       this.say('event', `Something went wrong: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       this.busy = false;
+      this.onChange?.();
     }
   }
 

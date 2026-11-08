@@ -2,7 +2,7 @@
 title: Agents and shared packages
 area: agents
 sources: [packages/client, packages/mcp, packages/llm, agents/worker]
-verified: self-run-checkpoint
+verified: claude/silly-sinoussi-243c95
 ---
 Summary: `packages/llm` is the only model gateway (`decide` for one structured answer, `runWorker` for a Claude Code run). `packages/client` wraps SpacetimeDB and is the only way a process joins Contract. `packages/mcp` exposes nine tools to workers, and `agents/worker` runs a headless Claude Code session in a git worktree with hooks for claims, change reports and summary caching.
 Spec basis: docs/SPEC.md sections 4, 10, 11, 12, plus docs/spec-additions-live-code.md and docs/spec-additions-summary-tools.md (both already built, per their status lines).
@@ -105,6 +105,7 @@ Claude Code hooks (`agents/worker/hook-settings.json`):
 - PreToolUse `Edit|Write|MultiEdit` runs `claim-guard.ts` (blocks edits on others' claims, blocks edits while paused, enforces `CONTRACT_ALLOWED_PATHS`).
 - PostToolUse `Edit|Write|MultiEdit` runs `hook.ts` (`contract-hook`: report_change for signature changes, report_edit with the diff).
 - Stop runs `summary-hook.ts` again (cache-hit counting).
+- The edit hooks are thin: they POST to the agent's sidecar (`sidecar.ts`; 127.0.0.1, port + secret in `.contract/sidecar/<id>.json`), which the worker starts on its own connection (`ContractClient.raw()`) and `watch.ts` starts on a persistent one. No sidecar -> `report.ts` (`directReport`/`directGuard`, a fresh connection, ~1 s). Keep `hook.ts`/`claim-guard.ts` free of mapper/SDK imports or every edit pays ~0.5 s again. `npm run latency` measures it.
 
 Early-stop estimate (`resume.ts:22`): average completion tokens of baseline `code` runs, minus what the stopped attempt already generated. Falls back to `DEFAULT_CODING_STEP_TOKENS = 4000` (resume.ts:15) without a baseline.
 
@@ -117,7 +118,7 @@ Unit tests (no server). Run from the repo root:
 - `npm test -w @contract/llm`: `packages/llm/test/nemotron.test.ts` (fake OpenAI client; covers decide, usage, abort, parseJson, createLLM). Nothing tests `ClaudeCodeLLM`; it has no unit test (unverified: nothing else covers it).
 - `npm test -w @contract/client`: `packages/client/test/{context,service,target}.test.ts` (pure helpers: buildContext, rankExisting, summaryKey, holdService, resolveTarget).
 - `npm test -w @contract/mcp`: `packages/mcp/test/tools.test.ts` (fake client; lists exactly the spec tools; checks the worker rules mention every tool).
-- `npm test -w @contract/worker`: `agents/worker/test/{hook,live-code,resume,summary-hook}.test.ts` (pure helpers only). No `vitest.config` in agents/worker; defaults apply.
+- `npm test -w @contract/worker`: `agents/worker/test/{hook,live-code,resume,summary-hook,sidecar}.test.ts` (pure helpers; sidecar over real HTTP with a fake connection). No `vitest.config` in agents/worker; defaults apply.
 
 Live tests (need a running SpacetimeDB):
 - `packages/client/test-live/client.test.ts` and `packages/mcp/test-live/mcp.test.ts`.

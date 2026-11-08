@@ -17,13 +17,16 @@
 // Both block with a message that names the tool to call. CONTRACT_PROTOCOL=off turns this
 // part off (the other-agent claim and pause checks stay).
 //
+// Thin like hook.ts: the question goes to this agent's sidecar (sidecar.ts), which answers from
+// its live subscription in milliseconds. With no sidecar it falls back to report.ts's
+// directGuard: parse the file and open a fresh connection (seconds).
+//
 // Fails open: no Contract env, a parse error or a server problem lets the edit through.
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { SymbolRange } from '@contract/mapper';
-import { repoFile } from './summary-hook.ts';
-import { hookAgent } from './hook.ts';
+import type { DbConnection } from '@contract/client';
+import { askSidecar } from './sidecar-client.ts';
 
 export interface GuardInput {
   cwd: string;
@@ -138,7 +141,59 @@ export function claimFirstMessage(ids: string[]): string {
   ].join('\n');
 }
 
-const sql = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** What the guard decided: 0 lets the edit through, 2 blocks it with `message`. */
+export interface GuardVerdict {
+  code: 0 | 2;
+  message?: string;
+}
+
+/** The rows the guard reads, taken from whatever connection holds them. */
+export interface GuardView {
+  status?: string;
+  /** An open or resolving conflict this agent is the paused side of. */
+  conflict?: { id: bigint; symbolId: string };
+  claims: ClaimRow[];
+  owners: Map<string, string>;
+  planActive: boolean;
+  mapped: Set<string>;
+}
+
+/** Reads a GuardView from a connection subscribed to claim, symbol, agent, this agent's plans and conflicts. */
+export function guardView(conn: DbConnection, agentId: string): GuardView {
+  const c = [...conn.db.conflict.iter()].find((x) => x.agentB === agentId && (x.status === 'open' || x.status === 'resolving'));
+  return {
+    status: conn.db.agent.id.find(agentId)?.status,
+    conflict: c ? { id: c.id, symbolId: c.symbolId } : undefined,
+    claims: [...conn.db.claim.iter()].map((r) => ({ symbolId: r.symbolId, agentId: r.agentId, expiresAtMs: Number(r.expiresAt.microsSinceUnixEpoch / 1000n) })),
+    owners: new Map([...conn.db.agent.iter()].map((a) => [a.id, [a.ownerDev, a.machine].filter(Boolean).join(', ')])),
+    planActive: [...conn.db.plan.iter()].some((p) => p.agentId === agentId && p.active),
+    mapped: new Set([...conn.db.symbol.iter()].map((s) => s.id)),
+  };
+}
+
+/**
+ * The guard's decision for an edit to `rel` touching `touched`. `retryable` marks the blocks
+ * that only mean "your own plan/claim isn't in the cache yet", which a cache a few ms behind the
+ * agent's own MCP call could produce; the sidecar re-checks those once before answering.
+ */
+export function guardVerdict(v: GuardView, o: { agentId: string; rel: string; touched: string[]; sourceFile: boolean; enforce: boolean; nowMs: number }): GuardVerdict & { retryable?: boolean } {
+  if (!o.sourceFile && !o.touched.length) return { code: 0 };
+  if (v.status === 'paused') return { code: 2, message: pausedMessage(v.conflict ? ` on conflict #${v.conflict.id} (${v.conflict.symbolId})` : '') };
+  const blocks = blockingClaims(v.claims, o.touched, o.agentId, o.nowMs);
+  if (blocks.length) return { code: 2, message: blockMessage(blocks, v.owners) };
+  if (!o.enforce) return { code: 0 };
+  if (o.sourceFile && !v.planActive) return { code: 2, message: planFirstMessage(o.rel), retryable: true };
+  const unclaimed = unclaimedByMe(v.claims, o.touched, v.mapped, o.agentId, o.nowMs);
+  if (unclaimed.length) return { code: 2, message: claimFirstMessage(unclaimed), retryable: true };
+  return { code: 0 };
+}
+
+/** Body of POST /guard on the sidecar. */
+export interface GuardRequest {
+  input: GuardInput;
+  repoDir: string;
+  enforce: boolean;
+}
 
 async function main(): Promise<number> {
   // stderr is the message Claude Code shows the model, so keep the SpacetimeDB SDK's logs out of it.
@@ -155,77 +210,15 @@ async function main(): Promise<number> {
       return 2;
     }
   }
-  const agent = hookAgent();
-  if (!agent) return 0;
-  const { agentId, token, host } = agent;
-  const rel = path ? repoFile(path, input.cwd, repoDir) : undefined;
-  if (!rel) return 0;
-
-  const { isMappable, symbolRangesAsync, symbolsTouched, useMapPolicy } = await import('@contract/mapper');
-  useMapPolicy(repoDir); // the target's contract.json "map"
+  const agentId = process.env.CONTRACT_AGENT_ID;
+  if (!agentId || !path) return 0;
   const enforce = (process.env.CONTRACT_PROTOCOL ?? 'enforce') !== 'off';
-  const sourceFile = isMappable(rel);
-  let touched: string[] = [];
-  if (existsSync(resolve(repoDir, rel))) { // new files have no claims
-    const current = readFileSync(resolve(repoDir, rel), 'utf8');
-    const ranges: SymbolRange[] = await symbolRangesAsync(rel, current);
-    touched = symbolsTouched(ranges, pendingLines(input, current));
-  }
-  if (!sourceFile && !touched.length) return 0;
-
-  const { DbConnection } = await import('@contract/client');
-  const conn = await new Promise<InstanceType<typeof DbConnection>>((ok, fail) => {
-    const c: InstanceType<typeof DbConnection> = DbConnection.builder()
-      .withUri(host)
-      .withDatabaseName(agent.dbName)
-      .withToken(token)
-      .onConnect(() => {
-        c.subscriptionBuilder()
-          .onApplied(() => ok(c))
-          .onError((ctx) => fail(new Error(`subscription failed: ${String(ctx.event ?? 'unknown error')}`)))
-          .subscribe([
-            ...touched.map((id) => `SELECT * FROM claim WHERE symbol_id = ${sql(id)}`),
-            ...touched.map((id) => `SELECT * FROM symbol WHERE id = ${sql(id)}`),
-            `SELECT * FROM plan WHERE agent_id = ${sql(agentId)}`,
-            'SELECT * FROM agent',
-            `SELECT * FROM conflict WHERE agent_b = ${sql(agentId)}`,
-          ]);
-      })
-      .onConnectError((_ctx, err) => fail(err))
-      .build();
-  });
-  try {
-    if (conn.db.agent.id.find(agentId)?.status === 'paused') {
-      const c = [...conn.db.conflict.iter()].find((x) => x.status === 'open' || x.status === 'resolving');
-      process.stderr.write(pausedMessage(c ? ` on conflict #${c.id} (${c.symbolId})` : '') + '\n');
-      return 2;
-    }
-    const claims = [...conn.db.claim.iter()].map((c) => ({
-      symbolId: c.symbolId,
-      agentId: c.agentId,
-      expiresAtMs: Number(c.expiresAt.microsSinceUnixEpoch / 1000n),
-    }));
-    const blocks = blockingClaims(claims, touched, agentId, Date.now());
-    if (blocks.length) {
-      const owners = new Map([...conn.db.agent.iter()].map((a) => [a.id, [a.ownerDev, a.machine].filter(Boolean).join(', ')]));
-      process.stderr.write(blockMessage(blocks, owners) + '\n');
-      return 2;
-    }
-    if (!enforce) return 0;
-    if (sourceFile && ![...conn.db.plan.iter()].some((p) => p.agentId === agentId && p.active)) {
-      process.stderr.write(planFirstMessage(rel) + '\n');
-      return 2;
-    }
-    const mapped = new Set([...conn.db.symbol.iter()].map((s) => s.id));
-    const unclaimed = unclaimedByMe(claims, touched, mapped, agentId, Date.now());
-    if (unclaimed.length) {
-      process.stderr.write(claimFirstMessage(unclaimed) + '\n');
-      return 2;
-    }
-    return 0;
-  } finally {
-    conn.disconnect();
-  }
+  const req: GuardRequest = { input, repoDir, enforce };
+  const verdict =
+    (await askSidecar<GuardVerdict>(agentId, '/guard', req, 3000)) ??
+    (await (await import('./report.ts')).directGuard(input, repoDir, enforce));
+  if (verdict.code === 2 && verdict.message) process.stderr.write(verdict.message + '\n');
+  return verdict.code === 2 ? 2 : 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

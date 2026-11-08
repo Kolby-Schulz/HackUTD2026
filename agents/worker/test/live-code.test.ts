@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { symbolRanges, symbolsTouched } from '@contract/mapper';
-import { changedLines, fileDiff } from '../src/hook.ts';
+import { changedLines, fileDiff } from '../src/report.ts';
 import { blockingClaims, blockMessage, claimFirstMessage, pendingLines, planFirstMessage, unclaimedByMe } from '../src/claim-guard.ts';
 
 const SRC = [

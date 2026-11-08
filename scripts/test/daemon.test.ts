@@ -1,9 +1,9 @@
 // Control daemon (scripts/daemon.ts): runs queued machine_command rows once, fails stale or bad
 // ones, and pushes only what changed (machine state, processes, chat) back to the database.
 import { EventEmitter } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Registry } from '../control.ts';
-import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, TakeoverGuard, takeOverPidFile, type MachineCommand, type MachinePort, type ProcessRow } from '../daemon.ts';
+import { browserCommand, COALESCE_MS, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, TakeoverGuard, takeOverPidFile, type MachineCommand, type MachinePort, type ProcessRow } from '../daemon.ts';
 
 function fakeSpawn() {
   const calls: string[][] = [];
@@ -98,6 +98,64 @@ describe('Daemon', () => {
     const { daemon, log } = setup();
     await daemon.handle(cmd(1, 'chat', { text: 'hi' }));
     expect(log.finished).toEqual([[1n, false, 'chat is off on this laptop']]);
+  });
+});
+
+describe('Daemon event-driven sync', () => {
+  it('pushes a burst of log lines in one coalesced sync, without a polling tick', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fn } = fakeSpawn();
+      const reg = new Registry(fn, 'tsx', '/tmp');
+      const logs: string[] = [];
+      const port: MachinePort = {
+        update: async () => undefined, finish: async () => undefined, deleteProcess: async () => undefined, postChat: async () => undefined,
+        putProcess: async (p) => void logs.push(p.log),
+      };
+      const daemon = new Daemon(reg, port, undefined, () => 1_000_000);
+      daemon.listen();
+      const p = reg.start({ key: 'worker:a', label: 'a', long: true, args: ['x.ts'] });
+      const child = p.child as unknown as { stdout: { emit: (e: string, b: Buffer) => void } };
+      for (let i = 0; i < 5; i++) child.stdout.emit('data', Buffer.from(`line ${i}\n`));
+      expect(logs).toEqual([]); // nothing sent inside the coalescing window
+      await vi.advanceTimersByTimeAsync(COALESCE_MS);
+      expect(logs).toEqual(['line 0\nline 1\nline 2\nline 3\nline 4']);
+      child.stdout.emit('data', Buffer.from('line 5\n'));
+      await vi.advanceTimersByTimeAsync(COALESCE_MS);
+      expect(logs.at(-1)?.endsWith('line 5')).toBe(true);
+      expect(logs).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('runs at most one sync at a time and queues one more pass for changes during it', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let updates = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const port: MachinePort = {
+      update: async () => {
+        updates++;
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        if (updates === 1) await gate;
+        inFlight--;
+      },
+      finish: async () => undefined, putProcess: async () => undefined, deleteProcess: async () => undefined, postChat: async () => undefined,
+    };
+    const daemon = new Daemon(new Registry(fakeSpawn().fn, 'tsx', '/tmp'), port);
+    const first = daemon.flush();
+    await new Promise((r) => setTimeout(r, 0)); // the first pass is now running (inside update)
+    daemon.touch();
+    const second = daemon.flush();
+    const third = daemon.flush(); // joins the queued pass
+    expect(second).toBe(third);
+    release();
+    await Promise.all([first, second]);
+    expect(updates).toBe(2);
+    expect(maxInFlight).toBe(1);
   });
 });
 

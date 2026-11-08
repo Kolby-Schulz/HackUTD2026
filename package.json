@@ -26,7 +26,8 @@
     "join": "tsx scripts/join.ts",
     "judge": "tsx scripts/judge.ts",
     "bench": "tsx scripts/bench.ts",
-    "control": "tsx scripts/control.ts"
+    "control": "tsx scripts/control.ts",
+    "latency": "tsx scripts/latency.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

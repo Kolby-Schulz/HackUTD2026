@@ -41,13 +41,59 @@ export interface MachinePort {
 /** Commands older than this when the daemon first sees them are failed, not run (e.g. queued while it was off). */
 export const STALE_COMMAND_MS = 60_000;
 const LOG_TAIL = 100;
+/** Changes within this window go out in one sync, so a burst of log lines is one reducer call. */
+export const COALESCE_MS = 100;
+/** The machine row is resent this often even when nothing changed (the dashboard's online check). */
+export const HEARTBEAT_MS = 10_000;
 
 export class Daemon {
   private seen = new Set<bigint>();
   private sentProcs = new Map<string, string>();
   private sentChat = 0;
   private lastState = '';
+  private timer?: ReturnType<typeof setTimeout>;
+  private last: Promise<void> = Promise.resolve();
+  private queued?: Promise<void>;
   constructor(private reg: Registry, private port: MachinePort, private assistant?: Assistant, private now = () => Date.now()) {}
+
+  /** Pushes changes as they happen: every registry or chat change schedules a coalesced sync. */
+  listen() {
+    this.reg.onChange = () => this.schedule();
+    if (this.assistant) this.assistant.onChange = () => this.schedule();
+  }
+
+  /** Syncs within `delayMs` (default COALESCE_MS); calls inside that window share one sync. */
+  schedule(delayMs = COALESCE_MS) {
+    if (this.timer) {
+      if (delayMs > 0) return;
+      clearTimeout(this.timer); // sooner wins
+    }
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      void this.flush();
+    }, delayMs);
+    this.timer.unref?.();
+  }
+
+  /**
+   * One sync at a time. A call while one runs queues exactly one more pass (later calls join it),
+   * so the newest state always goes out and a caller waits for at most two passes, never for a
+   * stream of log lines. Never throws; failures are logged.
+   */
+  flush(): Promise<void> {
+    if (this.queued) return this.queued;
+    const pass = this.last.then(async () => {
+      this.queued = undefined; // changes from here on need another pass
+      try {
+        await this.sync();
+      } catch (e) {
+        console.error(`[control] sync: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+    this.queued = pass;
+    this.last = pass;
+    return pass;
+  }
 
   /** Runs one queued command and marks it done or failed. Each id runs at most once. */
   async handle(cmd: MachineCommand): Promise<void> {
@@ -62,7 +108,7 @@ export class Daemon {
       console.log(`[control] ${cmd.action} failed: ${error}`);
     }
     await this.port.finish(cmd.id, !error, error);
-    await this.sync();
+    await this.flush();
   }
 
   private async run(action: string, args: Record<string, unknown>) {
@@ -87,7 +133,7 @@ export class Daemon {
         if (this.assistant.busy) throw new Error('still working on your last message');
         const text = str('text').trim();
         if (!text) throw new Error('message is empty');
-        void this.assistant.chat(text).finally(() => void this.sync()); // answers arrive through machine_chat
+        void this.assistant.chat(text).finally(() => this.schedule(0)); // answers arrive through machine_chat
         return;
       }
       default: {
@@ -152,7 +198,9 @@ export class Daemon {
   /** Stops every process and pushes their final state, so a restart doesn't find them 'running'. */
   async shutdown(): Promise<void> {
     this.reg.stopAll();
-    await this.sync();
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = undefined;
+    await this.flush();
   }
 }
 

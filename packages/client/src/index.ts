@@ -140,6 +140,12 @@ export interface ContractClient {
   logSaving(kind: SavingKind, tokensAvoidedEst: number, note: string): Promise<void>;
 
   disconnect(): Promise<void>;
+
+  /**
+   * The live SpacetimeDB connection (undefined while reconnecting or after disconnect). It changes
+   * on reconnect, so call it each time. The worker's hook sidecar uses it instead of opening its own.
+   */
+  raw?(): DbConnection | undefined;
 }
 
 /** Thrown by claim() when another agent holds an unexpired claim on the symbol. */
@@ -483,6 +489,10 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     async logSaving(kind, tokensAvoidedEst, note) {
       live();
       await r.logSaving({ runId: currentRunId(), agentId, kind, tokensAvoidedEst: u32(tokensAvoidedEst), note });
+    },
+
+    raw() {
+      return state.closed ? undefined : conn;
     },
 
     async disconnect() {

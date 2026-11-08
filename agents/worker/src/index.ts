@@ -32,6 +32,7 @@ import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
 import { createPromptTask, waitForTask } from './session-task.ts';
+import { startSidecar } from './sidecar.ts';
 import { TASKS } from './tasks.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -133,6 +134,13 @@ if (mode === 'with_contract') {
   contract.disconnect = async () => server?.disconnect();
 }
 if (mode === 'with_contract') saveToken(contract.token);
+// The edit hooks (hook.ts, claim-guard.ts) hand their work to this sidecar, which reuses our
+// connection: an edit reaches the server in ~100 ms instead of a fresh process + connection.
+if (mode === 'with_contract') {
+  await startSidecar({ agentId, getConn: () => contract.raw?.(), log: (m) => console.log(`[${agentId}] ${m}`) }).catch((e: unknown) =>
+    console.warn(`[${agentId}] hook sidecar didn't start (hooks fall back to their own connection): ${e instanceof Error ? e.message : String(e)}`),
+  );
+}
 
 // Session flow: the task row comes from the open run (our own, or one the dashboard made).
 if (session) {

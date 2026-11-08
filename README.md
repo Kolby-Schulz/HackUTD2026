@@ -314,6 +314,34 @@ Across 2 scenario(s) and 4 runs, Contract saved **26%** of the cost (0% of token
 _Generated 2026-11-08T07:33:30.039Z by `npm run bench`. Averages per run; tokens include cache reads (cost is what was billed)._
 <!-- bench:end -->
 
+## Latency
+
+An edit on one laptop should show up on the other laptop's dashboard in well under a second.
+Each Claude Code edit runs two hooks (`agents/worker/src/claim-guard.ts` before it,
+`hook.ts` after it). They are thin: they hand the file to the agent's **sidecar** over
+`127.0.0.1` (port file in `.contract/sidecar/<agent>.json`). The sidecar runs inside the
+worker, or inside `npm run watch-agent` for a joined editor, and keeps one open SpacetimeDB
+connection with the parser loaded. With no sidecar, the hooks fall back to doing the work
+themselves, about 1 s slower.
+
+```bash
+npm run latency                      # this laptop: each hook stage, old path vs sidecar
+npm run latency -- --echo            # laptop B: answer pings until Ctrl-C
+npm run latency -- --ping --n 20     # laptop A: round trip via laptop B (median / p95)
+```
+
+Measured on one MacBook against Maincloud (medians):
+
+| Stage | Before (fresh process per edit) | After (sidecar) |
+| --- | --- | --- |
+| PostToolUse hook process | 988 ms (tsx 177 + mapper import 395 + connect 157 + subscribe 35 + reducer 33 + parse/diff) | 161 ms (hands off and exits) |
+| PreToolUse claim guard | 943 ms | 151 ms (answers from the cache) |
+| Sidecar parse + diff + reducer call | n/a | 55 ms |
+| Server to another connection (`onInsert`) | 36 ms | 36 ms |
+| **Edit to another dashboard (estimated)** | **~990 ms** | **~220 ms** |
+
+What is left is mostly the `tsx` start for the hook process.
+
 ## Commands
 
 ```bash
@@ -326,6 +354,7 @@ npm run dashboard
 npm run demo -- --mode without_contract --seed 7
 npm run reset
 npm run typecheck
+npm run latency        # edit-to-dashboard timings (see Latency)
 ```
 
 ## License

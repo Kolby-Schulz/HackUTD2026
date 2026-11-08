@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { mapFileAsync, signatureHash, symbolRangesAsync, symbolsTouched, type MappedSymbol } from '@contract/mapper';
 import { pendingLines } from '../src/claim-guard.ts';
-import { detectChanges, editedFile, type SymbolRow } from '../src/hook.ts';
+import { detectChanges, editedFile, type SymbolRow } from '../src/report.ts';
 
 const OLD = 'export function calcFee(amount: number): number';
 const NEW = 'export function calcFee(amount: number, currency: string): number';

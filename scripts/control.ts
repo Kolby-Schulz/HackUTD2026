@@ -25,7 +25,7 @@ import { createLLM } from '@contract/llm';
 import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingTool } from '@contract/client';
 import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
-import { browserCommand, Daemon, Pairer, TakeoverGuard, takeOverPidFile, type MachinePort } from './daemon.ts';
+import { browserCommand, Daemon, HEARTBEAT_MS, Pairer, TakeoverGuard, takeOverPidFile, type MachinePort } from './daemon.ts';
 import { machineId, machineTokenKey, REPO, savedToken, saveToken, TSX, TSX_CLI } from './lib.ts';
 
 const LOG_LINES = 300;
@@ -214,6 +214,8 @@ export class Registry {
   info?: RepoInfo;
   /** Where repo, sessionRepo and machine are saved so a restart keeps them (unset in tests). */
   stateFile?: string;
+  /** Called on every change the dashboard shows: a log line, a process starting or ending, the repo. */
+  onChange?: () => void;
   constructor(private spawnFn: typeof spawn = spawn, private bin = TSX, private cwd = REPO) {}
   /** The default bin is node, which needs tsx's entry first (see TSX in lib.ts); a test's stand-in doesn't. */
   private get binArgs(): string[] { return this.bin === TSX ? [TSX_CLI] : []; }
@@ -259,6 +261,7 @@ export class Registry {
     } catch {
       this.info = undefined;
     }
+    this.onChange?.();
   }
 
   /**
@@ -317,9 +320,11 @@ export class Registry {
     });
     const p: Proc = { key: cmd.key, label: cmd.label, long: cmd.long, status: 'running', code: null, startedAt: Date.now(), log: [], child };
     this.procs.set(cmd.key, p);
+    this.onChange?.();
     const add = (chunk: Buffer) => {
       for (const line of chunk.toString().split(/\r?\n/)) if (line.trim()) p.log.push(line);
       if (p.log.length > LOG_LINES) p.log.splice(0, p.log.length - LOG_LINES);
+      this.onChange?.();
     };
     child.stdout?.on('data', add);
     child.stderr?.on('data', add);
@@ -335,6 +340,7 @@ export class Registry {
         if (hint) p.log.push(hint);
         resolveExit(code);
         onExit?.(p);
+        this.onChange?.();
       };
       child.on('error', (e) => { p.log.push(`[control] ${e.message}`); done(null); });
       child.on('exit', (code) => done(code));
@@ -346,6 +352,7 @@ export class Registry {
     const p = this.procs.get(key);
     if (!p || p.status !== 'running' || !p.child?.pid) throw new Error(`${key} is not running`);
     p.status = 'stopped';
+    this.onChange?.();
     // Windows has no process groups (kill(-pid) throws), so taskkill /T ends the whole tree there.
     if (process.platform === 'win32') {
       try { execFileSync('taskkill', ['/pid', String(p.child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch { p.child.kill(); }
@@ -514,12 +521,14 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   conn.db.machineCommand.onInsert((_ctx, row) => enqueue(row));
   for (const row of [...conn.db.machineCommand.iter()].sort((a, b) => (a.id < b.id ? -1 : 1))) enqueue(row);
 
-  // Push process/log/chat changes every second; resend the machine row every 10 s as the heartbeat.
-  let ticks = 0;
+  // Push process/log/chat changes as they happen (coalesced over ~100 ms, see Daemon.schedule),
+  // off the command queue so a slow command never holds them up; resend the machine row every
+  // 10 s as the heartbeat.
+  daemon.listen();
   setInterval(() => {
-    if (++ticks % 10 === 0) daemon.touch();
-    queue = queue.then(() => daemon.sync()).catch((e: unknown) => console.error(`[control] sync: ${e instanceof Error ? e.message : String(e)}`));
-  }, 1000);
+    daemon.touch();
+    daemon.schedule(0);
+  }, HEARTBEAT_MS);
   // Rows an earlier daemon left at 'running' (it was killed before it could report) are marked stopped.
   await daemon.adopt([...conn.db.machineProcess.iter()].filter((p) => p.machineId === id).map((p) => ({
     procKey: p.procKey, label: p.label, long: p.long, status: p.status, code: p.code, startedAtMs: p.startedAtMs, endedAtMs: p.endedAtMs, log: p.log,
