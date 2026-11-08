@@ -12,7 +12,14 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
 - MVP, two-laptop shared Maincloud DB, any-agent join, replay, benchmark, Nemotron coordinator (#43), coordinator duplicate reuse (#44). 25 PRs merged.
 
 ## In flight (local, not on GitHub)
-- Playground design board (`#/playground`, branch `feat/dashboard-playground`): board + agents committed (6ecef41), chat + comment tool uncommitted. Full plan in [[playground-plan]]: 411 features, 84 work packages. Wave 0 DONE on `feat/dashboard-playground` (merge only in `.worktrees/integration`; 238 tests). Wave 1 batch 1 running (WP-13, 14, 15, 18, 23, 34, 36, 39, 41, 42); batch 2 next (WP-17, 19, 20, 24, 25, 37, 38, 40, 43, 44), checked file-disjoint. Unverified so far: comment flow and narrow layout after WP-12 (needs a visible browser pane). Queued: WP-NET-0. Another session works in the main checkout on `feat/variants`.
+- Playground design board (`#/playground`). Plan: [[playground-plan]]; seams: `docs/playground/WIRING.md`.
+  - Branches: `playground/features` (WP merges only, worktree `.worktrees/features`), `playground/wiring` (seams only,
+    `.worktrees/wiring`), `feat/dashboard-playground` (fast-forwards to wiring after checks + visual pass).
+  - Wave 0 done; Wave 1 done (all 39 WPs; features e4da972, 612 tests). Wave 2 started early (WP-52, 55, 56, 58, 61, 63,
+    64 merged) before the owner asked to finish phases in order; no more Wave 2 until wiring + visual pass are done.
+  - Running: wiring agents W-chat, W-board, W-core (worktrees `.worktrees/w-*`, branches `wire/*`, file-disjoint).
+  - Next: review + merge wire/* into playground/wiring, visual pass of the demo checklist (needs a visible browser
+    pane), then fast-forward feat/dashboard-playground. Then remaining Wave 2/3 and WP-NET-0.
 
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
 - #26: submission package (README, diagram, demo video, Devpost)
