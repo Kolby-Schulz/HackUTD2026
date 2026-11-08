@@ -74,7 +74,8 @@ function useControl() {
   return { status, down, refresh: () => setTick((n) => n + 1) };
 }
 
-export function ControlTab({ openRun }: { openRun?: R.Run }) {
+/** `chat` false: the workbench shows the assistant in its own Chat pane, so this tab only has the controls. */
+export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: boolean }) {
   const { status, down, refresh } = useControl();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
@@ -105,7 +106,7 @@ export function ControlTab({ openRun }: { openRun?: R.Run }) {
     return (
       <section className="card pad control-off">
         <h2 style={{ fontSize: 16 }}>Start Contract's chat on this laptop</h2>
-        <p className="muted">Run this once in a terminal in the repo. Then you can type what you want built here, and Contract starts the coordinator, a session and the agents for you:</p>
+        <p className="muted">Run this once in a terminal in the repo. Then you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and Contract starts the coordinator, a session and the agents for you:</p>
         <pre className="mono">npm run control</pre>
         <p className="muted" style={{ fontSize: 12 }}>It only listens on 127.0.0.1 and only runs commands on this machine. Each laptop runs its own.</p>
       </section>
@@ -124,7 +125,7 @@ export function ControlTab({ openRun }: { openRun?: R.Run }) {
       <RepoPicker status={status} openRun={openRun} locked={procs.some((p) => p.status === 'running' && p.key !== 'clone')} busy={!!busy}
         onSet={(repo) => act('Set repository', '/repo', { repo })} />
       {error && <div className="banner" role="alert">{error}</div>}
-      <ChatPanel openRun={openRun} onChange={refresh} demo={isDemo} repoLabel={status?.repoLabel} />
+      {chat && <ChatPanel openRun={openRun} onChange={refresh} demo={isDemo} repoLabel={status?.repoLabel} />}
       <details className="card pad manual">
       <summary>Manual controls <span className="muted">· start and stop each piece yourself, with each process's output</span></summary>
       <div className="control" style={{ marginTop: 14 }}>
@@ -157,7 +158,7 @@ export function ControlTab({ openRun }: { openRun?: R.Run }) {
 
         <section className="card pad step wide">
           <div className="cap muted">3 · Agents</div>
-          <p className="muted">Starts a Claude Code worker on this laptop. Leave the task empty and it waits for one from the <b>New task</b> form in the left column.</p>
+          <p className="muted">Starts a Claude Code worker on this laptop. Leave the task empty and it waits for one: pick it in <b>Chat</b> and send it a task.</p>
           <form className="worker-form" onSubmit={(e) => { e.preventDefault(); void act(`Start ${workerId}`, '/run', { action: 'worker', id: workerId.trim(), prompt }).then(() => setPrompt('')); }}>
             <label className="field">
               <span className="cap muted">Agent id</span>
@@ -322,23 +323,21 @@ function RepoPicker({ status, openRun, locked, busy, onSet }: {
   );
 }
 
-interface ChatMessage { id: number; role: 'user' | 'assistant' | 'event'; text: string; at: number }
+export interface ChatMessage { id: number; role: 'user' | 'assistant' | 'event'; text: string; at: number }
 
-const EXAMPLES = [
+export const EXAMPLES = [
   'Add a late fee to overdue invoices',
   'Add late fees to invoices, and have another agent show dates as YYYY-MM-DD on receipts',
   "What's happening right now?",
 ];
 
 /** The chat: type what you want built; the assistant (scripts/assistant.ts) runs everything. */
-function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; onChange: () => void; demo: boolean; repoLabel?: string }) {
+/** The assistant's conversation (scripts/assistant.ts via the control server), polled once a
+ *  second while the server answers. `up` is false when this laptop isn't running `npm run control`. */
+export function useAssistant(onChange?: () => void) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
-  const [text, setText] = useState('');
-  const [error, setError] = useState<string>();
-  const [sending, setSending] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
-
+  const [up, setUp] = useState(false);
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
@@ -347,14 +346,30 @@ function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; on
         .then((r) => r.json() as Promise<{ busy: boolean; messages: ChatMessage[] }>)
         .then((c) => {
           if (!alive) return;
+          setUp(true);
           setMessages((prev) => (prev.length === c.messages.length && prev.at(-1)?.id === c.messages.at(-1)?.id ? prev : c.messages));
           setBusy(c.busy);
           timer = setTimeout(load, 1000);
         })
-        .catch(() => { if (alive) timer = setTimeout(load, 4000); });
+        .catch(() => { if (alive) { setUp(false); timer = setTimeout(load, 4000); } });
     load();
     return () => { alive = false; clearTimeout(timer); };
   }, []);
+  async function send(text: string) {
+    await post('/chat', { text });
+    setBusy(true);
+    setMessages((m) => [...m, { id: -Date.now(), role: 'user', text, at: Date.now() }]);
+    onChange?.();
+  }
+  return { messages, busy, up, send };
+}
+
+function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; onChange: () => void; demo: boolean; repoLabel?: string }) {
+  const { messages, busy, send } = useAssistant(onChange);
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string>();
+  const [sending, setSending] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { endRef.current?.scrollIntoView({ block: 'nearest' }); }, [messages.length, busy]);
 
@@ -364,11 +379,8 @@ function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; on
     setSending(true);
     setError(undefined);
     try {
-      await post('/chat', { text: msg });
+      await send(msg);
       setText('');
-      setBusy(true);
-      setMessages((m) => [...m, { id: -Date.now(), role: 'user', text: msg, at: Date.now() }]);
-      onChange();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

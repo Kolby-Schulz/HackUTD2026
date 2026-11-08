@@ -395,6 +395,8 @@ export interface MapNode {
   kind: string;
   version: number;
   owner?: Person;
+  /** Who is on this symbol: the claim holder, or every agent planning to create it. */
+  owners: Person[];
   state: NodeState;
   ghost: boolean;
   col: number;
@@ -407,8 +409,13 @@ export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; 
   const ppl = people(t.agents);
   const ids = new Set(t.symbols.map((s) => s.id));
   const active = new Set(t.plans.filter((p) => p.active).map((p) => p.id));
-  const ghosts = new Map<string, string>(); // symbol id -> agent id
-  for (const i of t.planItems) if (i.intent === 'create' && active.has(i.planId) && !ids.has(i.symbolId)) ghosts.set(i.symbolId, i.agentId);
+  const ghosts = new Map<string, string[]>(); // symbol id -> agents planning to create it
+  for (const i of t.planItems) {
+    if (i.intent !== 'create' || !active.has(i.planId) || ids.has(i.symbolId)) continue;
+    const xs = ghosts.get(i.symbolId) ?? [];
+    if (!xs.includes(i.agentId)) xs.push(i.agentId);
+    ghosts.set(i.symbolId, xs);
+  }
 
   const hotSyms = new Set(t.conflicts.filter((c) => (c.status === 'open' || c.status === 'resolving') && inWin(w, ms(c.createdAt))).map((c) => c.symbolId));
   const changed = new Set(t.changes.filter((c) => inWin(w, ms(c.createdAt))).map((c) => c.symbolId));
@@ -442,11 +449,12 @@ export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; 
     const r = rows.get(c) ?? 0;
     rows.set(c, r + 1);
     const ghost = !s;
-    const ownerId = claimBy.get(id) ?? (ghost ? ghosts.get(id) : undefined);
+    const ownerIds = claimBy.has(id) ? [claimBy.get(id)!] : ghost ? ghosts.get(id) ?? [] : [];
+    const ownerId = ownerIds[0];
     const state: NodeState = hotSyms.has(id) ? 'conflict' : changed.has(id) ? 'changed' : ghost ? 'planned' : claimBy.has(id) ? 'claimed' : 'idle';
     return {
       id, name: s?.name ?? symbolName(id), file: s?.file ?? symbolFile(id), kind: s?.kind ?? 'function', version: s?.version ?? 0,
-      owner: ownerId ? person(ppl, ownerId) : undefined, state, ghost, col: c, row: r,
+      owner: ownerId ? person(ppl, ownerId) : undefined, owners: ownerIds.map((x) => person(ppl, x)), state, ghost, col: c, row: r,
     };
   });
   return {
@@ -619,4 +627,88 @@ export function replayMarks(t: Tables, run: R.Run): { at: number; label: string 
     .filter((c) => ms(c.createdAt) >= start && ms(c.createdAt) <= end)
     .sort((a, b) => Number(a.id - b.id))
     .map((c) => ({ at: ms(c.createdAt) - start, label: `#${c.id} ${CONFLICT_KIND[c.kind]?.label ?? c.kind}` }));
+}
+
+/* ---------------- workbench (one-screen dashboard) ---------------- */
+
+export type HistoryTone = 'agent' | 'plan' | 'change' | 'conflict' | 'resolved';
+export interface HistoryItem { key: string; at: number; time: string; title: string; sub: string; tone: HistoryTone; color?: string }
+
+/** What happened to one symbol in this run, oldest first: plans, claim, changes, conflicts, rulings. */
+export function symbolHistory(t: Tables, w: Window, symbolId: string): HistoryItem[] {
+  const ppl = people(t.agents);
+  const rel = (x: number) => fmtClock(x - w.start);
+  const out: HistoryItem[] = [];
+  const INTENT: Record<string, string> = { modify: 'plans to change it', create: 'plans to create it', depend: 'depends on it' };
+  for (const i of t.planItems) {
+    if (i.symbolId !== symbolId) continue;
+    const p = t.plans.find((x) => x.id === i.planId);
+    if (!p || !inWin(w, ms(p.createdAt))) continue;
+    const who = person(ppl, i.agentId);
+    out.push({ key: 'plan' + i.id, at: ms(p.createdAt), time: rel(ms(p.createdAt)), title: `Planned by ${who.name}`, sub: INTENT[i.intent] ?? i.intent, tone: 'plan', color: who.color });
+  }
+  for (const c of t.claims) {
+    if (c.symbolId !== symbolId || !inWin(w, ms(c.claimedAt))) continue;
+    const who = person(ppl, c.agentId);
+    out.push({ key: 'claim', at: ms(c.claimedAt), time: rel(ms(c.claimedAt)), title: `Claimed by ${who.name}`, sub: `held until T+${fmtClock(ms(c.expiresAt) - w.start, false)}`, tone: 'agent', color: who.color });
+  }
+  for (const c of t.changes) {
+    if (c.symbolId !== symbolId || !inWin(w, ms(c.createdAt))) continue;
+    const title = c.kind === 'created' ? 'Created' : c.kind === 'removed' ? 'Removed' : `Changed (${c.kind})`;
+    out.push({ key: 'change' + c.id, at: ms(c.createdAt), time: rel(ms(c.createdAt)), title, sub: c.description || c.newSignature || `by ${person(ppl, c.agentId).name}`, tone: 'change' });
+  }
+  for (const c of t.conflicts) {
+    if (c.symbolId !== symbolId || !inWin(w, ms(c.createdAt))) continue;
+    const k = CONFLICT_KIND[c.kind] ?? { label: c.kind, rule: '' };
+    out.push({ key: 'conflict' + c.id, at: ms(c.createdAt), time: rel(ms(c.createdAt)), title: `Conflict #${c.id} opened`,
+      sub: `${k.label} between ${person(ppl, c.agentA).name} and ${person(ppl, c.agentB).name}`, tone: 'conflict' });
+    const d = t.decisions.find((x) => x.conflictId === c.id);
+    const doneAt = d ? ms(d.createdAt) : c.resolvedAt ? ms(c.resolvedAt) : undefined;
+    if (doneAt !== undefined && (c.status === 'resolved' || c.status === 'dismissed')) {
+      const secs = ((doneAt - ms(c.createdAt)) / 1000).toFixed(1);
+      out.push({ key: 'resolved' + c.id, at: doneAt, time: rel(doneAt), title: c.status === 'dismissed' ? `Dismissed in ${secs}s` : `Resolved in ${secs}s`,
+        sub: d ? `${person(ppl, d.ownerAgent).name} owns it` : 'no change needed', tone: 'resolved' });
+    }
+  }
+  const order: Record<HistoryTone, number> = { plan: 0, agent: 1, change: 2, conflict: 3, resolved: 4 };
+  return out.sort((x, y) => x.at - y.at || order[x.tone] - order[y.tone]);
+}
+
+export interface Savings {
+  /** Tokens this run has spent so far. */
+  current: number;
+  /** Tokens the newest finished without-Contract run had spent at the same point, if there is one. */
+  base?: number;
+  saved?: number;
+}
+
+/** Tokens saved so far: the baseline (newest finished without_contract run) at the same elapsed
+ *  time minus this run's spend. Measured, never estimated; no baseline means no number. */
+export function savingsNow(t: Tables, run: R.Run | undefined, now: number): Savings {
+  const w = runWindow(run, now);
+  const current = run ? sum(t.usage.filter((u) => u.runId === run.id).map(tokensOf)) : 0;
+  const baseRun = t.runs.filter((r) => r.mode === 'without_contract' && r.endedAt && r.id !== run?.id).sort((a, b) => Number(b.id - a.id))[0];
+  // nothing to compare until this run has spent something: an idle run would look like a saving
+  if (!run || run.mode === 'without_contract' || !baseRun || current === 0) return { current };
+  const elapsed = w.end - w.start;
+  const start = ms(baseRun.startedAt);
+  const base = sum(t.usage.filter((u) => u.runId === baseRun.id && ms(u.createdAt) - start <= elapsed).map(tokensOf));
+  return { current, base, saved: Math.max(0, base - current) };
+}
+
+export type Stage = 'Plan' | 'Code' | 'Merge';
+
+/** Where the run is: planning until the first code change or edit, coding until it ends. */
+export function runStage(t: Tables, run: R.Run | undefined, w: Window): Stage {
+  if (run?.endedAt) return 'Merge';
+  const coding = t.changes.some((c) => inWin(w, ms(c.createdAt))) || (t.fileEdits ?? []).some((e) => inWin(w, ms(e.createdAt)));
+  return coding ? 'Code' : 'Plan';
+}
+
+/** The symbol the coordinator is working on: the newest open or resolving conflict's symbol. */
+export function coordFocus(t: Tables, w: Window): { symbolId: string; conflict: string; resolving: boolean } | undefined {
+  const c = t.conflicts
+    .filter((x) => (x.status === 'open' || x.status === 'resolving') && inWin(w, ms(x.createdAt)))
+    .sort((a, b) => Number(b.id - a.id))[0];
+  return c ? { symbolId: c.symbolId, conflict: String(c.id), resolving: c.status === 'resolving' } : undefined;
 }

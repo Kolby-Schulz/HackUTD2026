@@ -248,3 +248,36 @@ describe('replay (issue #27)', () => {
     expect(replayMarks(t, t.runs[1])).toEqual([{ at: 6000, label: '#1 Duplicate implementation' }, { at: 28000, label: '#2 Broken dependency' }]);
   });
 });
+
+describe('workbench', () => {
+  it('lists every agent planning a ghost symbol, and the holder of a claimed one', async () => {
+    const { codeMap } = await import('../src/model.ts');
+    const t = story();
+    const by = Object.fromEntries(codeMap(t, runWindow(t.runs[1], NOW), NOW).nodes.map((n) => [n.name, n]));
+    expect(by.formatDate.owners.map((p) => p.id)).toEqual(['agent-a']);
+    expect(by.calculateFee.owners.map((p) => p.id)).toEqual(['agent-a']);
+    expect(by.buildInvoice.owners).toEqual([]);
+  });
+  it('tells one symbol\u2019s story oldest first, ending with how its conflict was resolved', async () => {
+    const { symbolHistory } = await import('../src/model.ts');
+    const t = story();
+    const h = symbolHistory(t, runWindow(t.runs[1], NOW), DATES);
+    expect(h.map((x) => x.tone)).toEqual(['plan', 'conflict', 'resolved']);
+    expect(h[2].title).toBe('Resolved in 2.6s');
+  });
+  it('measures tokens saved against the last without run at the same point, never estimated', async () => {
+    const { savingsNow } = await import('../src/model.ts');
+    const t = story();
+    expect(savingsNow(t, t.runs[1], NOW)).toEqual({ current: 6700, base: 0, saved: 0 });
+    expect(savingsNow(t, t.runs[1], T0 + 220_000)).toEqual({ current: 6700, base: 15000, saved: 8300 });
+    expect(savingsNow(t, t.runs[0], NOW)).toEqual({ current: 15000 });
+  });
+  it('puts the coordinator on the open conflict and the run in the code stage after a change', async () => {
+    const { coordFocus, runStage } = await import('../src/model.ts');
+    const t = story();
+    const w = runWindow(t.runs[1], NOW);
+    expect(coordFocus(t, w)).toEqual({ symbolId: FEES, conflict: '2', resolving: true });
+    expect(runStage(t, t.runs[1], w)).toBe('Code');
+    expect(runStage(t, t.runs[0], runWindow(t.runs[0], NOW))).toBe('Merge');
+  });
+});
