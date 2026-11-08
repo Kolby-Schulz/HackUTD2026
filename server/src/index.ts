@@ -802,6 +802,24 @@ export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }
 });
 
 /**
+ * Drops the file_edit rows made during an ended run (started_at..ended_at). `npm run reset` calls
+ * it for each run it has to end itself: a merge always ends its run first, so those runs were
+ * never merged, their worktrees are gone, and their diffs would only show code that no longer
+ * exists anywhere. Merged runs keep their diffs. Refused while the run is open.
+ */
+export const discard_run_edits = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }) => {
+  requireOperator(ctx);
+  const r = ctx.db.run.id.find(run_id);
+  if (!r) throw new SenderError(`unknown run ${run_id}`);
+  if (r.ended_at === undefined) throw new SenderError(`run ${run_id} is still open; end it first`);
+  const from = r.started_at.microsSinceUnixEpoch, to = r.ended_at.microsSinceUnixEpoch;
+  for (const e of [...ctx.db.fileEdit.iter()]) {
+    const at = e.created_at.microsSinceUnixEpoch;
+    if (at >= from && at <= to) ctx.db.fileEdit.id.delete(e.id);
+  }
+});
+
+/**
  * Clears per-run working state before a demo run so nothing leaks from the last one: the
  * code map (the mapper rebuilds it from the clean demo-repo; agent-reported signatures would
  * otherwise survive, since upsert_symbols keeps stored signature text while the hash matches),

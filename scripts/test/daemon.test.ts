@@ -2,6 +2,7 @@
 // ones, and pushes only what changed (machine state, processes, chat) back to the database.
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
+import { Assistant, NEW_CONVERSATION } from '../assistant.ts';
 import { Registry } from '../control.ts';
 import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, TakeoverGuard, takeOverPidFile, type MachineCommand, type MachinePort, type ProcessRow } from '../daemon.ts';
 
@@ -38,6 +39,23 @@ const cmd = (id: number, action: string, args: object = {}, createdAtMs = 1_000_
 });
 
 describe('Daemon', () => {
+  it('starts a new conversation when the repository changes, not when it stays the same', async () => {
+    const { fn } = fakeSpawn();
+    const reg = new Registry(fn, 'tsx', '/tmp');
+    const posted: string[] = [];
+    const port: MachinePort = { update: async () => undefined, finish: async () => undefined, putProcess: async () => undefined, deleteProcess: async () => undefined, postChat: async (m) => void posted.push(m.text) };
+    const assistant = new Assistant({} as never);
+    assistant.say('user', 'build a cart for the old repo');
+    const daemon = new Daemon(reg, port, assistant, () => 1_000_000);
+    await daemon.handle(cmd(1, 'repo', { repo: 'https://github.com/acme/shop' }));
+    expect(assistant.messages.map((m) => m.text)).toEqual([`${NEW_CONVERSATION} · acme/shop`]);
+    expect(posted.at(-1)).toBe(`${NEW_CONVERSATION} · acme/shop`);
+    assistant.say('user', 'hi');
+    reg.stop('clone');
+    await daemon.handle(cmd(2, 'repo', { repo: 'https://github.com/acme/shop' }));
+    expect(assistant.messages.map((m) => m.text)).toEqual([`${NEW_CONVERSATION} · acme/shop`, 'hi']);
+  });
+
   it('runs an allowed command once and reports the process', async () => {
     const { daemon, calls, log } = setup();
     await daemon.handle(cmd(1, 'worker', { id: 'agent-b' }));

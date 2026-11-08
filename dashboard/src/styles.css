@@ -80,6 +80,13 @@ button { cursor: pointer; }
 .iconbtn { width: 28px; height: 28px; border: none; background: none; border-radius: 5px; display: grid; place-items: center; color: var(--text2); }
 .iconbtn:hover { background: var(--soft); color: var(--text); }
 .iconbtn[aria-pressed='true'] { color: var(--accent); }
+/* MUI-style tooltip for icon buttons: <button data-tip="Label">. Shows below on hover or keyboard focus. */
+[data-tip] { position: relative; }
+[data-tip]::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%) scale(0.8); transform-origin: top center; z-index: 1000; pointer-events: none; white-space: nowrap; background: rgba(97, 97, 97, 0.92); color: #fff; font-family: var(--font); font-size: 11px; font-weight: 500; line-height: 1.4; padding: 4px 8px; border-radius: 4px; opacity: 0; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+[data-tip]:hover::after, [data-tip]:focus-visible::after { opacity: 1; transform: translateX(-50%) scale(1); transition-delay: 100ms; }
+/* The last button sits at the window edge: align its tooltip to the right so it never clips. */
+.tb-right [data-tip]:last-child::after { left: auto; right: 0; transform: scale(0.8); transform-origin: top right; }
+.tb-right [data-tip]:last-child:hover::after, .tb-right [data-tip]:last-child:focus-visible::after { transform: scale(1); }
 
 .main { display: flex; min-height: 0; min-width: 0; }
 /* activity bar, VS Code style: grey icons, bright with a full-height edge bar while open, count badges */
@@ -92,8 +99,9 @@ button { cursor: pointer; }
 .ab-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
 .ab-badge { position: absolute; right: 7px; bottom: 7px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--accent); color: #fff; font-size: 9.5px; font-weight: 700; line-height: 16px; text-align: center; box-shadow: 0 0 0 2px var(--chrome); pointer-events: none; }
 .ab-badge.alert { background: var(--danger); }
-.ab-tip { position: absolute; left: calc(100% + 6px); top: 50%; transform: translateY(-50%); z-index: 70; white-space: nowrap; pointer-events: none; padding: 4px 8px; border-radius: 4px; background: #1f2328; color: #fff; font-size: 12px; opacity: 0; transition: opacity 0.12s ease 0.35s; }
-.ab-btn:hover .ab-tip, .ab-btn:focus-visible .ab-tip { opacity: 1; }
+.ab-tip { position: absolute; left: calc(100% + 6px); top: 50%; transform: translateY(-50%) scale(0.8); transform-origin: left center; z-index: 1000; white-space: nowrap; pointer-events: none; padding: 4px 8px; border-radius: 4px; background: rgba(97, 97, 97, 0.92); color: #fff; font-family: var(--font); font-size: 11px; font-weight: 500; line-height: 1.4; opacity: 0; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1), transform 150ms cubic-bezier(0.4, 0, 0.2, 1); }
+/* same look as the [data-tip] tooltips, opening to the right */
+.ab-btn:hover .ab-tip, .ab-btn:focus-visible .ab-tip { opacity: 1; transform: translateY(-50%) scale(1); transition-delay: 100ms; }
 
 .pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .side { background: var(--chrome); flex: none; max-width: 30vw; }
