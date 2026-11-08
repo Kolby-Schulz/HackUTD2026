@@ -43,18 +43,45 @@ share it with no LAN setup. Only its owner's login can publish; anyone can conne
    SPACETIME_DB_NAME=contract-hackutd26
    ```
 
-2. Start a worker: `npm run worker -- --id agent-b --task 2` (use a different `--id` per laptop).
-3. Check who is online. A worker heartbeats every 15 s and goes stale after 60 s:
+2. Both laptops: `git pull && npm run reset`, so they start from the same `origin/main`.
+3. Host laptop: `npm run coordinator` and `npm run dashboard` (each in its own terminal), then
+   `npm run session -- start`. That ends any open run, clears the last run's state, opens a
+   `with_contract` run and maps `demo-repo/`.
+4. Each laptop starts its own agent with a different `--id`, and tells it what to build:
 
    ```bash
-   spacetime sql --server maincloud contract-hackutd26 "SELECT id, machine, status, last_heartbeat FROM agent"
+   npm run worker -- --id agent-a --prompt "Add late fees to invoices..."
    ```
+
+   Or start it with `--wait` and type the task into the dashboard's **New task** form:
+
+   ```bash
+   npm run worker -- --id agent-b --wait
+   ```
+
+   Workers branch from `origin/main`. When a worker finishes, it pushes `agent/<id>` to origin
+   (`--no-push` skips that).
+5. When every agent is done, run this on either laptop:
+
+   ```bash
+   npm run session -- merge
+   ```
+
+   It fetches every agent's branch, merges them in `.worktrees/merge-<run>` and runs unit
+   tests, typecheck and check-dupes. If those fail, a local agent gets a merge-fix pass.
+   Then it ends the run. Add `--integration` when the agents ran the two canned tasks
+   (`agents/worker/src/tasks.ts`), and `--push` to push the merge branch.
+
+To check who is online (a worker heartbeats every 15 s and goes stale after 60 s):
+
+```bash
+spacetime sql --server maincloud contract-hackutd26 "SELECT id, machine, status, last_heartbeat FROM agent"
+```
+
+`npm run demo` stays the single-laptop A/B benchmark (both modes, canned tasks, scoreboard).
 
 After a change to `server/`, the owner republishes with `npm run publish:cloud -w @contract/server`.
 Keep live tests local (they wipe their database); they default to `ws://localhost:3000`.
-
-Until `scripts/seed.ts` exists the cloud database has no tasks, so workers log
-`unknown task` on status updates; they still connect and run.
 
 ## Commands
 
@@ -62,6 +89,8 @@ Until `scripts/seed.ts` exists the cloud database has no tasks, so workers log
 npm run mapper -- --repo ../demo-repo --watch
 npm run coordinator
 npm run worker -- --id agent-a --task 1 --mode with_contract
+npm run worker -- --id agent-b --prompt "..."   # or --wait (dashboard New task form)
+npm run session -- start | merge
 npm run dashboard
 npm run demo -- --mode without_contract --seed 7
 npm run reset

@@ -91,15 +91,18 @@ export async function waitFor<T>(check: () => T | undefined, what: string, timeo
  * Persistent SpacetimeDB tokens per agent id. register_agent refuses an id held by another
  * identity for 60 s after its last heartbeat, so reusing the token lets the same agent run
  * again straight away (next demo run, merge-fix pass).
+ * Keyed per server too: a maincloud token is rejected by a local server (401) and vice versa.
+ * The worker (agents/worker/src/index.ts) uses the same file and keys.
  */
 const IDENTITIES = join(STATE_DIR, 'identities.json');
+export const identityKey = (agentId: string) => `${agentId}@${process.env.SPACETIME_DB_NAME}@${process.env.SPACETIME_HOST}`;
 export function savedToken(agentId: string): string | undefined {
   if (!existsSync(IDENTITIES)) return undefined;
-  return (JSON.parse(readFileSync(IDENTITIES, 'utf8')) as Record<string, string>)[agentId];
+  return (JSON.parse(readFileSync(IDENTITIES, 'utf8')) as Record<string, string>)[identityKey(agentId)];
 }
 export function saveToken(agentId: string, token: string) {
   mkdirSync(STATE_DIR, { recursive: true });
   const all = existsSync(IDENTITIES) ? (JSON.parse(readFileSync(IDENTITIES, 'utf8')) as Record<string, string>) : {};
-  all[agentId] = token;
+  all[identityKey(agentId)] = token;
   writeFileSync(IDENTITIES, JSON.stringify(all, null, 2) + '\n', { mode: 0o600 });
 }

@@ -155,3 +155,11 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .map { height: 420px; }
   .table-wrap { overflow-x: auto; }
 }
+
+/* ---- new task form (agents column) ---- */
+.new-task { border-top: 1px solid var(--border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.new-task select, .new-task textarea { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font: inherit; font-size: 13px; }
+.new-task textarea { resize: vertical; min-height: 60px; }
+.new-task select:focus, .new-task textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.new-task button { align-self: flex-end; background: var(--ok); color: var(--on-agent); border: none; border-radius: var(--radius); padding: 5px 14px; font-weight: 600; cursor: pointer; }
+.new-task button:disabled { opacity: 0.5; cursor: default; }
