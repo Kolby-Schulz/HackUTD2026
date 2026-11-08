@@ -7,6 +7,9 @@ import { MachineProvider } from './machine.tsx';
 import '@fontsource-variable/unbounded';
 import '@fontsource-variable/jetbrains-mono';
 import './styles.css';
+import { applyInitialTheme } from './theme.ts';
+
+applyInitialTheme();
 
 // #/variants is a standalone page (no SpacetimeDB connection), loaded on demand so the main bundle doesn't grow.
 const Variants = lazy(() => import('./variants/Variants.tsx').then((m) => ({ default: m.Variants })));

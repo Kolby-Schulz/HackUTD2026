@@ -64,7 +64,7 @@ export function CodeMap({ nodes, edges, selected, coord, onSelect, widget }: Pro
     data: { n, selected: n.id === selected, coord }, draggable: false, connectable: false,
   })), [nodeSig]);
   const rfEdges = useMemo<Edge[]>(() => edges.map((e) => {
-    const color = e.hot ? '#cf222e' : '#afb8c1';
+    const color = e.hot ? 'var(--danger)' : 'var(--faint)';
     return { id: e.id, source: e.source, target: e.target, type: 'smoothstep', animated: e.hot,
       style: { stroke: color, strokeWidth: e.hot ? 2 : 1.4 }, markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 } };
   }), [edgeSig]);
