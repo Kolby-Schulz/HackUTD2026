@@ -33,3 +33,6 @@
 .pg-av.ring-idle { box-shadow: 0 0 0 2px var(--pg-success); }
 .pg-av.ring-waiting { box-shadow: 0 0 0 2px var(--pg-accent); }
 .pg-av.ring-blocked { box-shadow: 0 0 0 2px var(--pg-danger); }
+
+/* Per-agent usage chip in a presence row (WP-83). */
+.pg-crow .pg-usage { flex: none; font-size: 10px; color: var(--pg-muted); background: var(--pg-chip); border-radius: 8px; padding: 1px 6px; white-space: nowrap; }

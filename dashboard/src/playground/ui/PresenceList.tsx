@@ -7,6 +7,7 @@ import { followActor, followingId, stopFollow, subscribeFollow } from '../core/f
 import { goTo } from '../core/goto';
 import { toast } from '../core/toast';
 import type { AgentState } from '../core/types';
+import { formatChip, usageStore } from '../agents/usage';
 import { ARROW, YOU_COLOR } from './constants';
 import { statusOf } from './meta';
 import type { Meta } from './meta';
@@ -71,6 +72,12 @@ export function AvatarStack({ cursors, onMore, onPick }: { cursors: Meta[]; onMo
   );
 }
 
+/** Per-agent usage chip ("12.4k tok · $0.08"); renders nothing until the agent has recorded a call (scripted agents never do). */
+function UsageChip({ id }: { id: string }) {
+  const text = useSyncExternalStore(usageStore.subscribe, () => { const u = usageStore.get(id); return u.calls > 0 ? formatChip(u) : ''; });
+  return text ? <span className="pg-usage" title="Model usage">{text}</span> : null;
+}
+
 export function PresenceList({ board, rt, cursors }: SlotProps) {
   useJoinLeaveToasts(cursors, board.me);
   const following = useSyncExternalStore(subscribeFollow, followingId);
@@ -84,6 +91,7 @@ export function PresenceList({ board, rt, cursors }: SlotProps) {
             <b>{c.name}</b>
             <small>{c.kind === 'human' ? 'you · mouse' : c.kind === 'api' ? 'window.board' : statusOf(c)}</small>
           </div>
+          {c.kind === 'agent' && <UsageChip id={c.id} />}
           {c.kind === 'agent' && <span className={`pg-dot ${toneOf(c.state)}`} title={c.state ?? 'idle'} />}
           {c.kind === 'agent' && (c.state === 'stopped'
             ? <button className="ghost" title="Restart" onClick={(e) => { e.stopPropagation(); rt?.restart(c.id); }}>▶</button>

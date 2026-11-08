@@ -37,6 +37,8 @@ export interface NumberFieldProps {
   /** Undo label (default 'Edit <prop>'). */
   undoLabel?: string;
   className?: string;
+  /** Runs after a committed edit (e.g. re-measure auto-sized text). */
+  afterCommit?: () => void;
 }
 
 const clamp = (v: number, lo?: number, hi?: number) => Math.min(hi ?? Infinity, Math.max(lo ?? -Infinity, v));
@@ -88,7 +90,7 @@ export function NumberField(props: NumberFieldProps) {
     const g = gesture.current;
     gesture.current = null;
     if (!g) return;
-    if (commit) g.commit(); else g.abort();
+    if (commit) { g.commit(); props.afterCommit?.(); } else g.abort();
   }
 
   const evalFor = (text: string) => (s: Shape): number | null => {

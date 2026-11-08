@@ -15,7 +15,9 @@ import { BUBBLE } from '../constants';
 import { useUi } from '../hooks';
 import type { SlotProps } from '../slotProps';
 import { ZoomMenu } from '../ZoomMenu';
-import { AvatarStack, jumpToActor } from '../PresenceList';
+import { AvatarStack, toggleFollow } from '../PresenceList';
+import { startPresent } from '../../actions/present';
+import { setTitleName } from '../title';
 import { pickTool } from './Toolbar';
 import '../../styles/topbar.css';
 
@@ -24,7 +26,7 @@ function FileName() {
   const name = useStoreValue(prefs.subscribe, () => prefs.get().fileName);
   const [editing, setEditing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  useEffect(() => { document.title = `${name} · Playground`; }, [name]);
+  useEffect(() => { setTitleName(name); }, [name]);
   useEffect(() => {
     const on = () => setEditing(true);
     window.addEventListener(RENAME_EVENT, on);
@@ -140,7 +142,7 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
       <span className="pg-sub">multi-agent design board · proof of concept</span>
       <span className="pg-grow" />
       <UndoRedo board={board} />
-      <AvatarStack cursors={cursors} onPick={(id) => jumpToActor(board, id)} />
+      <AvatarStack cursors={cursors} onPick={toggleFollow} />
       <div className="pg-cbtn">
         <button className={'pg-icon' + (tool === 'comment' ? ' on' : '')} title={`Comment (${TOOL_KEYS.comment.toUpperCase()})`} onClick={() => pickTool(ui, tool === 'comment' ? 'select' : 'comment')}>
           <svg viewBox="0 0 24 24" width="20" height="20"><path d={BUBBLE} /></svg>
@@ -153,6 +155,9 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
           </div>
         )}
       </div>
+      <button className="pg-icon" title="Present" aria-label="Present" onClick={() => startPresent()}>
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 5.5v13l11-6.5z" /></svg>
+      </button>
       <div className="pg-cbtn">
         <button className="pg-share" onClick={share} title="Copy link">
           <svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 11V8a5 5 0 0 1 10 0v3M5.5 11h13v9.5h-13z" /></svg>
