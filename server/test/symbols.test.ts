@@ -38,13 +38,53 @@ describe('upsert_symbols', () => {
     t.advance(1);
 
     // Act
-    upsert(t, [{ ...sym(INVOICE, 'buildInvoice()', 'h1'), behavior_note: 'now with notes' }]);
+    upsert(t, [sym(INVOICE, 'buildInvoice()', 'h1')]);
 
     // Assert
     const row = t.db.symbol.id.find(INVOICE)!;
     expect(row.version).toBe(1);
-    expect(row.behavior_note).toBe('now with notes');
     expect(row.updated_at.microsSinceUnixEpoch).toBe(t.now());
+  });
+
+  it('keeps the stored behavior_note, even when the hash changes', () => {
+    // Arrange
+    upsert(t, [sym(INVOICE, 'buildInvoice()', 'h1')]);
+    t.internal((ctx) => {
+      const r = ctx.db.symbol.id.find(INVOICE)!;
+      ctx.db.symbol.id.update({ ...r, behavior_note: 'rounds half-up now' }); // as report_change('behavior') would
+    });
+
+    // Act
+    upsert(t, [{ ...sym(INVOICE, 'buildInvoice()', 'h1'), behavior_note: '' }]);
+    const sameHash = t.db.symbol.id.find(INVOICE)!.behavior_note;
+    upsert(t, [{ ...sym(INVOICE, 'buildInvoice(order)', 'h2'), behavior_note: '' }]);
+
+    // Assert
+    expect(sameHash).toBe('rounds half-up now');
+    expect(t.db.symbol.id.find(INVOICE)!.behavior_note).toBe('rounds half-up now');
+  });
+
+  it("keeps an agent's reported signature while the hash is unchanged, and takes the mapper's once it moves", () => {
+    // Arrange
+    upsert(t, [sym(INVOICE, 'buildInvoice(order)', 'h1')]);
+    t.internal((ctx) => {
+      const r = ctx.db.symbol.id.find(INVOICE)!;
+      ctx.db.symbol.id.update({ ...r, signature: 'buildInvoice(order, lateFee)', version: r.version + 1 }); // as report_change('signature') would
+    });
+
+    // Act: a stale mapper push (the agent's edit hasn't reached the mapper's checkout)
+    upsert(t, [sym(INVOICE, 'buildInvoice(order)', 'h1')]);
+    const stale = t.db.symbol.id.find(INVOICE)!;
+    // Act: the change lands, so the mapper's hash moves
+    upsert(t, [sym(INVOICE, 'buildInvoice(order, lateFee)', 'h2')]);
+    const landed = t.db.symbol.id.find(INVOICE)!;
+
+    // Assert
+    expect(stale.signature).toBe('buildInvoice(order, lateFee)');
+    expect(stale.version).toBe(2);
+    expect(landed.signature).toBe('buildInvoice(order, lateFee)');
+    expect(landed.signature_hash).toBe('h2');
+    expect(landed.version).toBe(3);
   });
 
   it('bumps the version when the signature hash changes', () => {
