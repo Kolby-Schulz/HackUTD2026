@@ -21,3 +21,4 @@
 .pg-share { display: flex; align-items: center; gap: 6px; border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 8px; padding: 4px 11px; font-weight: 500; }
 .pg-share svg path { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; stroke-linecap: round; }
 .pg-share:hover { background: var(--pg-hover-faint); }
+a.pg-share { color: inherit; text-decoration: none; }

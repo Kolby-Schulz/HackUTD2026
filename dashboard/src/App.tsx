@@ -115,6 +115,7 @@ export function App() {
             <ActivityButton label="Changes" on={dock.isOpen('changes')} onClick={() => flip('changes')} badge={view.edits.length} badgeTitle="edits this run">{ICON.changes}</ActivityButton>
             <ActivityButton label="Control" on={dock.isOpen('control')} onClick={() => flip('control')}>{ICON.control}</ActivityButton>
             <ActivityButton label="Chat" on={dock.isOpen('chat')} onClick={() => flip('chat')}>{ICON.chat}</ActivityButton>
+            <ActivityLink label="Design board" href="#/playground">{BOARD_ICON}</ActivityLink>
             <ActivityButton label="Savings panel" on={open.panel} onClick={() => toggle('panel')} badge={openCount} badgeTitle="open conflicts" alert>{ICON.panel}</ActivityButton>
           </div>
           <div className="ab-group">
@@ -205,6 +206,26 @@ export function App() {
     </div>
   );
 }
+
+/** An activity bar icon that opens another page (plain hash navigation) instead of toggling a view. */
+function ActivityLink({ label, href, children }: { label: string; href: string; children: ReactNode }) {
+  return (
+    <a className="ab-btn" href={href} aria-label={`Open ${label}`}>
+      {children}
+      <span className="ab-tip" role="tooltip">{label}</span>
+    </a>
+  );
+}
+
+const BOARD_ICON = (
+  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+    <g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round">
+      <rect x="3.5" y="4" width="17" height="13" rx="2" />
+      <path d="M12 12l6 2-2.5 1-1 2.5z" />
+      <path d="M8 21h8" strokeLinecap="round" />
+    </g>
+  </svg>
+);
 
 /** One icon in the activity bar, styled like VS Code's: grey when its view is hidden, bright with a
  *  full-height bar on the left edge while open, an optional count badge, and a tooltip. */

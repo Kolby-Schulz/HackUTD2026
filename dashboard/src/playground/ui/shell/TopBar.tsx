@@ -135,7 +135,7 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
 
   return (
     <header className="pg-top">
-      <a className="pg-back" href="#/live" title="Back to dashboard">←</a>
+      <a className="pg-back" href="#/" title="Back to dashboard" aria-label="Back to dashboard">←</a>
       <span className="pg-logo">◆</span>
       <FileName />
       <SaveDot ui={ui} />
@@ -155,6 +155,10 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
           </div>
         )}
       </div>
+      <a className="pg-share" href="#/variants" title="Compare design variants">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path d="M4 5h7v14H4zM13 5h7v6h-7zM13 13h7v6h-7z" /></svg>
+        <span>Variants</span>
+      </a>
       <button className="pg-icon" title="Present" aria-label="Present" onClick={() => startPresent()}>
         <svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 5.5v13l11-6.5z" /></svg>
       </button>

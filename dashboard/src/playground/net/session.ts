@@ -44,6 +44,8 @@ export interface BoardSessionOpts {
   transport: BoardTransport;
   actors?: readonly LocalActor[];
   onError?: (e: NetError) => void;
+  /** Another client's actor joined or changed (show its cursor, name and colour). */
+  onRemoteActor?: (row: BoardActorRow) => void;
   timers?: Timers;
 }
 
@@ -213,7 +215,8 @@ export function connectBoard(o: BoardSessionOpts): BoardSession {
     const me = mineHex();
     let grew = false;
     for (const r of c.added) {
-      if (r.boardId !== boardId || !owned.has(r.actor)) continue;
+      if (r.boardId !== boardId) continue;
+      if (!owned.has(r.actor)) { o.onRemoteActor?.(r); continue; }
       if (me && r.identity.toHexString() !== me) { report({ kind: 'actor-taken', actor: r.actor }); continue; }
       if (r.lastOpSeq > 0n) restoreSeqs({ [r.actor]: Number(r.lastOpSeq) });
       if (!joined.has(r.actor)) { joined.add(r.actor); grew = true; }

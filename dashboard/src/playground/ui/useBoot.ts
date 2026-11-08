@@ -20,7 +20,10 @@ import { commentThreads } from '../comments/threads';
 import { install as installKeys } from '../core/keys';
 import { registerViewFallbacks } from './board/viewActions';
 import { applyViewFromUrl } from '../actions/share';
-import { DEMO, HOST_AGENTS, viewCenter } from './kit';
+import { DEMO, HOST_AGENTS, LIVE, viewCenter } from './kit';
+import { connectBoard } from '../net/session';
+import { connectSpacetime } from '../net/spacetime';
+import { SPACETIME_DB_NAME, SPACETIME_HOST } from '../../data';
 import type { ChatSink } from './kit';
 
 /** Boots the page; `rtRef` mirrors the returned runtime for callbacks that must not re-render on it. */
@@ -42,7 +45,20 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       viewport: () => camera.visibleRect(),
     });
     // Autosave: board, chat and comment threads survive a reload; `?demo=1` skips both load and save.
-    const persistence = createPersistence(board.doc, { boardId: 'playground', demo: DEMO, toast: (t, o) => toast(t, o) });
+    // The live board's state lives in SpacetimeDB, so it neither loads nor autosaves a local copy.
+    const persistence = createPersistence(board.doc, { boardId: 'playground', demo: DEMO || LIVE, toast: (t, o) => toast(t, o) });
+    const net = LIVE ? connectSpacetime({ uri: SPACETIME_HOST, database: SPACETIME_DB_NAME, boardId: 'playground', boardName: 'Design board' }) : null;
+    const me = board.actors.get(board.me);
+    const session = net ? connectBoard({
+      boardId: 'playground', doc: board.doc, presence: board.presence, transport: net,
+      actors: [{ id: board.me, kind: 'human', name: me?.name ?? 'You', color: me?.color ?? '#3366ff' }],
+      onRemoteActor: (r) => {
+        if (board.actors.get(r.actor)) return;
+        const kind = r.kind === 'agent' ? 'agent' : r.kind === 'system' ? 'system' : 'human';
+        board.actors.spawn({ id: r.actor, kind, name: r.name, color: r.color });
+      },
+      onError: (e) => toast(e.kind === 'op-too-large' ? 'That change is too large to sync' : e.kind === 'push-refused' ? 'The server refused a change' : `Sync problem: ${e.kind}`, { key: `net.${e.kind}` }),
+    }) : null;
     const offExtras = [
       registerExtra('chat', { get: () => sink.chat.toJSON(), set: (v) => sink.chat.load(v as Parameters<ChatStore['load']>[0]) }),
       registerExtra('comments', { get: () => commentThreads.toJSON(), set: (v) => commentThreads.load(v as Parameters<typeof commentThreads.load>[0]) }),
@@ -70,7 +86,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     }) : () => {};
     // a restored board: agents build in cells that saved work does not touch
     if (restored) r.occupy(board.doc.getState());
-    for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
+    if (HOST_AGENTS) for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
     // a shared link (#/playground?x=&y=&z=&sel=) moves the camera there and selects the ids that exist
     const offUrl = applyViewFromUrl(board, camera);
 
@@ -88,6 +104,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       press: (id, down) => choreo(id).press(down),
     });
     return () => {
+      session?.dispose(); net?.close();
       persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
       sink.persistence = null; sink.ui.set({ persistence: null });
       offCoord(); offMeasure(); offUrl(); offKeys(); offView(); offDev();

@@ -63,7 +63,6 @@ class FakeClient implements BoardTransport {
   onActors(cb: Cb<RowChange<BoardActorRow>>) { return this.add(this.subs.actors, cb); }
   onPresence(cb: Cb<RowChange<BoardPresenceRow>>) { return this.add(this.subs.presence, cb); }
   onCursor(cb: Cb<BoardCursorEvent>) { return this.add(this.subs.cursor, cb); }
-  onMessages() { return () => {}; }
 
   async joinBoard(a: { boardId: string; actor: string; kind: string; name: string; color: string }) {
     this.live();
@@ -87,8 +86,6 @@ class FakeClient implements BoardTransport {
     this.server.broadcast((c) => c.subs.presence.forEach((f) => f({ added: [row], removed: [] })));
   }
   async moveCursor(e: BoardCursorEvent) { this.live(); this.cursors.push(e); this.server.broadcast((c) => c.subs.cursor.forEach((f) => f(e))); }
-  async postMessage() { this.live(); }
-  async resolveThread() { this.live(); }
 
   connect() {
     this.st = 'live';

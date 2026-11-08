@@ -22,8 +22,11 @@ export function humanId(): ActorId {
   return makeActorId('human');
 }
 
-/** This browser runs the scripted agents (a networked viewer would pass false). */
-export const HOST_AGENTS = true;
+/** Live board through SpacetimeDB unless the page asks for the offline board (`?board=local`). */
+export const LIVE = typeof location !== 'undefined' && !/[?&]board=local\b/.test(location.search + location.hash);
+
+/** Only the offline board runs agents in the page; on the live board a tab is a viewer and never hosts agents. */
+export const HOST_AGENTS = !LIVE;
 
 /**
  * What the shell hands to boot: the chat sink and store and the UI store. Boot creates the autosave handle

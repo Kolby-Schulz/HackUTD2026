@@ -7,7 +7,6 @@ import type { ActorId } from '../core/types';
 /** Server limits from push_ops. */
 export const MAX_OPS_PER_PUSH = 100;
 export const MAX_OP_BODY_BYTES = 8 * 1024;
-export const MAX_MESSAGE_CHARS = 4000;
 
 export interface BoardOpRow { opId: string; boardId: string; seq: bigint; actor: string; tx: string; body: string }
 /** Anything with the SDK Identity's hex form. */
@@ -20,10 +19,6 @@ export interface BoardPresenceRow {
 /** `doc` is a SavedBoard (core/types) as JSON, covering every op with seq <= uptoSeq. */
 export interface BoardSnapshotRow { boardId: string; uptoSeq: bigint; doc: string }
 export interface BoardCursorEvent { boardId: string; actor: string; x: number; y: number; tx: number; ty: number; moveMs: number; down: boolean }
-export interface BoardMessageRow {
-  id: string; boardId: string; threadId: string; kind: string; author: string; toActor?: string;
-  body: string; anchor?: string; resolved: boolean; createdAt: bigint;
-}
 
 /** One op as push_ops takes it. `body` is the encoded envelope (see opcodec). */
 export interface PushOp { opId: string; tx: string; body: string }
@@ -36,10 +31,6 @@ export interface PresenceArgs {
   selection: string; status: string; tool: string; detail: string; typing: string; viewport: string;
 }
 export interface CursorArgs { boardId: string; actor: ActorId; x: number; y: number; tx: number; ty: number; moveMs: number; down: boolean }
-export interface MessageArgs {
-  id: string; boardId: string; threadId: string; kind: 'chat' | 'comment'; author: ActorId;
-  toActor?: ActorId; body: string; anchor?: string;
-}
 
 export type NetStatus = 'connecting' | 'live' | 'offline';
 
@@ -58,8 +49,6 @@ export interface BoardTransport {
   pushOps(boardId: string, ops: readonly PushOp[]): Promise<void>;
   setPresence(a: PresenceArgs): Promise<void>;
   moveCursor(a: CursorArgs): Promise<void>;
-  postMessage(a: MessageArgs): Promise<void>;
-  resolveThread(boardId: string, threadId: string): Promise<void>;
 
   /** The subscription's initial rows have all been delivered (fires again after each reconnect). */
   onSynced(cb: () => void): () => void;
@@ -69,5 +58,4 @@ export interface BoardTransport {
   onActors(cb: (c: RowChange<BoardActorRow>) => void): () => void;
   onPresence(cb: (c: RowChange<BoardPresenceRow>) => void): () => void;
   onCursor(cb: (e: BoardCursorEvent) => void): () => void;
-  onMessages(cb: (c: RowChange<BoardMessageRow>) => void): () => void;
 }
