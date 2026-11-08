@@ -1,4 +1,4 @@
-// Top bar: back link, title, avatars, comment tool + options, share, zoom.
+// Top bar: the dashboard's brand (a link back to it), title, avatars, comment tool + options, share, zoom.
 import { useEffect, useRef, useState } from 'react';
 import { TOOL_KEYS } from '../../actions/tools';
 import { RENAME_EVENT, cleanFileName, FILE_NAME_MAX } from '../../actions/panels';
@@ -19,6 +19,7 @@ import { AvatarStack, toggleFollow } from '../PresenceList';
 import { startPresent } from '../../actions/present';
 import { setTitleName } from '../title';
 import { pickTool } from './Toolbar';
+import { APP_NAME, SCurveMark } from '../../../Intro';
 import '../../styles/topbar.css';
 
 /** Editable board name (SHELL-2): click or F2 to edit, Enter/blur commits, Esc cancels. Stored in prefs and document.title. */
@@ -135,11 +136,10 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
 
   return (
     <header className="pg-top">
-      <a className="pg-back" href="#/" title="Back to dashboard" aria-label="Back to dashboard">←</a>
-      <span className="pg-logo">◆</span>
+      <a className="brand pg-brand" href="#/" title="Back to dashboard" aria-label={`Back to the ${APP_NAME} dashboard`}><SCurveMark size={22} />{APP_NAME}</a>
+      <span className="pg-crumb" aria-hidden="true">/</span>
       <FileName />
       <SaveDot ui={ui} />
-      <span className="pg-sub">multi-agent design board · proof of concept</span>
       <span className="pg-grow" />
       <UndoRedo board={board} />
       <AvatarStack cursors={cursors} onPick={toggleFollow} />

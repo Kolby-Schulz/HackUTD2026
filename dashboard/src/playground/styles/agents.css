@@ -2,7 +2,7 @@
 .pg-actions { display: flex; gap: 6px; padding: 0 14px 10px; }
 .pg-actions button, .pg-foot > button { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 7px; padding: 5px 10px; }
 .pg-actions button:hover, .pg-foot > button:hover { background: var(--pg-hover-faint); }
-.pg-actions .primary { background: var(--pg-ink); color: var(--pg-white); border-color: var(--pg-ink); }
+.pg-actions .primary { background: var(--pg-ink); color: var(--pg-on-ink); border-color: var(--pg-ink); }
 .pg-actions .primary:hover { background: var(--pg-ink-hover); }
 .pg-row { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 10px; color: var(--pg-muted); }
 .pg-seg { display: flex; background: var(--pg-hover); border-radius: 7px; padding: 2px; }

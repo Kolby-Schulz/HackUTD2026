@@ -32,7 +32,6 @@
 .pg-top { min-width: 0; white-space: nowrap; }
 .pg-top > * { flex: none; }
 .pg-top .pg-grow { flex: 1 1 0; min-width: 0; }
-.pg-top .pg-sub { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pg-file { flex: 0 1 auto; min-width: 40px; max-width: 280px; }
 .pg-file-btn, .pg-file-in { font: inherit; font-weight: 600; color: var(--pg-ink); border: 1px solid transparent; border-radius: 6px; padding: 3px 7px; background: none; max-width: 100%; box-sizing: border-box; }
 .pg-file-btn { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -42,5 +41,4 @@
 .pg-save[data-status='saving'] { background: var(--pg-accent); }
 .pg-save[data-status='error'], .pg-save[data-status='full'] { background: var(--pg-danger); }
 
-@media (max-width: 1100px) { .pg-top .pg-sub { display: none; } }
-@media (max-width: 900px) { .pg-top { gap: 6px; padding: 0 8px; } .pg-top .pg-logo, .pg-top .pg-share span { display: none; } .pg-file { max-width: 140px; } }
+@media (max-width: 900px) { .pg-top { gap: 6px; padding: 0 8px; } .pg-top .pg-share span { display: none; } .pg-file { max-width: 140px; } }

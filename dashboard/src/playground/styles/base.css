@@ -3,7 +3,7 @@
   position: fixed; inset: 0;
   display: flex; flex-direction: column;
   background: var(--pg-bg); color: var(--pg-ink);
-  font: 13px/1.35 Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font: 13px/1.35 var(--font);
   color-scheme: light;
   user-select: none;
 }

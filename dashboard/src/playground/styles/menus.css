@@ -17,7 +17,7 @@
 .pg-dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .pg-dlg-btn { font: inherit; font-size: 13px; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--pg-line-strong); background: var(--pg-panel); color: var(--pg-ink); cursor: pointer; }
 .pg-dlg-btn:hover { background: var(--pg-hover-soft); }
-.pg-dlg-primary { background: var(--pg-ink); border-color: var(--pg-ink); color: var(--pg-white); }
+.pg-dlg-primary { background: var(--pg-ink); border-color: var(--pg-ink); color: var(--pg-on-ink); }
 .pg-dlg-primary:hover { background: var(--pg-ink-hover); }
 .pg-dlg-primary[data-destructive] { background: var(--pg-danger); border-color: var(--pg-danger); }
 .pg-dlg-primary[data-destructive]:hover { background: var(--pg-danger); filter: brightness(.92); }
