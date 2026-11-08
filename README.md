@@ -211,6 +211,13 @@ workers, judge, merge, reset) and show each process's output. Only paired browse
 commands, every command goes through a fixed allowlist, and it runs things only on the laptop
 it runs on (each laptop runs its own). Workers push `agent/<id>` to origin as usual.
 
+**Several people, one dashboard.** Each browser drives only the laptop it paired with, so pair with
+the laptop whose terminal printed the code (yours), and have teammates run `npm run control` on
+their own laptops and pair their own browsers. Everyone still sees the same run, agents, chat and
+changes, because they share one database; the Control tab lists the other laptops online and the
+repo each one is on. If two laptops have the same hostname, the second daemon picks
+`<hostname>-xxxx` and remembers it in `.contract/control.json` (`--machine <name>` overrides).
+
 ## Joining from a new laptop
 
 ```bash

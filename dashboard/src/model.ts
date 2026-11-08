@@ -186,6 +186,23 @@ function statusLabel(s: string): string {
 
 /* ---------------- agents ---------------- */
 
+/** Workers used to report the raw hostname while the daemon lowercases it (and drops `.local`), so compare loosely. */
+export function sameMachine(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const norm = (s: string) => s.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '');
+  return norm(a) === norm(b);
+}
+
+/**
+ * Who the chat composer addresses before the user picks anyone: the assistant on the paired laptop,
+ * else the first online agent on that laptop, else nobody. Never an agent on a teammate's laptop:
+ * the database is shared, so "the first agent online" is often someone else's.
+ */
+export function defaultRecipient(agents: readonly Pick<AgentCard, 'id' | 'machine' | 'offline'>[], machine: string | undefined, assistantUp: boolean): string {
+  if (assistantUp) return 'insync';
+  return agents.find((a) => !a.offline && sameMachine(a.machine, machine))?.id ?? '';
+}
+
 export interface AgentCard {
   id: string;
   person: Person;

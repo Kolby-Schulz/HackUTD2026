@@ -35,11 +35,26 @@ export interface Status {
 }
 export interface ChatMessage { id: number; role: 'user' | 'assistant' | 'event'; text: string; at: number }
 
+/** One laptop as every browser sees it (the machine tables are public; only commands need pairing). */
+export interface Laptop {
+  id: string;
+  online: boolean;
+  /** Paired with this browser (or this browser is its daemon). */
+  mine: boolean;
+  repoLabel: string;
+  /** How many browsers are paired with it; 0 means its owner hasn't paired yet. */
+  pairedBy: number;
+  /** Running processes on it. */
+  running: number;
+}
+
 export interface MachineState {
   /** Machines this browser is paired with, online first. */
   mine: { id: string; online: boolean }[];
   /** Online machines this browser isn't paired with (shown so you know pairing is the missing step). */
   unpaired: string[];
+  /** Every laptop the database knows, mine first, then online, then by id. Read-only. */
+  laptops: Laptop[];
   /** The machine the Control tab and chat drive, if one is paired and online. */
   current?: string;
   pick: (id: string) => void;
@@ -116,6 +131,16 @@ export function MachineProvider({ children }: { children: ReactNode }) {
       .map((m) => ({ id: m.id, online: online(m) }))
       .sort((a, b) => Number(b.online) - Number(a.online) || a.id.localeCompare(b.id));
     const unpaired = machines.filter((m) => online(m) && !pairedIds.has(m.id) && !ownIds.has(m.id)).map((m) => m.id);
+    const laptops: Laptop[] = machines
+      .map((m) => ({
+        id: m.id,
+        online: online(m),
+        mine: pairedIds.has(m.id) || ownIds.has(m.id),
+        repoLabel: m.repoLabel,
+        pairedBy: access.filter((a) => a.machineId === m.id).length,
+        running: procRows.filter((p) => p.machineId === m.id && p.status === 'running').length,
+      }))
+      .sort((a, b) => Number(b.mine) - Number(a.mine) || Number(b.online) - Number(a.online) || a.id.localeCompare(b.id));
     const current = mine.find((m) => m.id === picked && m.online)?.id ?? mine.find((m) => m.online)?.id;
     const row = machines.find((m) => m.id === current);
     let info: RepoInfo | undefined;
@@ -163,7 +188,7 @@ export function MachineProvider({ children }: { children: ReactNode }) {
         throw e;
       }
     };
-    return { mine, unpaired, current, pick, status, chat: { messages, busy: row?.chatBusy ?? false }, send, pair, pairing };
+    return { mine, unpaired, laptops, current, pick, status, chat: { messages, busy: row?.chatBusy ?? false }, send, pair, pairing };
   }, [machines, access, procRows, chatRows, me, now, picked, conn, pairing]);
 
   // A pairing link: pair as soon as we're connected and the machine's row has arrived.

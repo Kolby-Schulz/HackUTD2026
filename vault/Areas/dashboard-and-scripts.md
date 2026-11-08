@@ -17,6 +17,8 @@ Summary: The dashboard is a React 19 + Vite single page that reads 15 SpacetimeD
 - **Logic**: all derivations are pure functions in `dashboard/src/model.ts` (622 lines): `cases` :145, `agentCards` :224, `feed` :296, `codeMap` :406, `tokenStats` about :470-500, `replayAt`. `App.tsx:33` `useLive()` returns one snapshot shared by every panel.
 - **Clock**: `useNow(1000)` (`data.ts:59`) is a local tick for the T+ timer and claim expiry. It reads nothing from the server, so the no-polling rule holds.
 
+- **Several laptops, one dashboard** (`dashboard/src/machine.tsx`, `ControlTab.tsx`, `Chat.tsx`): `MachineState.laptops` lists every `machine` row (mine, online, repoLabel, pairedBy = `machine_access` count, running procs). The not-paired form never pre-selects a laptop (placeholder "Which laptop is yours?") and asks `window.confirm` before pairing with one that another browser already paired; the manual-controls header names the other laptops online with their repo and warns when a repo differs. The chat's default recipient is `defaultRecipient()` in `model.ts`: the assistant, else an agent on the paired laptop (`sameMachine()` ignores case and `.local`), never a teammate's agent.
+
 ## Scripts
 
 All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `npx tsx scripts/<file>.ts`.
