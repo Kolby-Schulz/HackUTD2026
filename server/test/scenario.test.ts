@@ -84,6 +84,8 @@ describe('spec section 14: changed behavior, with Contract', () => {
           purpose: 'code',
           prompt_tokens: 40_000,
           completion_tokens: 2_000,
+          cache_read_tokens: 30_000,
+          cost_usd: 0.05,
         }),
       );
       t.as('outsider', (ctx) => mod.set_task_status(ctx, { task_id: tk.id, status: 'done' }));
