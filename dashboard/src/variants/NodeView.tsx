@@ -74,14 +74,12 @@ export interface NodeViewProps {
   picked: ReadonlySet<SlotId>;
   onTake?: (slot: SlotId) => void;
   onHover?: (slot: SlotId | null) => void;
-  /** Render this instead of the slot layout (a playground frame compared as a whole page). */
-  whole?: ComponentType;
 }
 
 export function NodeView(p: NodeViewProps) {
+  const pending = p.graph.nodes.get(p.nodeId)?.pending;
+  if (pending) return <div className="vx-absent vx-pending" role="status">{pending}</div>;
   const { sources } = resolveAll(p.graph, p.nodeId);
-  const src0 = p.graph.nodes.get(p.nodeId)?.source;
-  const boardSourced = src0 === 'live' || src0 === 'copy';
   const box = (slot: SlotId) => {
     const src = sources[slot];
     const C = src ? p.comp(src, slot) : undefined;
@@ -98,13 +96,10 @@ export function NodeView(p: NodeViewProps) {
         onMouseLeave={() => p.onHover?.(null)}
         onClickCapture={interactive ? (e) => { e.preventDefault(); e.stopPropagation(); p.onTake!(slot); } : undefined}
       >
-        {C ? <Boundary key={src} label={label}><C /></Boundary>
-          : boardSourced ? <div className="vx-absent">No “{label}” layer in this frame</div>
-          : <div className="vx-missing">Nothing fills “{label}”</div>}
+        {C ? <Boundary key={src} label={label}><C /></Boundary> : <div className="vx-missing">Nothing fills “{label}”</div>}
       </div>
     );
   };
-  if (p.whole) { const W = p.whole; return <Boundary label="Frame"><W /></Boundary>; }
   if (p.isolate) return <div className="vx-isolated">{box(p.isolate)}</div>;
   const Layout = p.screen.Layout;
   return (

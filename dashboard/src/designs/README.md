@@ -9,7 +9,6 @@ Open it with `npm run dashboard`, then go to http://localhost:5173/#/variants.
 
 ```
 src/designs/
-  lineage.json              mixes and final decisions (written by the page; commit it)
   <screen>/
     screen.tsx              declares the slots and places them (defineScreen)
     <variant>/index.tsx     fills some or all slots (defineVariant); the folder name is its id
@@ -20,19 +19,16 @@ src/designs/
 - **Root variant**: fills every slot.
 - **Child variant**: `extends: '<id>'` (a variant or a mix) and fills only the slots it changes.
   The rest come from its parent.
-- **Mix**: a record in `lineage.json` saying which node each slot comes from. Made in the page, not by hand.
+- **Mix**: a row in SpacetimeDB (`variant_mix`) saying which node each slot comes from. Made in the page, not by hand.
+- Picks, votes and generation jobs are SpacetimeDB rows too (`variant_pick`, `variant_vote`, `variant_job`), so every
+  browser sees the same decisions live. Only code lives in git.
 
-## Frames from the playground
+## Generating variants with the agent
 
-Designs can also come from the `#/playground` board, with no code. Click **From playground** in the Designs list:
-
-- **Link live**: the frame re-renders here whenever the playground saves (same browser, any tab).
-- **Copy**: freezes the frame as it is now. Its shapes are stored in `lineage.json`, so the copy is shared through git.
-  A live link can be frozen later from its ⋯ menu.
-- Name a frame's direct child layers after this screen's parts (for example "Top nav", "Hero", "Primary button") and they
-  become parts you can mix with code variants. A frame with no matching layers is compared as a whole page, at its own width.
-- Nothing here writes to the playground. The page reads the board the playground autosaves to `localStorage`
-  (`pg.board.v1.playground`) and renders it with the playground's own style functions (`render/style.ts`).
+Pick **Generate a child variant…** in a design's ⋯ menu and describe the change. The job is queued in SpacetimeDB;
+the variant agent (`npm run variants-agent`, in `agents/variants/`) takes it, writes `<screen>/gen-<slug>/`,
+typechecks the dashboard, commits only that folder and marks the job done with its token use. The dev server on the
+agent's checkout shows it at once; other laptops and deployed builds show "not in this build" until they pull.
 
 ## Rules for variant code
 

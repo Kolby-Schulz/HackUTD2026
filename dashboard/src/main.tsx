@@ -11,7 +11,7 @@ import { applyInitialTheme } from './theme.ts';
 
 applyInitialTheme();
 
-// #/variants is a standalone page (no SpacetimeDB connection), loaded on demand so the main bundle doesn't grow.
+// #/variants is its own page on the same SpacetimeDB connection, loaded on demand so the main bundle doesn't grow.
 const Variants = lazy(() => import('./variants/Variants.tsx').then((m) => ({ default: m.Variants })));
 const isVariants = () => /^#\/?variants/.test(location.hash);
 
@@ -22,12 +22,15 @@ function Root() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
-  if (variants) return <Suspense fallback={null}><Variants /></Suspense>;
   return (
     <SpacetimeDBProvider connectionBuilder={connectionBuilder}>
-      <MachineProvider>
-        <App />
-      </MachineProvider>
+      {variants ? (
+        <Suspense fallback={null}><Variants /></Suspense>
+      ) : (
+        <MachineProvider>
+          <App />
+        </MachineProvider>
+      )}
     </SpacetimeDBProvider>
   );
 }

@@ -1,4 +1,4 @@
-// Self-contained pieces of #/variants: segmented control, overlay comparison, name and width dialogs.
+// Self-contained pieces of #/variants: segmented control, overlay comparison, name, width and generate dialogs.
 import { useRef, useState } from 'react';
 import type { ComponentType, CSSProperties, ReactNode } from 'react';
 import { COLORS } from './constants.ts';
@@ -6,9 +6,7 @@ import type { Graph } from './model.ts';
 import { Frame, NodeView } from './NodeView.tsx';
 import type { Zoom } from './NodeView.tsx';
 import type { Screen } from './registry.ts';
-import type { BoardRef, NodeId, SlotId } from './types.ts';
-import { matchSlots } from './boards.ts';
-import type { BoardData, FrameInfo } from './boards.ts';
+import type { NodeId, SlotId } from './types.ts';
 import { Dialog } from './ui.tsx';
 
 export function Seg<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; options: [T, ReactNode][]; label?: string }) {
@@ -122,59 +120,24 @@ export function WidthDialog(p: { pane: string; initial: number; onCancel: () => 
   );
 }
 
-/** Lists the playground board's top-level frames: link one live, or copy it in as a frozen design. */
-export function ImportDialog(p: {
-  board: BoardData | null; frames: FrameInfo[]; linked: Map<string, BoardRef>; slots: Record<SlotId, string>;
-  onLink: (f: FrameInfo, mode: 'live' | 'copy') => void; onShow: (id: NodeId) => void; onClose: () => void;
-}) {
+/** Asks the variant agent for a new child: a short brief, queued through SpacetimeDB. */
+export function GenerateDialog(p: { parent: string; agents: number; onCancel: () => void; onConfirm: (brief: string) => void }) {
+  const [brief, setBrief] = useState('');
   return (
-    <Dialog heading="Bring in from the playground" onClose={p.onClose} width={560}>
-      {!p.board ? (
-        <div className="vx-import-empty">
-          <p>There’s no playground board saved in this browser yet.</p>
-          <p className="vx-note">Open the playground, draw or ask agents for a few frames, then come back. Frames appear here as soon as the board saves.</p>
-          <div className="vx-dialog-actions">
-            <button type="button" className="vx-btn" onClick={p.onClose}>Close</button>
-            <a className="vx-btn primary" href="#/playground">Open the playground</a>
-          </div>
+    <Dialog heading={`Generate a child of “${p.parent}”`} onClose={p.onCancel}>
+      <form className="vx-form" onSubmit={(e) => { e.preventDefault(); if (brief.trim()) p.onConfirm(brief.trim()); }}>
+        <label>What should change?
+          <textarea autoFocus rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="e.g. Rounder buttons and a denser feature grid" />
+        </label>
+        <p className="vx-note">
+          {p.agents ? 'A variant agent picks this up, writes the variant, checks it compiles and commits it. It appears here when it is ready.'
+            : 'No variant agent is online. The job waits in the queue until one starts (npm run variants-agent).'}
+        </p>
+        <div className="vx-dialog-actions">
+          <button type="button" className="vx-btn" onClick={p.onCancel}>Cancel</button>
+          <button type="submit" className="vx-btn primary" disabled={!brief.trim()}>Queue it</button>
         </div>
-      ) : (
-        <>
-          <p className="vx-note">
-            <b>Link</b> keeps a frame in sync with the board. <b>Copy</b> freezes it as it is now and saves it with the designs. Name a frame’s
-            layers after this screen’s parts ({Object.values(p.slots).join(', ')}) to mix them part by part; otherwise the frame is compared as a whole page.
-          </p>
-          {p.frames.length === 0 ? (
-            <p className="vx-import-empty">The board “{p.board.name}” has no frames yet.</p>
-          ) : (
-            <ul className="vx-import">
-              {p.frames.map((f) => {
-                const parts = Object.keys(matchSlots(p.board!, f.id, p.slots)).map((s) => p.slots[s]);
-                const ref = p.linked.get(f.id);
-                return (
-                  <li key={f.id}>
-                    <div className="vx-import-main">
-                      <b className="ellipsis">{f.name}</b>
-                      <span className="vx-note">
-                        <span className="mono">{f.w}×{f.h}</span> · {f.layers} layer{f.layers === 1 ? '' : 's'} · {parts.length ? `Parts: ${parts.join(', ')}` : 'Whole page'}
-                      </span>
-                    </div>
-                    {ref ? (
-                      <button className="vx-btn ghost" onClick={() => p.onShow(ref.id)}>{ref.mode === 'live' ? 'Linked' : 'Copied'} · Show</button>
-                    ) : (
-                      <>
-                        <button className="vx-btn" onClick={() => p.onLink(f, 'copy')}>Copy</button>
-                        <button className="vx-btn primary" onClick={() => p.onLink(f, 'live')}>Link live</button>
-                      </>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div className="vx-dialog-actions"><button type="button" className="vx-btn" onClick={p.onClose}>Done</button></div>
-        </>
-      )}
+      </form>
     </Dialog>
   );
 }
