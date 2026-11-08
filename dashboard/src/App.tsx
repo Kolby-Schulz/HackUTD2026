@@ -73,7 +73,7 @@ export function App() {
   const panel = open.panel && (
     <>
       <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
-      <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings">
+      <section className="pane" style={{ height: size.panel, flex: 'none', maxHeight: 'calc(100% - 200px)' }} aria-label="Savings">
         <Boundary name="Panel">
           <BottomPanel savings={view.savings} cases={view.cases} onClose={() => toggle('panel', false)} />
         </Boundary>

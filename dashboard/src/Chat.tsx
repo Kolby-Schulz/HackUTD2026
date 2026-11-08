@@ -176,8 +176,8 @@ function Composer({ agents, openRun, connected, assistant, machine }: {
             ) : agents.length > 0 && <optgroup label="Agents">{agents.map(option)}</optgroup>}
             <option value="all" disabled={running.length === 0}>Every running agent ({running.length})</option>
           </select>
+          <div className={'reach' + (to === 'all' && (others > 0 || laptops > 1) ? ' wide' : '')}>{reach}</div>
         </div>
-        <div className={'reach' + (to === 'all' && (others > 0 || laptops > 1) ? ' wide' : '')}>{reach}</div>
         <label htmlFor="chat-prompt" className="sr-only">{what}</label>
         <textarea id="chat-prompt" rows={3} maxLength={toAssistant ? 4000 : 2000} value={text} disabled={!to || (!connected && !toAssistant)}
           placeholder={!to ? 'No one to send to yet' : connected || toAssistant ? `${what}…` : 'Offline: reconnect to send'}

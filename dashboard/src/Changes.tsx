@@ -99,9 +99,8 @@ export function ChangesView({ edits, agents, symbol, symbolName, onPickSymbol, o
               <button type="button" className="edit-head" aria-expanded={on} onClick={() => toggle(e, i)}>
                 <svg className={'chev' + (on ? '' : ' closed')} width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                 <span className="sq" style={{ background: e.agent.color }} title={e.agent.name}>{e.agent.letter}</span>
-                <span className="ellipsis grow"><b className="mono">{parts.at(-1)}</b> <span className="muted mono">{parts.slice(0, -1).join('/')}</span></span>
-                <span className="stat mono">{e.stat}</span>
-                <span className="mono muted" style={{ fontSize: 11 }}>{e.time.slice(0, 5)}</span>
+                <span className="edit-file"><b className="mono ellipsis">{parts.at(-1)}</b>{parts.length > 1 && <span className="muted mono ellipsis">{parts.slice(0, -1).join('/')}</span>}</span>
+                <span className="edit-meta mono"><span className="stat">{e.stat}</span> <span className="muted">{e.time.slice(0, 5)}</span></span>
               </button>
               {e.symbols.length > 0 && (
                 <div className="edit-syms">

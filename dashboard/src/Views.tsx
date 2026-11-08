@@ -114,7 +114,7 @@ export function SymbolWidget({ node, symbols, edges, history, openCase, onClose 
   const [word, color] = STATE_WORD[node.state] ?? STATE_WORD.idle;
   const who = node.owners.map((p) => p.name).join(' and ');
   return (
-    <div role="dialog" aria-label={`${node.name} details`}>
+    <div className="widget-inner" role="dialog" aria-label={`${node.name} details`}>
       <div className="widget-head">
         <span className="dot" style={{ background: color }} />
         <span className="mono grow ellipsis" style={{ fontWeight: 700 }}>{node.name}</span>
