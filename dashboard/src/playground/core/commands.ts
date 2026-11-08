@@ -550,6 +550,8 @@ export interface BoardKit extends Board {
   actors: ReturnType<typeof createActorRegistry>;
   locks: Locks; claims: Claims; selection: SelectionStore; index: SpatialIndex; undoManager: UndoManager;
   events: EventBus; gate: Gate; me: ActorId;
+  /** Take back a revert (WP-77): same gate check as undo. Respects per-actor stacks (the work returns to its owner's undo stack). */
+  reapply(by: ActorId, txId: string): Result;
 }
 
 export function createBoard(opts: BoardOptions = {}): BoardKit {
@@ -710,6 +712,13 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
       afterUndo(by, r.tx);
       if (r.ok) return { ok: true };
       return fail('stale', r.skipped.length ? `${r.skipped.length} field(s) were changed since` : `nothing to revert for ${txId}`);
+    },
+    reapply(by, txId) {
+      if (!gate.can(by, 'write')) return fail('forbidden', `${by} lacks the "write" capability`);
+      const r = undoManager.reapply(by, txId);
+      afterUndo(by, r.tx); // like revert: a card reapply leaves the selection alone
+      if (r.ok) return { ok: true };
+      return fail('stale', r.skipped.length ? `${r.skipped.length} field(s) were changed since` : `nothing to reapply for ${txId}`);
     },
     subscribe: (f, cb) => events.subscribe(f, cb),
     snapshot(o = {}): Snapshot {

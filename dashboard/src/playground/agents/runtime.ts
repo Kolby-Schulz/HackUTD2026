@@ -12,6 +12,7 @@ import { absRect } from '../core/tree';
 import type { TreeView } from '../core/tree';
 import { CELL_H, CELL_W, COLS, createScriptedDriver, createSlots } from './scripted';
 import type { Slots } from './scripted';
+import { createLlmDriver } from './llm';
 
 export const NAMES = ['Iris', 'Juno', 'Milo', 'Nova', 'Otto', 'Pia', 'Rex', 'Sol', 'Tess', 'Vik', 'Wren', 'Zed'];
 export const COLORS = ['#f24e1e', '#a259ff', '#14ae5c', '#ff7262', '#0fa5e9', '#e8a700', '#ec4899', '#6366f1', '#10b981', '#f97316', '#8b5cf6', '#06b6d4'];
@@ -108,10 +109,17 @@ export function createRuntime(opts: RuntimeOpts) {
       for (;;) { const k = baseSlots.claim(); if (k < 0 || !occupied.has(k)) return k; }
     },
     clear() { baseSlots.clear(); occupied.clear(); },
+    release(k) { baseSlots.release?.(k); },
   };
   const agents = new Map<ActorId, Agent>();
   const makeDriver = opts.makeDriver ?? ((kind, s) => {
-    if (kind !== 'scripted') throw new Error('only the scripted driver exists yet');
+    if (kind === 'llm') {
+      // The bridge URL is a per-browser setting. Storage may be blocked; an empty URL gives a driver that fails closed.
+      let bridgeUrl = '';
+      try { bridgeUrl = localStorage.getItem('pg.llmBridge') ?? ''; } catch { /* storage unavailable */ }
+      // no URL: a fetch that always fails, so the driver says "bridge offline" instead of calling the page's own origin
+      return createLlmDriver(bridgeUrl ? { bridgeUrl } : { bridgeUrl, fetch: () => Promise.reject(new Error('no bridge URL')) });
+    }
     return createScriptedDriver({ slots: s });
   });
   let speed = 1;
@@ -422,6 +430,14 @@ export function createRuntime(opts: RuntimeOpts) {
     }
   }
 
+  /** Coordinator seams (WP-68): hand out and take back grid cells; `redirect` restarts the loser's build in a new cell. */
+  const pickSlot = () => slots.claim();
+  const freeSlot = (k: number) => slots.release?.(k);
+  function redirect(id: ActorId) {
+    const a = agents.get(id);
+    if (a && !a.stopped) interrupt(a, 'Moving to another spot.');
+  }
+
   function reset() {
     for (const id of [...agents.keys()]) remove(id);
     slots.clear();
@@ -429,7 +445,7 @@ export function createRuntime(opts: RuntimeOpts) {
   }
 
   return {
-    hosting, spawn, stop, stopAll, restart, remove, setPaused, setAllPaused, request, resetSlots, occupy, reset,
+    hosting, spawn, stop, stopAll, restart, remove, setPaused, setAllPaused, request, resetSlots, occupy, reset, pickSlot, freeSlot, redirect,
     cancelTask, promoteTask, tasks, step, setSpeed, setAgentSpeed,
     getSpeed: () => (stepMode ? 0 : speed),
     getAgentSpeed: (id: ActorId) => agents.get(id)?.mult ?? 1,

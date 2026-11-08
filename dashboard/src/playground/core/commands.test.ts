@@ -222,3 +222,28 @@ describe('human-edited text (WP-22 rule)', () => {
     expect(board.exec({ actor: 'agent-iris', opId: 't-c', commands: [{ t: 'shape.update', ids: [id], patch: { color: '#ff0000' } }] }).ok).toBe(true); // other fields stay editable
   });
 });
+
+describe('reapply (WP-77)', () => {
+  it('takes back a revert through the gate, keeps per-actor stacks, and a human redo never reapplies an agent tx', () => {
+    const made = run(A, [rectCmd(0, 0)]);
+    const id = rid(made.results[0]);
+    expect(b.revert(H, made.tx!).ok).toBe(true);
+    expect(sh(id).deleted).toBe(true);
+    expect(b.redo(H)).toBe(false); // the human's redo stack is untouched
+    expect(b.undoManager.canReapply(made.tx!)).toBe(true);
+    expect(b.reapply(H, made.tx!).ok).toBe(true);
+    expect(sh(id).deleted).toBeFalsy();
+    expect(b.undoManager.canUndo(A)).toBe(true); // the work is back on the agent's own undo stack
+    expect(b.undoManager.canUndo(H)).toBe(false);
+    expect(b.reapply(H, made.tx!).ok).toBe(false); // nothing left to reapply
+  });
+  it('is refused without the write capability', () => {
+    const made = run(A, [rectCmd(0, 0)]);
+    b.revert(H, made.tx!);
+    b.actors.spawn({ id: 'human-viewer', kind: 'human', name: 'V', caps: ['read'] });
+    const r = b.reapply('human-viewer', made.tx!);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.error).toBe('forbidden');
+    expect(b.undoManager.canReapply(made.tx!)).toBe(true);
+  });
+});
