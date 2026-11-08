@@ -130,5 +130,10 @@ humanEdited rule, palette.open, toast action, share link and URL view.
   `actions/edit.ts` skips "Nothing to undo" when `undoManager.last()?.outcome.skipped.length` (fields were superseded).
 - WP-65, WP-69, WP-75: no seam.
 
+## Owner requests
+- done: cursor tags show only the action, with the state dots after it; hovering an agent's arrow shows the name and
+  pins the pill at your pointer while the agent keeps moving, then eases it back on leave (`ui/Cursors.tsx`,
+  `styles/cursors.css`). WP-53's `layoutTags` seam must keep the `.hot`/`.pinned` classes and the tag transform.
+
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).

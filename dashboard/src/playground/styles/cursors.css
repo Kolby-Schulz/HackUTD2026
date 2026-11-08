@@ -27,5 +27,13 @@
 .pg-tag .badge { background: var(--c); color: var(--pg-white); border-radius: 50%; width: 14px; height: 14px; display: inline-grid; place-items: center; font-size: 9px; font-weight: 700; flex: none; }
 .pg-cursor.light .pg-tag .badge { color: var(--pg-ink); }
 /* idle fading: the tag dims when the cursor has been still for a while */
-.pg-tag { transition: opacity .4s; }
+
 .pg-cursor.still .pg-tag { opacity: .55; }
+/* names show on hover only; the pill pins at your pointer (.pinned) and eases back on release */
+.pg-cursor:not(.hot) .pg-tag .nm { display: none; }
+.pg-cursor.hot .pg-tag .nm + .st::before { content: '· '; }
+.pg-cursor.quiet:not(.hot) .pg-tag { opacity: 0; }
+.pg-cursor.hot { z-index: 2; }
+.pg-cursor.hot .pg-tag { opacity: 1; }
+.pg-tag { transition: opacity .4s, transform .22s cubic-bezier(.2, .8, .2, 1); }
+.pg-cursor.pinned .pg-tag { transition: opacity .15s; }

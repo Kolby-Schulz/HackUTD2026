@@ -15,6 +15,16 @@ import '../styles/cursors.css';
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const STILL_MS = 4000;          // tag dims after this long without motion
 const IDLE_MS = 20000;          // idle agents dim after this long
+const TAG_DX = 16, TAG_DY = 18;  // tag offset from the arrow tip (matches .pg-tag left/top)
+const PAD = 6;                   // slack around the hover areas
+
+/** Is the pointer on an agent's arrow (tip at v)? */
+function onArrow(px: number, py: number, v: { x: number; y: number }): boolean {
+  return px >= v.x - PAD && px <= v.x + 22 + PAD && py >= v.y - PAD && py <= v.y + 24 + PAD;
+}
+
+/** A hovered agent: its tag is pinned at the human pointer until the pointer leaves the pill. */
+interface Hot { id: string; pin: { x: number; y: number }; w: number; h: number }
 
 // 14px glyphs on a 24 grid, stroke only. Tools for people, state icons for agents.
 const GLYPHS: Record<string, string> = {
@@ -50,6 +60,7 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
   const els = useRef(new Map<string, HTMLDivElement>());
   const smoothers = useRef(new Map<string, Smoother>());
   const sticky = useRef(new Map<string, string>());
+  const hot = useRef<Hot | null>(null);
   const shown = useMemo(() => (DRAW_LOCAL_CURSOR ? cursors : cursors.filter((c) => c.id !== env.board.me)), [cursors, env]);
   const colors = useMemo(() => resolveColors(shown.filter((c) => c.kind !== 'human').map((c) => ({ id: c.id, color: c.color })), sticky.current), [shown]);
 
@@ -72,6 +83,7 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
 
   usePainter((cam) => {
     const t = now();
+    const at = new Map<string, { x: number; y: number }>();
     for (const [id, el] of els.current) {
       const p = env.board.presence.get(id);
       if (id === env.board.me) {
@@ -84,6 +96,7 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
       if (!sm) { el.style.opacity = '0'; continue; }
       const v = w2v(cam, { x: sm.x, y: sm.y });
       el.style.transform = `translate3d(${v.x}px, ${v.y}px, 0)`;
+      at.set(id, v);
       const still = t - sm.movedAt > STILL_MS;
       const idle = !p!.state || p!.state === 'idle';
       el.style.opacity = String(sm.fade < 1 ? sm.fade : idle && t - sm.movedAt > IDLE_MS ? 0.45 : 1);
@@ -92,7 +105,50 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
       const g = glyphFor('agent', p!.state, p!.tool);
       if (el.dataset.glyph !== g) el.dataset.glyph = g;
     }
+    paintHover(at);
   });
+
+  // Hover an agent's arrow: its pill (name · status) pins where your pointer is, so the agent keeps
+  // moving freely. When your pointer leaves the pill, it animates back to the agent's cursor.
+  function paintHover(at: Map<string, { x: number; y: number }>) {
+    const { x: px, y: py, inside } = env.pointer;
+    const busy = !!env.board.presence.get(env.board.me)?.down;
+    let h = hot.current;
+    if (h) {
+      const v = at.get(h.id);
+      // the pinned area spans from the pin point (your pointer) to the pill's far corner
+      const inPill = px >= h.pin.x - PAD && px <= h.pin.x + TAG_DX + h.w + PAD
+        && py >= h.pin.y - PAD && py <= h.pin.y + TAG_DY + h.h + PAD;
+      if (!inside || busy || !v || !(inPill || onArrow(px, py, v))) { release(h.id); h = null; }
+    }
+    if (!h && inside && !busy) {
+      for (const [id, v] of at) {
+        if (!onArrow(px, py, v)) continue;
+        const el = els.current.get(id);
+        const tag = el?.querySelector<HTMLElement>('.pg-tag');
+        if (!el || !tag) break;
+        el.classList.add('hot', 'pinned');
+        h = hot.current = { id, pin: { x: px, y: py }, w: tag.offsetWidth, h: tag.offsetHeight };
+        break;
+      }
+    }
+    if (h) {
+      const v = at.get(h.id)!;
+      const tag = els.current.get(h.id)?.querySelector<HTMLElement>('.pg-tag');
+      if (tag) {
+        tag.style.transform = `translate(${h.pin.x - v.x}px, ${h.pin.y - v.y}px)`;
+        h.w = tag.offsetWidth; h.h = tag.offsetHeight;
+      }
+    }
+  }
+  function release(id: string) {
+    hot.current = null;
+    const el = els.current.get(id);
+    if (!el) return;
+    el.classList.remove('pinned', 'hot');      // transition back on
+    const tag = el.querySelector<HTMLElement>('.pg-tag');
+    if (tag) tag.style.transform = '';
+  }
 
   useEffect(() => {
     const live = new Set(cursors.map((c) => c.id));
@@ -107,7 +163,7 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
         const color = human ? YOU_COLOR : colors.get(c.id) ?? c.color;
         const light = contrastOnWhite(color) < 3;
         return (
-          <div key={c.id} className={'pg-cursor' + (human ? ' human' : '') + (human && tool === 'comment' ? ' bubble' : '') + (light ? ' light' : '')}
+          <div key={c.id} className={'pg-cursor' + (human ? ' human' : '') + (!human && status === 'idle' ? ' quiet' : '') + (human && tool === 'comment' ? ' bubble' : '') + (light ? ' light' : '')}
             ref={(el) => { if (el) els.current.set(c.id, el); else els.current.delete(c.id); }}
             data-glyph={human ? tool : glyphFor(c.kind, c.state, undefined)}
             style={{ ['--c' as string]: color, opacity: 0 }}>
@@ -115,10 +171,11 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
             {human && <svg className="bub" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V11a8 8 0 1 1 8 8H3z" /></svg>}
             <span className="pg-tag">
               {!human && needsBadge(color) && <b className="badge">{badgeOf(c.name)}</b>}
+              <span className="nm">{c.name}</span>
+              {!human && status !== 'idle' ? <em className="st">{status}</em> : null}
               <span className="glyphs" aria-hidden="true">
                 {KEYS.map((k) => <svg key={k} className={'g g-' + k} width="14" height="14" viewBox="0 0 24 24"><path d={GLYPHS[k]} /></svg>)}
               </span>
-              <span className="nm">{c.name}</span>{!human && status !== 'idle' ? <em> · {status}</em> : null}
             </span>
           </div>
         );
