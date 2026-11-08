@@ -23,6 +23,8 @@ import { duplicateReason, nameOf } from './rules';
 // ---------------------------------------------------------------------------------
 
 const COORDINATOR_ID = 'coordinator';
+/** Marks instruction rows written by send_instruction (an operator on the dashboard). */
+const OPERATOR_PREFIX = 'Operator: ';
 const DEFAULT_CLAIM_TTL_SECS = 300;
 const HEARTBEAT_TIMEOUT_SECS = 60;
 const EXPIRE_EVERY_MICROS = 30_000_000n; // 30 s
@@ -939,6 +941,34 @@ export const acknowledge_instruction = spacetimedb.reducer(
     if (!row) throw new SenderError(`unknown instruction ${instruction_id}`);
     requireAgent(ctx, row.agent_id); // caller must be the instruction's agent
     if (!row.acknowledged) ctx.db.instruction.id.update({ ...row, acknowledged: true });
+  },
+);
+
+/**
+ * Operator message from the dashboard (issue #11): steer a running agent mid-task.
+ * agent_id '*' sends to every working or paused worker. The text is stored with the
+ * OPERATOR_PREFIX so workers and the dashboard can tell it from rule/coordinator pushes
+ * without a schema change. Open to any caller, like create_task (the dashboard is the
+ * operator console); a read-only public dashboard is issue #20.
+ */
+export const send_instruction = spacetimedb.reducer(
+  { agent_id: t.string(), text: t.string() },
+  (ctx, { agent_id, text }) => {
+    const body = text.trim();
+    if (!body) throw new SenderError('message is empty');
+    if (body.length > 2000) throw new SenderError('message is longer than 2000 characters');
+    const isWorker = (id: string) => id !== COORDINATOR_ID && id !== 'mapper';
+    let targets: string[];
+    if (agent_id === '*') {
+      targets = [...ctx.db.agent.iter()]
+        .filter((a) => isWorker(a.id) && (a.status === 'working' || a.status === 'paused'))
+        .map((a) => a.id);
+      if (!targets.length) throw new SenderError('no working agents to message');
+    } else {
+      if (!ctx.db.agent.id.find(agent_id) || !isWorker(agent_id)) throw new SenderError(`unknown agent '${agent_id}'`);
+      targets = [agent_id];
+    }
+    for (const id of targets) sendInstruction(ctx, id, OPERATOR_PREFIX + body);
   },
 );
 

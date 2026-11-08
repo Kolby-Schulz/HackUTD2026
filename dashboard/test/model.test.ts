@@ -162,3 +162,27 @@ describe('scoreboard', () => {
     expect(wi).toMatchObject({ runs: 0, running: true, total: 6700, conflictsCaught: 2 });
   });
 });
+
+describe('operator messages (issue #11)', () => {
+  const withMsgs = () => {
+    const t = story();
+    t.instructions = [...t.instructions,
+      { id: 4n, agentId: 'agent-a', conflictId: undefined, text: 'Operator: use cents everywhere', acknowledged: true, createdAt: ts(20) },
+      { id: 5n, agentId: 'agent-a', conflictId: undefined, text: 'Operator: skip the tests', acknowledged: false, createdAt: ts(25) },
+      { id: 6n, agentId: 'agent-a', conflictId: undefined, text: 'src/x.ts#f may already do this; reuse it', acknowledged: false, createdAt: ts(26) },
+    ];
+    return t;
+  };
+  it('lists them on the agent card with read state, without rule hints', () => {
+    const a = agentCards(withMsgs(), withMsgs().runs[1], NOW).find((c) => c.id === 'agent-a')!;
+    expect(a.messages.map((m) => [m.text, m.acked])).toEqual([['use cents everywhere', true], ['skip the tests', false]]);
+  });
+  it('shows them in the feed from the operator', () => {
+    const t = withMsgs();
+    const ev = feed(t, runWindow(t.runs[1], NOW));
+    const op = ev.find((e) => e.key === 'push5')!;
+    expect(op).toMatchObject({ actor: { id: 'operator', name: 'Operator' }, verb: 'messaged Agent A · delivered', sub: 'skip the tests' });
+    expect(ev.find((e) => e.key === 'push4')!.verb).toBe('messaged Agent A · read');
+    expect(ev.find((e) => e.key === 'push6')!.actor.id).toBe('coordinator');
+  });
+});

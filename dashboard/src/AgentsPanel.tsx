@@ -3,6 +3,7 @@ import type * as R from '@bindings/types.ts';
 import type { AgentCard, CoordView } from './model.ts';
 import { fmtK } from './model.ts';
 import { NewTaskForm } from './NewTaskForm.tsx';
+import { MessageBox } from './MessageBox.tsx';
 import { Avatar, Empty } from './ui.tsx';
 
 const GROUPS: [string, string][] = [['Paused', 'var(--warn)'], ['Working', 'var(--ok)'], ['Idle', 'var(--text2)'], ['Done', 'var(--done)']];
@@ -25,6 +26,12 @@ export function AgentsPanel({ agents, coord, openRun, tasks, onlineIds }: { agen
           </section>
         );
       })}
+      {agents.some((a) => a.status === 'Working' || a.status === 'Paused') && (
+        <section className="new-task" style={{ gap: 6 }}>
+          <div className="cap muted">Message all agents</div>
+          <MessageBox agentId="*" label="Tell every running agent…" />
+        </section>
+      )}
       <NewTaskForm agents={agents.filter((a) => onlineIds.has(a.id))} openRun={openRun} tasks={tasks} />
       <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div className="cap muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -65,6 +72,7 @@ function AgentItem({ a }: { a: AgentCard }) {
           <span className="waste-stripe" style={{ width: `${a.wastePct}%` }} />
         </div>
       </div>
+      {(a.status === 'Working' || paused) && <MessageBox agentId={a.id} label={`Message ${a.person.name}…`} messages={a.messages} />}
     </div>
   );
 }

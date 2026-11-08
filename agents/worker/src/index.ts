@@ -20,7 +20,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { connect, noopClient, type ContractClient } from '@contract/client';
+import { connect, isOperatorInstruction, noopClient, type ContractClient, type Instruction } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
@@ -166,11 +166,28 @@ contract.onStatusChange((status) => {
   if (status === 'paused') controller.abort();
 });
 
-// 5. Run, and on pause wait for an instruction then resume the same session.
+// 4b. Operator messages (issue #11, send_instruction from the dashboard): interrupt the
+// current turn and resume the same session with the message. Kept here, not read back from
+// pendingInstructions(), because the agent's own get_instructions MCP call may ack it first.
+// Before Claude Code reports a session id there is nothing to resume, so wait for it.
 let sessionId: string | undefined;
+let running = false;
+const operatorMsgs: Instruction[] = [];
+const interruptForOperator = () => {
+  if (running && sessionId && operatorMsgs.length && contract.status() !== 'paused') controller.abort();
+};
+contract.onInstruction((i) => {
+  if (!isOperatorInstruction(i)) return;
+  console.log(`[${agentId}] ${i.text}`);
+  operatorMsgs.push(i);
+  interruptForOperator();
+});
+
+// 5. Run, and on pause wait for an instruction then resume the same session.
 let prompt = task;
 for (;;) {
   try {
+    running = true;
     const r = await llm.runWorker(prompt, {
       ...contractOpts,
       cwd,
@@ -179,7 +196,10 @@ for (;;) {
       env: { ...env, ENABLE_TOOL_SEARCH: 'false' },
       signal: controller.signal,
       resumeSessionId: sessionId,
-      onSessionId: (id) => (sessionId = id),
+      onSessionId: (id) => {
+        sessionId = id;
+        interruptForOperator();
+      },
       onUsage,
       // After the spread, so contractOpts.allowedTools can't drop the test commands.
       allowedTools: ['Bash(npm test:*)', 'Bash(npm run:*)', 'Bash(npx vitest:*)', ...(contractOpts.allowedTools ?? [])],
@@ -187,19 +207,31 @@ for (;;) {
     console.log(`[${agentId}] done (${r.usage.prompt_tokens}+${r.usage.completion_tokens} tokens, $${r.usage.cost_usd.toFixed(4)})`);
     break;
   } catch (e) {
+    running = false;
     if (!(e instanceof LLMAbortError)) throw e;
     sessionId = e.sessionId ?? sessionId;
+    if (!sessionId) throw new Error(`[${agentId}] stopped before Claude Code reported a session id; cannot resume`);
+    if (contract.status() !== 'paused' && operatorMsgs.length) {
+      // Operator interrupt: not a coordination pause, so no early_stop saving and no waiting.
+      const msgs = operatorMsgs.splice(0);
+      for (const m of msgs) await contract.ack(m.id).catch(() => { /* already acked via get_instructions */ });
+      const text = msgs.map((m) => m.text.replace(/^Operator: /, '')).join(' ');
+      console.log(`[${agentId}] interrupted by the operator; resuming with: ${text}`);
+      prompt = `Message from the human operator, which overrides your earlier plan where they disagree: ${text} Follow it, then continue your task.`;
+      controller = new AbortController();
+      continue;
+    }
     const est = earlyStopEstimate(readTokenLog(localLog), e.usage?.completion_tokens ?? 0);
     console.log(`[${agentId}] paused; stopped Claude Code (~${est.tokens} tokens avoided${est.fromBaseline ? '' : ', default estimate'})`);
     await contract
       .logSaving('early_stop', est.tokens, `paused during ${sessionId ?? 'run'}${est.fromBaseline ? '' : ' (no baseline yet: default estimate)'}`)
       .catch((err: unknown) => console.warn(`[${agentId}] logSaving failed: ${String(err)}`));
-    if (!sessionId) throw new Error(`[${agentId}] paused before Claude Code reported a session id; cannot resume`);
 
     // Wait for the coordinator: resolve/dismiss unpauses us after inserting its instruction.
     await waitUntilUnpaused(contract);
     const instrs = resumeInstructions(contract.pendingInstructions());
     for (const i of contract.pendingInstructions()) await contract.ack(i.id);
+    operatorMsgs.length = 0; // delivered with the decision below (resumeInstructions keeps them)
     const text = instrs.map((i) => i.text).join(' ') || 'No change needed.';
     console.log(`[${agentId}] resuming: ${text}`);
     prompt = `Coordinator decision: ${text} Continue your task.`;

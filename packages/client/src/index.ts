@@ -65,6 +65,11 @@ export interface Instruction {
   acknowledged: boolean;
 }
 
+/** Prefix the server's send_instruction puts on operator (dashboard) messages (issue #11). */
+export const OPERATOR_PREFIX = 'Operator: ';
+export const isOperatorInstruction = (i: Pick<Instruction, 'text' | 'conflictId'>) =>
+  i.conflictId === undefined && i.text.startsWith(OPERATOR_PREFIX);
+
 export interface SymbolContext {
   id: string;
   signature: string;
