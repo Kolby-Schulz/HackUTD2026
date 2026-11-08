@@ -33,7 +33,7 @@ const LOG_LINES = 300;
 export type Action =
   | { action: 'coordinator' }
   | { action: 'session-start' }
-  | { action: 'session-merge'; integration?: boolean }
+  | { action: 'session-merge'; integration?: boolean; land?: boolean }
   | { action: 'worker'; id: string; prompt?: string }
   | { action: 'judge' }
   | { action: 'reset' };
@@ -166,7 +166,7 @@ export function toCommand(body: unknown): Command {
     case 'session-start':
       return { key: 'session-start', label: 'Start session', args: ['scripts/session.ts', 'start'], long: false };
     case 'session-merge':
-      return { key: 'session-merge', label: 'Merge session', args: ['scripts/session.ts', 'merge', ...(b.integration === true ? ['--integration'] : [])], long: false };
+      return { key: 'session-merge', label: 'Merge session', args: ['scripts/session.ts', 'merge', ...(b.integration === true ? ['--integration'] : []), ...(b.land === true ? ['--land'] : [])], long: false };
     case 'judge':
       return { key: 'judge', label: 'Judge agent', args: ['scripts/judge.ts'], long: true };
     case 'reset':
