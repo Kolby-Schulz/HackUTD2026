@@ -84,3 +84,56 @@ describe('clipboard', () => {
     expect(parsePayload(JSON.stringify({ format: 'contract-board-clip', v: 1, items: [{ kind: 'rect', parent: 5, props: {} }] }))).toBeNull();
   });
 });
+
+import { classifyClipboardText, pasteText, uniqueName } from './clipboard';
+describe('clipboard WP-78', () => {
+  it('pastes into a selected frame at the same relative offset, parent set, one undo', () => {
+    const [f, a] = make();
+    const p = copyShapes(b, [a])!;
+    const r = b.exec({ actor: H, opId: 'f2', commands: [{ t: 'shape.create', kind: 'frame', props: { name: 'B', x: 500, y: 0, w: 300, h: 300 } }] });
+    const bid = r.results[0].ok ? r.results[0].id! : '';
+    const res = pastePayload(b, p, { at: { x: 0, y: 0 }, intoFrame: bid });
+    expect(res.ok).toBe(true);
+    const s = b.doc.getState().shapes.get(res.ids[0])!;
+    expect(s.parent).toBe(bid);
+    expect([s.x, s.y]).toEqual([10, 20]);
+    expect(f).toBeTruthy();
+    b.undo(H);
+    expect(b.doc.getState().shapes.get(res.ids[0])?.deleted ?? true).toBe(true);
+  });
+  it('clamps a fully outside offset back into the target frame', () => {
+    make();
+    const r = b.exec({ actor: H, opId: 'o', commands: [{ t: 'shape.create', kind: 'rect', props: { x: 900, y: 900, w: 50, h: 50 } }, { t: 'shape.create', kind: 'frame', props: { x: 0, y: 0, w: 100, h: 100 } }] });
+    const [rid, fid] = r.results.map((x) => (x.ok ? x.id! : ''));
+    const res = pastePayload(b, copyShapes(b, [rid])!, { intoFrame: fid });
+    const s = b.doc.getState().shapes.get(res.ids[0])!;
+    expect([s.x, s.y]).toEqual([50, 50]);
+  });
+  it('makes unique names', () => {
+    expect(uniqueName('Card', new Set(['Card']))).toBe('Card copy');
+    expect(uniqueName('Card', new Set(['Card', 'Card copy']))).toBe('Card copy 2');
+    expect(uniqueName('Card', new Set(['x']))).toBe('Card');
+  });
+  it('classifies clipboard text', () => {
+    expect(classifyClipboardText('  ').kind).toBe('empty');
+    expect(classifyClipboardText('hello').kind).toBe('text');
+    expect(classifyClipboardText(JSON.stringify({ format: 'contract-board-clip', v: 2, items: [] })).kind).toBe('newer');
+    expect(classifyClipboardText('x'.repeat(5 * 1024 * 1024 + 1)).kind).toBe('toolarge');
+    const [f] = make();
+    expect(classifyClipboardText(serializePayload(copyShapes(b, [f])!)).kind).toBe('payload');
+  });
+  it('pastes text as a layer, truncates, replaces selected text, ignores blanks', () => {
+    expect(pasteText(b, '   ', { at: { x: 0, y: 0 } }).ok).toBe(false);
+    const r = pasteText(b, 'Hello\nworld', { at: { x: 40, y: 50 } });
+    const s = b.doc.getState().shapes.get(r.id!)!;
+    expect(s).toMatchObject({ kind: 'text', text: 'Hello\nworld', name: 'Hello', fontSize: 18, x: 40, y: 50 });
+    const rep = pasteText(b, 'Bye', { at: { x: 0, y: 0 }, replace: r.id });
+    expect(rep.replaced).toBe(true);
+    expect(b.doc.getState().shapes.get(r.id!)!.text).toBe('Bye');
+    const big = pasteText(b, 'a'.repeat(10001), { at: { x: 0, y: 0 } });
+    expect(big.truncated).toBe(true);
+    expect(b.doc.getState().shapes.get(big.id!)!.text!.length).toBe(10000);
+    b.undo(H);
+    expect(b.doc.getState().shapes.get(big.id!)?.deleted ?? true).toBe(true);
+  });
+});

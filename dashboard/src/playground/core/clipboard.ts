@@ -27,6 +27,8 @@ export interface ClipboardPayload {
   size: { w: number; h: number };
   /** Parent the first root was copied from (in-place paste goes back there when it still exists). */
   srcParent: ShapeId | null;
+  /** World top-left of the source parent (absent = copied from the root). Lets "paste into frame" keep relative position. */
+  srcParentOrigin?: Pt;
   items: ClipItem[];
 }
 
@@ -77,7 +79,16 @@ export function copyShapes(board: BoardKit, ids: readonly ShapeId[]): ClipboardP
   });
   const first = st.shapes.get(roots[0])!;
   const srcParent = first.parent !== null && st.shapes.has(first.parent) ? first.parent : null;
-  return { format: 'contract-board-clip', v: 1, origin: { x: x0, y: y0 }, size: { w: x1 - x0, h: y1 - y0 }, srcParent, items };
+  const srcParentOrigin = srcParent !== null ? toWorld(st, srcParent, { x: 0, y: 0 }) : undefined;
+  return { format: 'contract-board-clip', v: 1, origin: { x: x0, y: y0 }, size: { w: x1 - x0, h: y1 - y0 }, srcParent, srcParentOrigin, items };
+}
+
+/** "Card" -> "Card copy" -> "Card copy 2" ... only when `name` is already taken among the siblings. */
+export function uniqueName(name: string, taken: ReadonlySet<string | undefined>): string {
+  if (!taken.has(name)) return name;
+  const base = `${name} copy`;
+  if (!taken.has(base)) return base;
+  for (let i = 2; ; i++) if (!taken.has(`${base} ${i}`)) return `${base} ${i}`;
 }
 
 // ---- paste ----
@@ -90,6 +101,8 @@ export interface PasteOpts {
   view?: Rect;
   /** Force a target parent (null = root). Default: in place -> the original parent, else the frame under the anchor. */
   parent?: ShapeId | null;
+  /** Paste into this frame at the same offset from its top-left as from the source parent (clamped inside). Wins over `parent`. */
+  intoFrame?: ShapeId;
   /** Offset consecutive pastes at the same anchor by +16,+16 (default true). */
   stack?: boolean;
 }
@@ -106,7 +119,18 @@ export function pastePayload(board: BoardKit, payload: ClipboardPayload, o: Past
   // anchor = world top-left where the copy lands before the stacking offset
   let tl: Pt;
   let key: string;
-  if (o.inPlace || !o.at) { tl = { ...payload.origin }; key = 'place'; }
+  const into = o.intoFrame !== undefined && live(board, o.intoFrame) && st.shapes.get(o.intoFrame)!.kind === 'frame' ? o.intoFrame : null;
+  if (into) {
+    const f = st.shapes.get(into)!;
+    const po = payload.srcParentOrigin ?? { x: 0, y: 0 };
+    let rx = payload.origin.x - po.x, ry = payload.origin.y - po.y;
+    // completely outside the target: pull it back inside (as far as the frame's size allows)
+    if (rx + w <= 0 || rx >= f.w) rx = Math.max(0, Math.min(rx, f.w - w));
+    if (ry + h <= 0 || ry >= f.h) ry = Math.max(0, Math.min(ry, f.h - h));
+    tl = toWorld(st, into, { x: rx, y: ry });
+    key = `into:${into}`;
+  }
+  else if (o.inPlace || !o.at) { tl = { ...payload.origin }; key = 'place'; }
   else {
     const big = !!o.view && (w > o.view.w || h > o.view.h);
     tl = big ? { ...o.at } : { x: o.at.x - w / 2, y: o.at.y - h / 2 };
@@ -117,7 +141,8 @@ export function pastePayload(board: BoardKit, payload: ClipboardPayload, o: Past
   tl = { x: tl.x + n * PASTE_STACK_OFFSET, y: tl.y + n * PASTE_STACK_OFFSET };
 
   let parent: ShapeId | null;
-  if (o.parent !== undefined) parent = o.parent;
+  if (into) parent = into;
+  else if (o.parent !== undefined) parent = o.parent;
   else if (o.inPlace || !o.at) parent = payload.srcParent;
   else parent = frameAt(st, { x: tl.x + w / 2, y: tl.y + h / 2 });
   if (parent !== null && !live(board, parent)) parent = null;
@@ -128,7 +153,7 @@ export function pastePayload(board: BoardKit, payload: ClipboardPayload, o: Past
     if (it.parent === null) {
       const p = toLocal(st, parent, { x: tl.x + (it.props.x ?? 0), y: tl.y + (it.props.y ?? 0) });
       props.x = p.x; props.y = p.y;
-      if (props.name !== undefined && taken.has(props.name)) props.name = `${props.name} copy`;
+      if (props.name !== undefined) { props.name = uniqueName(props.name, taken); taken.add(props.name); }
     }
     return { t: 'shape.create', kind: it.kind, props, parent: it.parent === null ? parent : `$${it.parent}` } as Command;
   });
@@ -177,6 +202,65 @@ export function parsePayload(text: string): ClipboardPayload | null {
     origin: { x: num(o?.x) ?? 0, y: num(o?.y) ?? 0 },
     size: { w: Math.max(0, num(s?.w) ?? 0), h: Math.max(0, num(s?.h) ?? 0) },
     srcParent: null, // ids from another session mean nothing here
+    srcParentOrigin: raw.srcParentOrigin && num(raw.srcParentOrigin.x) !== undefined && num(raw.srcParentOrigin.y) !== undefined
+      ? { x: num(raw.srcParentOrigin.x)!, y: num(raw.srcParentOrigin.y)! } : undefined,
     items,
   };
+}
+
+/** What the system clipboard text is. `newer` = our format from a newer app version (refuse politely). */
+export type ClipText =
+  | { kind: 'payload'; payload: ClipboardPayload }
+  | { kind: 'newer' } | { kind: 'toolarge' } | { kind: 'empty' }
+  | { kind: 'text'; text: string };
+export function classifyClipboardText(text: unknown): ClipText {
+  if (typeof text !== 'string' || !text.trim()) return { kind: 'empty' };
+  if (text.length > MAX_PAYLOAD_BYTES) return { kind: 'toolarge' };
+  const payload = parsePayload(text);
+  if (payload) return { kind: 'payload', payload };
+  if (text.includes('contract-board-clip')) {
+    try { const r = JSON.parse(text); if (r?.format === 'contract-board-clip' && typeof r.v === 'number' && r.v > 1) return { kind: 'newer' }; } catch { /* plain text */ }
+  }
+  return { kind: 'text', text };
+}
+
+// ---- paste plain text (HISTORY-24) ----
+export const MAX_PASTE_TEXT = 10000;
+const TEXT_FONT = 18, TEXT_MAX_W = 480;
+export interface PasteTextResult { ok: boolean; id?: ShapeId; truncated: boolean; replaced?: boolean; exec?: ExecResult; error?: string }
+
+/** Rough text box: 0.55em per char, 1.4 line height, wrapped at 480. */
+function measureText(text: string): { w: number; h: number } {
+  const cw = TEXT_FONT * 0.55, lh = Math.ceil(TEXT_FONT * 1.4);
+  const lines = text.split('\n');
+  const longest = Math.max(...lines.map((l) => l.length));
+  const w = Math.max(24, Math.min(TEXT_MAX_W, Math.ceil(longest * cw) + 2));
+  const perLine = Math.max(1, Math.floor(w / cw));
+  const n = lines.reduce((a, l) => a + Math.max(1, Math.ceil(l.length / perLine)), 0);
+  return { w, h: n * lh };
+}
+
+/** Plain text -> a text layer at world point `at` (or replace the text of `replace`). One undo entry. */
+export function pasteText(board: BoardKit, raw: string, o: { at: Pt; replace?: ShapeId | null }, actor = board.me): PasteTextResult {
+  if (!raw.trim()) return { ok: false, truncated: false };
+  const truncated = raw.length > MAX_PASTE_TEXT;
+  const text = (truncated ? raw.slice(0, MAX_PASTE_TEXT) : raw).replace(/\r\n?/g, '\n');
+  const st = board.doc.getState();
+  const target = o.replace ? st.shapes.get(o.replace) : undefined;
+  if (target && !target.deleted && target.kind === 'text') {
+    const exec = board.exec({ actor, opId: opId(actor), commands: [{ t: 'shape.update', ids: [target.id], patch: { text } }], label: 'Paste text' });
+    return exec.ok ? { ok: true, id: target.id, truncated, replaced: true, exec } : { ok: false, truncated, exec, error: 'Could not paste' };
+  }
+  const parent = frameAt(st, o.at);
+  const l = toLocal(st, parent, o.at);
+  const { w, h } = measureText(text);
+  const firstLine = text.split('\n').find((x) => x.trim()) ?? 'Text';
+  const props: Partial<ShapeProps> = {
+    name: firstLine.trim().slice(0, 24), x: l.x, y: l.y, w, h, fills: [], text, fontSize: TEXT_FONT, color: '#1c1917',
+    textMode: w >= TEXT_MAX_W || text.includes('\n') ? 'auto-h' : 'auto-w',
+  };
+  const exec = board.exec({ actor, opId: opId(actor), commands: [{ t: 'shape.create', kind: 'text', props, parent }], label: 'Paste text' });
+  const r = exec.results[0];
+  if (!exec.ok || !r?.ok) return { ok: false, truncated, exec, error: r && !r.ok ? r.message : 'Could not paste' };
+  return { ok: true, id: r.id, truncated, exec };
 }
