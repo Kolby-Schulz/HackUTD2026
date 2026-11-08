@@ -8,16 +8,17 @@ import type { ShapeId } from '../../core/types';
 import { boxStyle, shapeStyle } from '../../render/style';
 import { TextView } from '../text/TextView';
 import { useBoardEnv } from './context';
-import { isVisible } from './culling';
+import { useVisible } from './culling';
 
 export const ShapeView = memo(function ShapeView({ id, depth }: { id: ShapeId; depth: number }) {
   const env = useBoardEnv();
   const store = env.board.doc;
   const s = useShape(store, id);
   const kids = useChildren(store, id);
+  const visible = useVisible(id, kids);
   if (!s || s.deleted) return null;
 
-  const children = kids.filter(isVisible).map((k) => <ShapeView key={k} id={k} depth={depth + 1} />);
+  const children = visible.map((k) => <ShapeView key={k} id={k} depth={depth + 1} />);
 
   if (s.kind === 'group') {
     return <div className="pg-shape k-group" data-id={id} style={boxStyle(s) as CSSProperties}>{children}</div>;

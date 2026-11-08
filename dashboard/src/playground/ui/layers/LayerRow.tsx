@@ -6,6 +6,7 @@ import type { ShapeId } from '../../core/types';
 import { MAX_INDENT_DEPTH, type LayerRowData } from './treeView';
 
 export const ROW_HEIGHT = 28;
+const MAX_DOTS = 3;
 
 const P = { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
 function KindIcon({ kind }: { kind: string }) {
@@ -28,10 +29,14 @@ export interface LayerRowProps {
   selected: boolean;
   /** A collapsed descendant of this row is selected (lighter tint). */
   hiddenSelected: boolean;
-  /** Colour of an agent holding a soft lock on this layer. */
-  lockColor?: string;
+  /** Colours of the agents holding a soft lock on this layer (stacked dots, max 3 then +n). */
+  lockColors?: readonly string[];
+  /** Colours of agents editing a descendant: shown as a hollow ring while this row is collapsed. */
+  belowColors?: readonly string[];
   onPick: (id: ShapeId) => void;
   onToggle: (id: ShapeId, deep: boolean) => void;
+  /** Double-click on the row (not the name, which renames): centre the camera on the layer. */
+  onJump?: (id: ShapeId) => void;
 }
 
 const noop = () => () => {};
@@ -59,7 +64,7 @@ function RenameInput({ id, initial }: { id: ShapeId; initial: string }) {
   );
 }
 
-export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, lockColor, onPick, onToggle }: LayerRowProps) {
+export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, lockColors, belowColors, onPick, onToggle, onJump }: LayerRowProps) {
   const env = activeBoard();
   // Per-row subscription to its own shape, so flags and author show without the panel passing them down.
   const shape = useSyncExternalStore(
@@ -81,8 +86,8 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
   };
   return (
     <div className={cls} style={{ height: ROW_HEIGHT, paddingLeft: 6 + Math.min(row.depth, MAX_INDENT_DEPTH) * 16, opacity: hidden ? 0.5 : undefined }}
-      data-layer={row.id} onClick={() => onPick(row.id)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-      <span className="chev" onClick={(e) => { if (!row.hasChildren) return; e.stopPropagation(); onToggle(row.id, e.altKey); }}>
+      data-layer={row.id} onClick={() => onPick(row.id)} onDoubleClick={() => onJump?.(row.id)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <span className="chev" onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { if (!row.hasChildren) return; e.stopPropagation(); onToggle(row.id, e.altKey); }}>
         {row.hasChildren && (
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: row.expanded ? 'rotate(90deg)' : undefined }}>
             <path d="M4.5 2.5L8 6 4.5 9.5" />
@@ -103,9 +108,16 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
           </button>
         </>
       )}
-      {lockColor
-        ? <span className="dot" title="Editing now" ref={pulse} style={{ background: lockColor }} />
-        : ownerColor && <span className="dot" title={`Created by ${owner?.name}`} style={{ background: 'transparent', boxShadow: `inset 0 0 0 1.5px ${ownerColor}`, width: 7, height: 7 }} />}
+      {lockColors?.length
+        ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flex: 'none' }}>
+            {lockColors.slice(0, MAX_DOTS).map((c) => <span key={c} className="dot" title="Editing now" ref={pulse} style={{ background: c }} />)}
+            {lockColors.length > MAX_DOTS && <span style={{ fontSize: 10, color: 'var(--pg-muted)' }}>+{lockColors.length - MAX_DOTS}</span>}
+          </span>
+        )
+        : !row.expanded && belowColors?.length
+          ? <span className="dot" title="Editing inside" style={{ background: 'transparent', boxShadow: `inset 0 0 0 1.5px ${belowColors[0]}`, width: 7, height: 7 }} />
+          : ownerColor && <span className="dot" title={`Created by ${owner?.name}`} style={{ background: 'transparent', boxShadow: `inset 0 0 0 1.5px ${ownerColor}`, width: 7, height: 7 }} />}
     </div>
   );
 });

@@ -33,3 +33,17 @@ describe('flattenTree', () => {
     expect([...hiddenSelectionParents(rows, shapes, ['b'])]).toEqual(['g']);
   });
 });
+
+import { rowActivity } from './treeView';
+describe('rowActivity', () => {
+  it('collects own editors and marks every ancestor', () => {
+    const shapes = new Map<string, any>([
+      ['f', { id: 'f', parent: null }], ['g', { id: 'g', parent: 'f' }], ['r', { id: 'r', parent: 'g' }],
+    ]);
+    const a = rowActivity([{ shapeId: 'r', holder: 'x' }, { shapeId: 'r', holder: 'y' }, { shapeId: 'g', holder: 'x' }, { shapeId: 'r', holder: 'ghost' }], shapes, (h) => ({ x: '#f00', y: '#0f0' } as Record<string, string>)[h]);
+    expect(a.own.get('r')).toEqual(['#f00', '#0f0']);
+    expect(a.below.get('g')).toEqual(['#f00', '#0f0']);
+    expect(a.below.get('f')).toEqual(['#f00', '#0f0']);
+    expect(a.below.has('r')).toBe(false);
+  });
+});

@@ -150,6 +150,27 @@ describe('snapMove', () => {
     expect(snapMove(box(297, 50), ctx({ parent: 'p' })).dx).toBe(3);
   });
 
+  it('snaps moves to the parent frame edges and centre, never to a grandparent', () => {
+    bind([
+      mk('gp', null, { x: 0, y: 0, w: 1000, h: 1000 }),
+      mk('fr', 'gp', { x: 100, y: 100, w: 400, h: 300 }),
+      mk('kid', 'fr', { x: 10, y: 10, w: 50, h: 50 }),
+    ]);
+    // left edge near the frame's left edge (world 100)
+    expect(snapMove(box(103, 250), ctx({ ignore: new Set(['kid']), parent: 'fr' })).dx).toBe(-3);
+    resetSnapMemory();
+    // right edge near the frame's right edge (world 500)
+    expect(snapMove(box(447, 250), ctx({ ignore: new Set(['kid']), parent: 'fr' })).dx).toBe(3);
+    resetSnapMemory();
+    // centre near the frame centre x=300
+    const c = snapMove(box(273, 250), ctx({ ignore: new Set(['kid']), parent: 'fr' }));
+    expect(c.dx).toBe(2);
+    expect(c.lines[0]).toMatchObject({ axis: 'x', at: 300 });
+    resetSnapMemory();
+    // the grandparent's edge (x=0 / x=1000) is not a candidate
+    expect(snapMove(box(997, 600), ctx({ ignore: new Set(['kid']), parent: 'fr' })).dx).toBe(0);
+  });
+
   it('restricts candidates to the viewport', () => {
     bind([mk('in', null, { x: 100, y: 0 }), mk('out', null, { x: 5000, y: 0 })], { viewport: { x: 0, y: 0, w: 1000, h: 800 } });
     expect(snapMove(box(5003, 20), ctx()).dx).toBe(0);

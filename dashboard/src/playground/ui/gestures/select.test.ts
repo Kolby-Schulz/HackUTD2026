@@ -6,7 +6,7 @@ import { createFakeFrameSource, createScheduler } from '../../core/raf';
 import { createUiStore, selectedIds } from '../board/state';
 import type { BoardEnv } from '../board/state';
 import type { PointerInfo } from './pipeline';
-import { enterAt, selectAt } from './select';
+import { enterAt, finishClick, selectAt } from './select';
 
 function makeEnv(): BoardEnv {
   const board = createBoard({ me: 'human-test' });
@@ -55,6 +55,8 @@ describe('click select', () => {
     selectAt(env, pi(520, 20, { shift: true }));
     expect(selectedIds(env.board)).toEqual([e, free]);
     selectAt(env, pi(250, 150, { shift: true }));
+    expect(selectedIds(env.board)).toEqual([e, free]);   // removal waits for the release
+    finishClick(env, pi(250, 150, { shift: true }));
     expect(selectedIds(env.board)).toEqual([free]);
     selectAt(env, pi(900, 900, { shift: true }));
     expect(selectedIds(env.board)).toEqual([free]);
