@@ -99,7 +99,7 @@ export function benchMarkdown(r: BenchReport): string {
   const o = r.overall;
   const head = o.costSaving === undefined
     ? `${o.runs} run(s) so far; run both modes of a scenario to compare.`
-    : `Across ${r.rows.filter((x) => x.with && x.without).length} scenario(s) and ${o.runs} runs, Contract saved **${pct(o.costSaving)}** of the cost ` +
+    : `Across ${r.rows.filter((x) => x.with && x.without).length} scenario(s) and ${o.runs} runs, InSync saved **${pct(o.costSaving)}** of the cost ` +
       `(${pct(o.tokenSaving)} of tokens) and left ${o.brokenWith}/${o.runsWith} merges broken vs ${o.brokenWithout}/${o.runsWithout} without it.`;
   const lines = [
     head,

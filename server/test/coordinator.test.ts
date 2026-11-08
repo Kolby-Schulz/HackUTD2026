@@ -12,6 +12,7 @@ import {
   CHECKOUT,
   type Harness,
   type Who,
+  asOperator,
 } from './helpers';
 
 const status = (t: Harness, id: string) => t.db.agent.id.find(id)!.status;
@@ -106,7 +107,8 @@ describe('resolve_conflict', () => {
   });
 
   it('rejects an agent squatting on the coordinator id from another identity', () => {
-    // Arrange: the real coordinator is registered; worker-c tries to impersonate it.
+    // Arrange: the real coordinator is registered and holds the coordinator lock; worker-c tries to impersonate it.
+    t.as('coordinator', (ctx) => mod.claim_service(ctx, { name: 'coordinator', machine: 'laptop-1', holder: 'p1' }));
     const act0 = () =>
       t.as('worker-c', (ctx) =>
         mod.register_agent(ctx, {
@@ -123,7 +125,7 @@ describe('resolve_conflict', () => {
     const act = () => resolve(t, conflictId, 'worker-c');
 
     // Assert
-    expect(act0).toThrow(/already linked/);
+    expect(act0).toThrow(/coordinator is already running on laptop-1/);
     expect(act).toThrow(/only the coordinator/);
   });
 
@@ -209,9 +211,9 @@ describe('resolve_conflict', () => {
 
   it('does not change an agent that was not paused', () => {
     // Arrange
-    t.as('outsider', (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
+    asOperator(t, (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
     const runId = all(t.db.run.iter())[0].id;
-    t.as('outsider', (ctx) => mod.create_task(ctx, { title: 'x', description: 'x', agent_id: 'agent-a', run_id: runId }));
+    asOperator(t, (ctx) => mod.create_task(ctx, { title: 'x', description: 'x', agent_id: 'agent-a', run_id: runId }));
     const taskId = all(t.db.task.iter())[0].id;
     t.as('worker-a', (ctx) => mod.set_task_status(ctx, { task_id: taskId, status: 'in_progress' }));
     t.as('worker-a', (ctx) => mod.set_task_status(ctx, { task_id: taskId, status: 'done' }));

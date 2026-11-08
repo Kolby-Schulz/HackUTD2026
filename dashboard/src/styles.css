@@ -293,7 +293,7 @@ button { cursor: pointer; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .msg-error { color: var(--danger); font-size: 12px; }
 .control { display: flex; flex-direction: column; gap: 16px; }
-.control-head { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 0 4px; }
+.control-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; padding: 0 4px; }
 .control-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .control .step { display: flex; flex-direction: column; gap: 10px; }
 .control .step.wide { grid-column: 1 / -1; }

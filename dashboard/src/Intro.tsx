@@ -1,7 +1,7 @@
-// Title card, one continuous motion: two blue sparkles draw two parallel lanes downward (two
-// agents working side by side), the lanes hook inward and meet in the middle (InSync catching
-// the conflict live), then the same two curves swing down into one straight line, turning
-// blue, with the sparkles riding them out to the ends. The name rises out of that line.
+// Title card, one continuous motion: two blue sparkles start in opposite corners (two agents)
+// and each draws half of one smooth cubic bezier S-curve, meeting in the middle (InSync catching the conflict live). Then the S flattens into
+// one straight line, turning blue, with the sparkles riding it out to the ends. The name rises
+// out of that line. (No letter shapes: the title has no U, V or X.)
 //
 // Everything is computed from one clock (a Motion value), so the sparkles always sit exactly
 // on the curves and nothing jumps. Built with Motion (motion/react, MIT, free).
@@ -40,9 +40,12 @@ const T = { draw: 1.35, meet: 1.35, morphFrom: 1.5, morphTo: 2.45, title: 2.15, 
 // ---- geometry (viewBox 600 x 400; the meeting point is the stage center, 300,200) ----
 type P = [number, number];
 type Cubic = [P, P, P, P];
-const LANE: Cubic = [[268, 40], [268, 168], [270, 200], [300, 200]]; // straight down, hooks in
+// Left half of an S from the top-left, flat at the end and steep through the middle; the right
+// half is the same curve turned 180 degrees about the center, so together they form one
+// continuous S through (300,200). The header mark (SCurveMark) is this same shape, scaled.
+const LANE: Cubic = [[100, 80], [250, 80], [262, 150], [300, 200]];
 const RULE: Cubic = [[132, 200], [188, 200], [244, 200], [300, 200]]; // left half of the line
-const mirror = (c: Cubic): Cubic => c.map(([x, y]) => [600 - x, y]) as Cubic;
+const mirror = (c: Cubic): Cubic => c.map(([x, y]) => [600 - x, 400 - y]) as Cubic;
 
 const lerp = (a: number, b: number, m: number) => a + (b - a) * m;
 const lerpP = (a: P, b: P, m: number): P => [lerp(a[0], b[0], m), lerp(a[1], b[1], m)];
@@ -170,16 +173,14 @@ export function Intro({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** The static mark: two lanes bowing toward each other, held by a rung. */
-export function LanesMark({ size = 30 }: { size?: number }) {
+/** The static mark: the intro's S-curve (two halves meeting in the middle), with a blue dot where they meet. */
+export const S_MARK_PATH = 'M6 9 C13.5 9 14.1 13.1 16 16 C17.9 18.9 18.5 23 26 23';
+export function SCurveMark({ size = 30 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
       <rect width="32" height="32" rx="9" fill="var(--surface)" stroke="var(--border)" />
-      <g fill="none" stroke="var(--text)" strokeWidth="2.4" strokeLinecap="round">
-        <path d="M11 6 Q15.5 16 11 26" />
-        <path d="M21 6 Q16.5 16 21 26" />
-      </g>
-      <line x1="13.3" y1="16" x2="18.7" y2="16" stroke="var(--accent)" strokeWidth="2.4" strokeLinecap="round" />
+      <path d={S_MARK_PATH} fill="none" stroke="var(--text)" strokeWidth="2.4" strokeLinecap="round" />
+      <circle cx="16" cy="16" r="2.3" fill="var(--accent)" />
     </svg>
   );
 }

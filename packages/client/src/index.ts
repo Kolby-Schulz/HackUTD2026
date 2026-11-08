@@ -287,6 +287,9 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     try {
       await register();
     } catch (e) {
+      // Our own teardown, not a dropped connection: don't warn "connection lost" or reconnect.
+      state.closed = true;
+      state.reason = 'register_agent refused';
       conn.disconnect();
       throw e;
     }

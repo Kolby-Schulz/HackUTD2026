@@ -25,8 +25,11 @@ import { demoRepoChanges, resetFiles, resetRuns } from './reset.ts';
 import { seed } from './seed.ts';
 import { scenarioOrDie } from './scenarios.ts';
 import {
-  adminConnect, AGENTS, git, log, MODES, REPO, resetServerState, RESULTS_DIR, savedToken, saveToken, TSX, WORKTREES, type Mode,
+  adminConnect, AGENTS, git, log, MODES, REPO, resetServerState, RESULTS_DIR, savedToken, saveToken, TSX, TSX_CLI, WORKTREES, type Mode,
 } from './lib.ts';
+
+// The previous run's workers exited moments ago; their heartbeats keep reset_demo_state refusing for up to 60 s.
+const RESET_WAIT_SECS = 90;
 
 const { values } = parseArgs({
   options: {
@@ -86,7 +89,7 @@ for (let i = 1; i <= runs; i++) {
     }
     if (i === 1) log('demo', 'leftovers from an earlier run; resetting first');
     resetFiles();
-    await resetRuns();
+    await resetRuns(RESET_WAIT_SECS);
   }
   await runOnce();
 }
@@ -101,12 +104,12 @@ async function runOnce() {
   //    survive (and leftover instructions would reach the new agents).
   {
     const conn = await adminConnect(['SELECT * FROM run']);
-    await resetServerState(conn);
+    await resetServerState(conn, RESET_WAIT_SECS);
     conn.disconnect();
     log('demo', 'cleared server state from the last run');
   }
   if (mode === 'with_contract') {
-    const code = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts')], REPO, 5 * 60_000);
+    const code = await run('mapper', TSX, [TSX_CLI, join(REPO, 'mapper/src/cli.ts')], REPO, 5 * 60_000);
     if (code.exitCode !== 0) die('mapper failed; is the server reachable?');
   }
 
@@ -131,7 +134,7 @@ async function runOnce() {
       const r = await run(
         a.id,
         TSX,
-        [join(REPO, 'agents/worker/src/index.ts'), '--id', a.id, '--task', a.task, '--task-id', String(s.tasks[a.id]), '--mode', mode,
+        [TSX_CLI, join(REPO, 'agents/worker/src/index.ts'), '--id', a.id, '--task', a.task, '--task-id', String(s.tasks[a.id]), '--mode', mode,
           '--task-text', a.id === 'agent-a' ? scenario.a.task : scenario.b.task],
         REPO,
         timeoutMs,

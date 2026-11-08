@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
 import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
-import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
+import { APP_NAME, Intro, SCurveMark, shouldPlayIntro } from './Intro.tsx';
 import { CodeMap } from './CodeMap.tsx';
 import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
 import { DockArea, useDock, type ViewId } from './Dock.tsx';
@@ -68,7 +68,7 @@ export function App() {
 
       <header className="titlebar">
         <div className="brand">
-          <button type="button" className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><LanesMark size={24} /></button>
+          <button type="button" className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><SCurveMark size={24} /></button>
           {APP_NAME}
         </div>
         <CommandCenter repoLabel={repoLabel} runs={runs} run={run} runPick={runPick} openRun={openRun} modeName={modeName}

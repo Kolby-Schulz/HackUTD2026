@@ -1,6 +1,6 @@
 // log_tokens, mark_attempt_wasted, log_saving, cache_summary, record_cache_hit (spec section 7).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { makeHarness, register, mod, all, type Harness, type Who } from './helpers';
+import { makeHarness, register, mod, all, type Harness, type Who, asOperator } from './helpers';
 
 function logTokens(t: Harness, overrides: Partial<{ agent_id: string; task_id: bigint; attempt: number; purpose: string; prompt_tokens: number; cache_read_tokens: number; cost_usd: number; who: Who }> = {}) {
   const { who = 'worker-a', ...rest } = overrides;
@@ -139,9 +139,9 @@ describe('mark_attempt_wasted', () => {
   beforeEach(() => {
     t = makeHarness();
     register(t, 'agent-a');
-    t.as('outsider', (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
+    asOperator(t, (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
     const runId = all(t.db.run.iter())[0].id; // read outside the transaction (the harness deadlocks otherwise)
-    t.as('outsider', (ctx) => mod.create_task(ctx, { title: 'x', description: 'x', agent_id: 'agent-a', run_id: runId }));
+    asOperator(t, (ctx) => mod.create_task(ctx, { title: 'x', description: 'x', agent_id: 'agent-a', run_id: runId }));
     taskId = all(t.db.task.iter())[0].id;
   });
 
@@ -153,7 +153,7 @@ describe('mark_attempt_wasted', () => {
     logTokens(t, { task_id: 999n, attempt: 1 });
 
     // Act
-    t.as('outsider', (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 1 }));
+    asOperator(t, (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 1 }));
 
     // Assert
     const rows = all(t.db.tokenUsage.iter()).map((r) => [r.task_id, r.attempt, r.wasted]);
@@ -168,11 +168,11 @@ describe('mark_attempt_wasted', () => {
 
   it('does not move the attempt backwards', () => {
     // Arrange
-    t.as('outsider', (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 1 }));
-    t.as('outsider', (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 2 }));
+    asOperator(t, (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 1 }));
+    asOperator(t, (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 2 }));
 
     // Act
-    t.as('outsider', (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 1 }));
+    asOperator(t, (ctx) => mod.mark_attempt_wasted(ctx, { task_id: taskId, attempt: 1 }));
 
     // Assert
     expect(t.db.task.id.find(taskId)!.attempt).toBe(3);
@@ -183,7 +183,7 @@ describe('mark_attempt_wasted', () => {
     logTokens(t, { task_id: 555n });
 
     // Act
-    const act = () => t.as('outsider', (ctx) => mod.mark_attempt_wasted(ctx, { task_id: 555n, attempt: 1 }));
+    const act = () => asOperator(t, (ctx) => mod.mark_attempt_wasted(ctx, { task_id: 555n, attempt: 1 }));
 
     // Assert
     expect(act).not.toThrow();

@@ -30,7 +30,7 @@ describe('benchReport', () => {
   });
   it('renders a README table with the headline', () => {
     const md = benchMarkdown(benchReport([runOf('planted', 'without_contract', 1, 100_000, true), runOf('planted', 'with_contract', 0.25, 30_000, false)]));
-    expect(md).toMatch(/Contract saved \*\*75%\*\* of the cost \(70% of tokens\) and left 0\/1 merges broken vs 1\/1 without it/);
+    expect(md).toMatch(/InSync saved \*\*75%\*\* of the cost \(70% of tokens\) and left 0\/1 merges broken vs 1\/1 without it/);
     expect(md).toContain(`| ${SCENARIOS.planted.title} | 1 / 1 | $1.00 | $0.25 | 75% |`);
   });
   it('has five scenarios, each with two tasks and checks', () => {

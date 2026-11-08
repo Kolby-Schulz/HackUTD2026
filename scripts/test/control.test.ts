@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { childEnv, cloneCommand, gitAccessHint, machineId, normalizeRepo, Registry, toCommand } from '../control.ts';
+import { childEnv, cloneCommand, gitAccessHint, heldByAnotherDaemon, machineId, normalizeRepo, Registry, suffixedId, toCommand } from '../control.ts';
 
 describe('toCommand', () => {
   it('maps each action to its script', () => {
@@ -35,11 +35,30 @@ describe('machineId', () => {
   });
 });
 
+describe('two laptops with the same hostname', () => {
+  it('adds a 4-char suffix and stays within 64 chars', () => {
+    expect(suffixedId('macbook-pro')).toMatch(/^macbook-pro-[a-z2-9]{4}$/);
+    expect(suffixedId('macbook-pro', () => 0)).toBe('macbook-pro-aaaa');
+    const long = suffixedId('x'.repeat(64));
+    expect(long).toHaveLength(64);
+    expect(long).toMatch(/^x{59}-[a-z2-9]{4}$/);
+  });
+
+  it('recognizes the server refusing an id another live daemon holds', () => {
+    expect(heldByAnotherDaemon(new Error("machine 'mbp' is online with another daemon; stop it first (or wait 30 s)"))).toBe(true);
+    expect(heldByAnotherDaemon(new Error('machine id is empty'))).toBe(false);
+    expect(heldByAnotherDaemon('is online with another daemon')).toBe(false);
+    expect(heldByAnotherDaemon(undefined)).toBe(false);
+  });
+});
+
 /** A child process stand-in: emits output, exits when killed. */
 function fakeSpawn() {
   const calls: string[][] = [];
-  const fn = ((_bin: string, args: string[]) => {
+  const envs: NodeJS.ProcessEnv[] = [];
+  const fn = ((_bin: string, args: string[], opts: { env: NodeJS.ProcessEnv }) => {
     calls.push(args);
+    envs.push(opts.env);
     const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: () => void };
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
@@ -48,7 +67,7 @@ function fakeSpawn() {
     setTimeout(() => child.stdout.emit('data', Buffer.from('hello\nworld\n')), 0);
     return child;
   }) as never;
-  return { fn, calls };
+  return { fn, calls, envs };
 }
 
 describe('Registry', () => {
@@ -65,6 +84,32 @@ describe('Registry', () => {
     expect(() => reg.stop('coordinator')).toThrow(/not running/);
     reg.forget('coordinator');
     expect(reg.view()).toEqual([]);
+  });
+
+  it('passes its machine id to every child, and only when it has one', () => {
+    const { fn, envs } = fakeSpawn();
+    const reg = new Registry(fn, 'tsx', '/tmp');
+    reg.start(toCommand({ action: 'coordinator' }));
+    expect(envs[0].CONTRACT_MACHINE).toBe(process.env.CONTRACT_MACHINE);
+    reg.machine = 'ethans-macbook-pro-k7q2';
+    reg.start(toCommand({ action: 'judge' }));
+    expect(envs[1]).toMatchObject({ CONTRACT_MACHINE: 'ethans-macbook-pro-k7q2', CONTRACT_TARGET: '' });
+  });
+
+  it('saves and reloads the machine id with the repo', () => {
+    const root = mkdtempSync(join(tmpdir(), 'control-'));
+    const a = new Registry(fakeSpawn().fn, 'tsx', root);
+    a.stateFile = join(root, '.contract', 'control.json');
+    a.setMachine('mbp-ab34');
+    a.setRepo('acme/app');
+    const b = new Registry(fakeSpawn().fn, 'tsx', root);
+    b.stateFile = a.stateFile;
+    expect(b.load()).toBe('https://github.com/acme/app.git');
+    expect(b.machine).toBe('mbp-ab34');
+    const c = new Registry(fakeSpawn().fn, 'tsx', root);
+    c.stateFile = join(root, 'missing.json');
+    expect(c.load()).toBeUndefined();
+    expect(c.machine).toBe('');
   });
 });
 

@@ -1,11 +1,11 @@
 // upsert_symbols: the code map the mapper writes (spec sections 7 and 9).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { makeHarness, mod, all, sym, seedCodeMap, FEES, INVOICE, TOTAL, CHECKOUT, type Harness } from './helpers';
+import { makeHarness, mod, all, sym, seedCodeMap, FEES, INVOICE, TOTAL, CHECKOUT, type Harness, asMapper } from './helpers';
 
 const FILE = 'src/billing/invoice.ts';
 
 function upsert(t: Harness, symbols: ReturnType<typeof sym>[], edges: { caller_id: string; callee_id: string }[] = []) {
-  t.as('mapper', (ctx) => mod.upsert_symbols(ctx, { file: FILE, symbols, edges }));
+  asMapper(t, (ctx) => mod.upsert_symbols(ctx, { file: FILE, symbols, edges }));
 }
 
 describe('upsert_symbols', () => {

@@ -2,10 +2,11 @@
 // control server (scripts/control.ts, `npm run control`), which runs the same commands the
 // README lists on this laptop. Process state isn't in SpacetimeDB, so this tab polls that
 // local server; every table on the dashboard still comes from live subscriptions.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type * as R from '@bindings/types.ts';
 import { StatusLabel } from './ui.tsx';
 import { MachinePicker, useMachine, type ChatMessage, type Proc, type Status } from './machine.tsx';
+import { controlSteps, envCopy, OS_LABEL, saveOS, savedOS, terminalName, type OS } from './os.ts';
 
 export type { ChatMessage } from './machine.tsx';
 
@@ -41,7 +42,7 @@ export function useControl() {
 /** `chat` false: the workbench shows the assistant in its own Chat pane, so this tab only has the controls. */
 export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: boolean }) {
   const { status, down, refresh } = useControl();
-  const { pairing } = useMachine();
+  const { pairing, laptops } = useMachine();
   const post = useSend();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
@@ -77,6 +78,10 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
 
   const isDemo = !status?.repo;
   const justPaired = pairing?.state === 'done' && pairing.machine === status?.machine;
+  // Teammates' laptops: everyone shares one database (and one open run), so say who else is here and
+  // on which repo. Buttons and chat on this tab still reach only the paired laptop.
+  const others = laptops.filter((l) => l.online && !l.mine);
+  const offRepo = status ? others.filter((l) => l.repoLabel !== status.repoLabel) : [];
 
   return (
     <div className="control">
@@ -92,10 +97,12 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
         <span className="dot" style={{ width: 8, height: 8, background: down ? 'var(--danger)' : 'var(--ok)' }} />
         <span>{down ? 'Lost the laptop' : <>Controlling <span className="mono">{status?.machine}</span></>}</span>
         <MachinePicker />
+        {others.length > 0 && <span className="muted" style={{ fontSize: 12 }}>· also online: {others.map((l) => `${l.id} (${l.repoLabel})`).join(', ')}</span>}
         <span className="grow" />
         <span className="muted">{openRun ? <>Open run <span className="mono">#{String(openRun.id)}</span> · {openRun.mode}</> : 'No open run'}</span>
       </div>
       {error && <div className="banner" role="alert">{error}</div>}
+      {offRepo.length > 0 && <div className="banner" role="status">{offRepo.map((l) => `${l.id} is on ${l.repoLabel}`).join('; ')}; agents in one run should work on the same repo as this laptop ({status?.repoLabel}).</div>}
 
       <div className="control-grid">
         <section className="card pad step">
@@ -282,12 +289,6 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
 }
 
 
-export const EXAMPLES = [
-  'Add a late fee to overdue invoices',
-  'Add late fees to invoices, and have another agent show dates as YYYY-MM-DD on receipts',
-  "What's happening right now?",
-];
-
 /** The chat: type what you want built; the assistant (scripts/assistant.ts) runs everything. */
 /** The paired laptop's assistant (scripts/assistant.ts, mirrored through machine_chat).
  *  `up` is false when no paired laptop is running `npm run control`. */
@@ -341,9 +342,6 @@ function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; on
           <div className="chat-empty">
             <h2>What should the agents build?</h2>
             <p className="muted">Describe it like you'd prompt a coding agent. Contract starts the coordinator and a session, splits the work across agents, keeps them from colliding, then merges and runs the tests.</p>
-            <div className="chips">
-              {(demo ? EXAMPLES : EXAMPLES.slice(-1)).map((e) => <button key={e} type="button" className="example" onClick={() => setText(e)}>{e}</button>)}
-            </div>
           </div>
         )}
         {messages.map((m) => (
@@ -397,27 +395,51 @@ function ProcRow({ p, busy, onStop, onClear }: { p: Proc; busy: boolean; onStop:
   );
 }
 
-/** No paired laptop online: how to start the daemon and pair this browser. */
+/** No paired laptop online: how to start the daemon on your laptop and pair this browser with it, and only it. */
 function NotPaired({ chat }: { chat: boolean }) {
-  const { mine, unpaired, pair, pairing } = useMachine();
+  const { mine, laptops, pair, pairing } = useMachine();
   const [machine, setMachine] = useState('');
   const [code, setCode] = useState('');
-  const target = machine || unpaired[0] || '';
+  const [os, setOs] = useState<OS>(savedOS);
+  // Nothing is pre-selected: the first online laptop is usually a teammate's, and pairing with it
+  // would make this browser drive their laptop.
+  const others = laptops.filter((l) => l.online && !l.mine);
+  const chosen = others.find((l) => l.id === machine);
   const working = pairing?.state === 'working';
+  const browsers = (n: number) => `${n} other browser${n === 1 ? '' : 's'}`;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!chosen || !code.trim()) return;
+    if (chosen.pairedBy > 0 && !window.confirm(`${chosen.id} is already paired with ${browsers(chosen.pairedBy)}. Only pair it if it's the laptop you're sitting at: every paired browser controls it.`)) return;
+    void pair(chosen.id, code).then(() => setCode('')).catch(() => undefined);
+  };
   return (
     <section className="card pad control-off">
-      <h2 style={{ fontSize: 16 }}>{working ? `Pairing with ${pairing.machine}…` : 'Connect a laptop'}</h2>
-      <p className="muted">Agents run on your own laptop. Start the daemon in a terminal in the repo, then click the pairing link it prints (or type its code below). After that you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and InSync starts the coordinator, a session and the agents for you.</p>
-      <pre className="mono">npm run control</pre>
+      <h2 style={{ fontSize: 16 }}>{working ? `Pairing with ${pairing.machine}…` : 'Connect your laptop'}</h2>
+      <p className="muted">Agents run on your own laptop, and this browser drives only the laptop you pair it with. Open {terminalName(os)}, go to the root of your Contract clone (the folder with <span className="mono">package.json</span>) and run these one at a time:</p>
+      <div className="row" role="group" aria-label="Laptop's operating system" style={{ gap: 6, marginBottom: 6 }}>
+        {(Object.keys(OS_LABEL) as OS[]).map((o) => (
+          <button key={o} type="button" className={`btn small${o === os ? '' : ' ghost'}`} aria-pressed={o === os} onClick={() => { setOs(o); saveOS(o); }}>{OS_LABEL[o]}</button>
+        ))}
+      </div>
+      <pre className="mono" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{controlSteps(os)}</pre>
+      <p className="muted">First time only, before <span className="mono">npm run control</span>: run <span className="mono">{envCopy(os)}</span>, then set <span className="mono">SPACETIME_HOST</span> and <span className="mono">SPACETIME_DB_NAME</span> in <span className="mono">.env</span>.</p>
+      <p className="muted">Then click the pairing link it prints (or type its code below). After that you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and InSync starts the coordinator, a session and the agents for you.</p>
+      <p className="muted">Teammates run the same commands on their laptops and pair their own browsers. Everyone sees the same run, agents and changes here; pairing only decides which laptop your buttons and chat reach.</p>
+      <p className="muted" style={{ fontSize: 12 }}>Seeing <span className="mono">npm error Missing script: "control"</span>? That checkout is on an old branch (or you're in the wrong folder). In the repo root run <span className="mono">git checkout main</span>, <span className="mono">git pull</span> and <span className="mono">npm install</span>, then try again.</p>
       {pairing?.state === 'failed' && <div className="banner" role="alert">Couldn't pair with {pairing.machine}: {pairing.error}</div>}
-      {unpaired.length > 0 && (
-        <form className="row repo-form" onSubmit={(e) => { e.preventDefault(); if (target && code.trim()) void pair(target, code).then(() => setCode('')).catch(() => undefined); }}>
-          {unpaired.length > 1
-            ? <select value={target} onChange={(e) => setMachine(e.target.value)} aria-label="Laptop">{unpaired.map((m) => <option key={m} value={m}>{m}</option>)}</select>
-            : <span className="mono">{target}</span>}
-          <input className="mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code, e.g. K7Q-4XM" aria-label="Pairing code" spellCheck={false} autoComplete="off" maxLength={12} />
-          <button type="submit" className="btn small" disabled={working || !code.trim()}>Pair</button>
-        </form>
+      {others.length > 0 && (
+        <>
+          <form className="row repo-form" onSubmit={submit}>
+            <select value={machine} onChange={(e) => setMachine(e.target.value)} aria-label="Your laptop">
+              <option value="">Which laptop is yours?</option>
+              {others.map((l) => <option key={l.id} value={l.id}>{l.id} · {l.repoLabel} · {l.pairedBy > 0 ? `paired by ${l.pairedBy} browser${l.pairedBy === 1 ? '' : 's'}` : 'not paired yet'}</option>)}
+            </select>
+            <input className="mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code, e.g. K7Q-4XM" aria-label="Pairing code" spellCheck={false} autoComplete="off" maxLength={12} />
+            <button type="submit" className="btn small" disabled={working || !chosen || !code.trim()}>Pair</button>
+          </form>
+          <p className="muted" style={{ fontSize: 12 }}>Your laptop is the one whose terminal printed the code. A laptop that's already paired is probably a teammate's.</p>
+        </>
       )}
       {mine.length > 0 && <p className="muted">Paired, but offline: <span className="mono">{mine.map((m) => m.id).join(', ')}</span>. Start <span className="mono">npm run control</span> there again.</p>}
       <p className="muted" style={{ fontSize: 12 }}>The daemon connects out to SpacetimeDB; nothing listens on a port. It only runs commands from browsers you paired, and only on that laptop. Codes work once and expire after 10 minutes.</p>

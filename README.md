@@ -1,4 +1,4 @@
-# Contract
+# InSync
 
 Live coordination for AI coding agents. A shared SpacetimeDB server lets a team's
 coding agents see each other's plans as they work, so conflicting changes are caught
@@ -7,27 +7,40 @@ conflicts and a live dashboard shows everything. Every model call goes through o
 provider switch: workers run on Claude Code, and the coordinator runs on NVIDIA Nemotron
 or Claude (`COORDINATOR_PROVIDER`).
 
-> Contract isn't another coding agent. It's what lets your team's coding agents work like a team.
+> InSync isn't another coding agent. It's what lets your team's coding agents work like a team.
 
 Built at HackUTD 2026. Full spec: [docs/SPEC.md](docs/SPEC.md).
 
-![Contract dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
+![InSync dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
 
 ## 60-second quickstart
 
 One laptop, the built-in demo repo, driven from the dashboard:
 
+From the repo root (the folder with `package.json`), on an up-to-date `main` (`npm run control`
+only exists there). First time only, copy `.env.example` to `.env` (`cp` on macOS/Linux/PowerShell,
+`copy` in Windows cmd) and set `SPACETIME_HOST=wss://maincloud.spacetimedb.com` and
+`SPACETIME_DB_NAME=contract-hackutd26`. Then:
+
 ```bash
+git checkout main
+git pull
 npm install
-cp .env.example .env     # set SPACETIME_HOST=wss://maincloud.spacetimedb.com, SPACETIME_DB_NAME=contract-hackutd26
-npm run control          # opens the dashboard, paired to this laptop
+npm run control
 ```
+
+`npm run control` opens the dashboard, already paired to this laptop.
+
+`npm error Missing script: "control"` means you're in the wrong folder or on an old branch:
+`cd` to the repo root and run `git checkout main`, `git pull`, then `npm install`.
+These commands work the same on macOS, Linux and Windows; run them one per line (Windows
+PowerShell 5.1 doesn't accept `&&`).
 
 In the dashboard's **Chat** tab, type what you want built, the way you'd prompt a coding agent:
 
 > Add late fees to invoices, and have another agent format receipt dates.
 
-Contract plans it, starts a coordinator and a session, puts one agent on each independent
+InSync plans it, starts a coordinator and a session, puts one agent on each independent
 piece, catches the conflicts between them while they type, and merges and runs the checks when
 they finish. A second laptop joins the same run with `npm run control` and the same `.env`.
 
@@ -41,12 +54,12 @@ coordinator, the dashboard) gets the result pushed to it through a subscription.
 flowchart LR
     subgraph L1[Laptop 1]
         A[Agent A<br/>Claude Code in a worktree]
-        MA[Contract MCP server<br/>+ edit hooks]
+        MA[InSync MCP server<br/>+ edit hooks]
         A <--> MA
     end
     subgraph L2[Laptop 2]
         B[Agent B<br/>Claude Code in a worktree]
-        MB[Contract MCP server<br/>+ edit hooks]
+        MB[InSync MCP server<br/>+ edit hooks]
         B <--> MB
     end
     subgraph DB[SpacetimeDB module · server/]
@@ -73,7 +86,7 @@ flowchart LR
   coordinator, mapper) is a Node process that connects as a client.
 - **Detection is free and instant.** The three rules below run inside `publish_plan`,
   `claim_symbol` and `report_change`. The coordinator model is only called after a rule fires,
-  and its tokens are logged against Contract on the scoreboard.
+  and its tokens are logged against InSync on the scoreboard.
 - **Every panel is a subscription.** The dashboard writes nothing except new tasks and
   operator messages; two laptops and a hosted dashboard all see the same rows.
 
@@ -109,7 +122,7 @@ mapped symbol without a claim.
 
 ```text
 server/              SpacetimeDB module: tables, reducers, conflict checks
-packages/client/     Contract client library + generated SpacetimeDB bindings
+packages/client/     InSync client library + generated SpacetimeDB bindings
 packages/llm/        Shared model wrapper (Claude Code today): calls, token + cost logging
 agents/worker/       Worker agent loop and its tools
 agents/coordinator/  Coordinator agent loop and prompts
@@ -185,15 +198,22 @@ Keep live tests local (they wipe their database); they default to `ws://localhos
 
 The easiest way: open the dashboard's **Chat** tab and say what you want, the way you'd prompt a
 coding agent ("Add late fees to invoices, and have another agent format receipt dates").
-Contract plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
+InSync plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
 session if they aren't running, puts one agent on each independent piece, and merges and runs
 the checks when they all finish. While agents work, follow-ups ("make it round half up") go to
 them as messages. It needs one daemon running on the laptop
 that does the work:
 
+In the repo root (older branches have no control script):
+
 ```bash
-npm run control     # first run: opens the dashboard in your browser, already linked to this laptop
+git checkout main
+git pull
+npm install
+npm run control
 ```
+
+On the first run it opens the dashboard in your browser, already linked to this laptop.
 
 The daemon connects out to SpacetimeDB as this laptop's `machine` row; nothing listens on a port,
 so the hosted dashboard drives it the same as a local one. Set `CONTRACT_DASHBOARD_URL` to your
@@ -211,6 +231,13 @@ workers, judge, merge, reset) and show each process's output. Only paired browse
 commands, every command goes through a fixed allowlist, and it runs things only on the laptop
 it runs on (each laptop runs its own). Workers push `agent/<id>` to origin as usual.
 
+**Several people, one dashboard.** Each browser drives only the laptop it paired with, so pair with
+the laptop whose terminal printed the code (yours), and have teammates run `npm run control` on
+their own laptops and pair their own browsers. Everyone still sees the same run, agents, chat and
+changes, because they share one database; the Control tab lists the other laptops online and the
+repo each one is on. If two laptops have the same hostname, the second daemon picks
+`<hostname>-xxxx` and remembers it in `.contract/control.json` (`--machine <name>` overrides).
+
 ## Joining from a new laptop
 
 ```bash
@@ -218,15 +245,16 @@ npm run join -- --agent agent-b --name "Agent B" --owner Bob
 ```
 
 Checks Node, `.env`, the `claude` login and git, registers the agent, and prints the worker
-command. Only one coordinator and one watching mapper run per database (a second one
-refuses to start). Rehearsal steps and network fallbacks: `docs/two-laptop-rehearsal.md`.
+command. Only one coordinator is active per database: a second one stands by and takes over
+if the first stops (a second watching mapper refuses to start). Rehearsal steps and network
+fallbacks: `docs/two-laptop-rehearsal.md`.
 
 To join from your own Claude Code, Cursor or Codex session instead of our worker:
 `npm run join -- --agent dana --client claude-code` (see `docs/join-contract.md`).
 
 ## Your own repo
 
-Contract works on any git repository, not only `demo-repo/` (issue #18). The easiest way:
+InSync works on any git repository, not only `demo-repo/` (issue #18). The easiest way:
 run `npm run control`, open the dashboard's **Chat** tab and paste a GitHub link
 (`owner/name` works too) into **Repository**. From the command line, pick it with
 `--repo <path|git URL>` or `CONTRACT_TARGET` in `.env`; a folder inside a repo works too.
@@ -258,7 +286,7 @@ npm run reset -- --repo ../my-app
 - **Code map folders.** Tests and tooling folders (`test/`, `tests/`, `__tests__/`, `scripts/`)
   are left out of the code map. If your app's code lives in one, or a folder should never be
   mapped, say so in `contract.json`: `"map": { "include": ["scripts"], "exclude": ["demo-repo"] }`.
-  This monorepo's own `contract.json` does exactly that, so Contract can run on itself
+  This monorepo's own `contract.json` does exactly that, so InSync can run on itself
   (`--repo .`); keep agents out of `server/` there, since a schema change needs
   `npm run generate -w @contract/server` and a publish, which no agent should do.
 - **Languages.** The code map reads TypeScript and JavaScript (ES modules), plus Python, Go,
@@ -277,7 +305,7 @@ The table below is a first, small sample (1 run per mode, 2 scenarios, generated
 (`npm run bench -- --runs 3`) before quoting a number.
 
 <!-- bench:begin -->
-Across 2 scenario(s) and 4 runs, Contract saved **26%** of the cost (0% of tokens) and left 0/2 merges broken vs 1/2 without it.
+Across 2 scenario(s) and 4 runs, InSync saved **26%** of the cost (0% of tokens) and left 0/2 merges broken vs 1/2 without it.
 
 | Scenario | Runs (without / with) | Cost without | Cost with | Saved | Tokens without | Tokens with | Wasted without | Broken merges without | Broken merges with |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

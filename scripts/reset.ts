@@ -69,9 +69,9 @@ export function targetChanges(target: Target = resolveTarget(REPO, undefined, { 
 /** The demo's name for targetChanges() (run-demo checks demo-repo before a run). */
 export const demoRepoChanges = () => targetChanges(resolveTarget(REPO, ''));
 
-export async function resetRuns() {
+export async function resetRuns(waitSecs = 0) {
   const conn = await adminConnect(['SELECT * FROM run']);
-  const ended = await resetServerState(conn);
+  const ended = await resetServerState(conn, waitSecs);
   log('reset', ended.length ? `ended open run(s) ${ended.join(', ')}` : 'no open run');
   log('reset', 'cleared code map, plans, claims and pending instructions');
   conn.disconnect();
