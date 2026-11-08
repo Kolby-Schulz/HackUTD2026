@@ -1,6 +1,6 @@
 // Merge, check and merge-fix helpers shared by run-demo.ts and session.ts. Owner: dashboard + demo.
 import { spawn } from 'node:child_process';
-import { checkTools, connect, type Check as TargetCheck, type DbConnection } from '@contract/client';
+import { checkTools, connect, toolPath, type Check as TargetCheck, type DbConnection } from '@contract/client';
 import { createLLM } from '@contract/llm';
 import { git, log, savedToken } from './lib.ts';
 
@@ -57,7 +57,8 @@ export async function runChecks(dir: string, list: readonly TargetCheck[]): Prom
   const testRuns: string[] = [];
   let dupesOut = '';
   for (const c of list) {
-    const r = await run(`check:${c.name}`, 'sh', ['-c', c.cmd], dir, 5 * 60_000, {}, true);
+    // The checkout's own tools first (.venv/bin for pytest, node_modules/.bin for vitest).
+    const r = await run(`check:${c.name}`, 'sh', ['-c', c.cmd], dir, 5 * 60_000, { PATH: toolPath(dir) }, true);
     checks.push({ name: c.name, ok: r.exitCode === 0, output: r.output, cmd: c.cmd });
     if (/test/.test(c.name) || /\btest\b/.test(c.cmd)) testRuns.push(r.output);
     if (c.name === 'check-dupes') dupesOut = r.output;
@@ -74,7 +75,13 @@ export function countTests(out: string): TestCount {
   const line = /Tests\s+(.*)/.exec(text)?.[1];
   if (line) return { passed: Number(/(\d+) passed/.exec(line)?.[1] ?? 0), failed: Number(/(\d+) failed/.exec(line)?.[1] ?? 0) };
   const tap = (word: string) => Number(new RegExp(`^(?:ℹ|#) ${word} (\\d+)`, 'm').exec(text)?.[1] ?? 0);
-  return { passed: tap('pass'), failed: tap('fail') };
+  if (tap('pass') || tap('fail')) return { passed: tap('pass'), failed: tap('fail') };
+  // pytest: "3 passed, 1 failed in 0.12s"; rspec: "4 examples, 1 failure"
+  const py = /^=*\s*(.*\b(?:passed|failed)\b.*) in [\d.]+s/m.exec(text)?.[1];
+  if (py) return { passed: Number(/(\d+) passed/.exec(py)?.[1] ?? 0), failed: Number(/(\d+) failed/.exec(py)?.[1] ?? 0) };
+  const rs = /(\d+) examples?, (\d+) failures?/.exec(text);
+  if (rs) return { passed: Number(rs[1]) - Number(rs[2]), failed: Number(rs[2]) };
+  return { passed: 0, failed: 0 };
 }
 
 /** One Claude Code pass (purpose merge_fix, attempt 2) that repairs the merged code as `agentId`. */
@@ -101,6 +108,7 @@ export async function mergeFix(agentId: string, taskId: bigint, demoDir: string,
   try {
     const r = await createLLM().runWorker(prompt, {
       cwd: demoDir,
+      env: { PATH: toolPath(demoDir) },
       purpose: 'merge_fix',
       allowedTools: checkTools({ checks }),
       onUsage: (u, purpose) =>

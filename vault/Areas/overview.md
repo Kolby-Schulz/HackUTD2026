@@ -32,7 +32,7 @@ Team of four owner areas (BE, AG, CM, DD) per CLAUDE.md. Milestones 1-4 and most
         +-------------------------------------------------------+
               ^ upsert_symbols                  ^ subscribe
               |                                 |
-        mapper (mapper/, ts-morph)      dashboard (dashboard/, React)
+        mapper (mapper/, ts-morph + tree-sitter)      dashboard (dashboard/, React)
 ```
 - SpacetimeDB server: all state. Reducers are the only writers, each a transaction. No network or filesystem access inside reducers (CLAUDE.md).
 - Worker (`agents/worker`): registers the agent, makes a git worktree and branch, runs Claude Code headless, handles pause/resume and token logging. Its MCP tools live in `packages/mcp`.
@@ -136,7 +136,7 @@ Names are blank in SPEC 16 ("name: ___"); not filled in any doc.
 - Planted conflict: the two designed collisions in demo-repo (changed rounding, duplicate date helper).
 - Early stop: a paused worker's Claude Code process is stopped; logged as a saving.
 - Wasted tokens: tokens of an attempt that was thrown away or needed a merge fix.
-- Worktree: `.worktrees/<agent-id>` (gitignored); `.worktrees/merge-<run>` for merges.
+- Worktree: `.worktrees/<agent-id>` (gitignored); `.worktrees/merge-<run>` for merges. Non-demo targets nest them under `.worktrees/<repoKey>/`.
 - contract-hook: PostToolUse hook; reads only, never upserts the shared code map (TASKS decision 10). Claim guard: join-time hook that blocks edits to claimed code or while paused.
 - Service lock: one coordinator and one watching mapper per database.
 - Jev / triage: TypeSafe's fast decision model, optional triage (SPEC 12b).

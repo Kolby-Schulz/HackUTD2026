@@ -1,5 +1,9 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { signatureHash, type MappedSymbol } from '@contract/mapper';
+import { mapFileAsync, signatureHash, symbolRangesAsync, symbolsTouched, type MappedSymbol } from '@contract/mapper';
+import { pendingLines } from '../src/claim-guard.ts';
 import { detectChanges, editedFile, type SymbolRow } from '../src/hook.ts';
 
 const OLD = 'export function calcFee(amount: number): number';
@@ -59,5 +63,37 @@ describe('editedFile', () => {
     expect(editedFile(input('/elsewhere/x.ts'), repo)).toBeUndefined();
     expect(editedFile(input(`${repo}/node_modules/a/index.ts`), repo)).toBeUndefined();
     expect(editedFile({ cwd: repo, tool_input: {} }, repo)).toBeUndefined();
+  });
+});
+
+describe('other languages (tree-sitter mapper)', () => {
+  const repo = '/wt/repo';
+  it('editedFile accepts any mapped language', () => {
+    expect(editedFile({ cwd: repo, tool_input: { file_path: `${repo}/app/fees.py` } }, repo)).toBe('app/fees.py');
+    expect(editedFile({ cwd: repo, tool_input: { file_path: `${repo}/pkg/fees.go` } }, repo)).toBe('pkg/fees.go');
+  });
+
+  it('a Python signature change is reported, like a TS one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hook-py-'));
+    try {
+      const path = join(dir, 'app/fees.py');
+      mkdirSync(join(dir, 'app'));
+      writeFileSync(path, 'def calc_fee(amount: int) -> int:\n    return amount\n');
+      const before = (await mapFileAsync(path, { repoDir: dir, edges: false })).symbols;
+      const rows = before.map((s) => ({ id: s.id, signature: s.signature, signatureHash: s.signatureHash }));
+      writeFileSync(path, 'def calc_fee(amount: int, currency: str) -> int:\n    return amount\n');
+      const after = (await mapFileAsync(path, { repoDir: dir, edges: false })).symbols;
+      expect(detectChanges(after, rows)).toMatchObject([
+        { symbolId: 'app/fees.py#calc_fee', kind: 'signature', newSignature: 'calc_fee(amount: int, currency: str): int' },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the claim guard finds the Go symbol an Edit touches', async () => {
+    const src = 'package fees\n\nfunc Fee(a int) int {\n\treturn a\n}\n\nfunc Other() int { return 1 }\n';
+    const lines = pendingLines({ cwd: repo, tool_name: 'Edit', tool_input: { old_string: '\treturn a' } }, src);
+    expect(symbolsTouched(await symbolRangesAsync('pkg/fees.go', src), lines)).toEqual(['pkg/fees.go#Fee']);
   });
 });

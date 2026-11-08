@@ -21,7 +21,7 @@ export { DbConnection } from './bindings/index.ts';
 export { estimateTokens } from './context.ts';
 export { identitiesFile, identityKey, readSavedToken, writeSavedToken } from './identity.ts';
 export { holdService, SERVICE_HEARTBEAT_MS, type ServiceLock } from './service.ts';
-export { resolveTarget, checkTools, subdirPrefix, cloneDirFor, DEMO_CHECKS, type Target, type Check } from './target.ts';
+export { resolveTarget, checkTools, subdirPrefix, cloneDirFor, DEMO_CHECKS, detectChecks, detectInstall, installFor, runInstall, toolPath, repoKey, worktreeDir, DEP_DIRS, DEP_PATHSPEC, missingTools, type MissingTool, type Target, type Check } from './target.ts';
 
 export interface AgentInfo {
   id: string; // 'agent-a', or the fixed ids 'coordinator', 'mapper', 'triage'
