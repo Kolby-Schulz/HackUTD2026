@@ -25,13 +25,13 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [ ] **Everyone:** install the SpacetimeDB CLI; `claude` logged in on each laptop (`claude -p "hi"` works)
 - [x] **BE:** `spacetime init` the module in `server/`; all section 6 tables (+ indexes) as real `table(...)`/`t.*`
 - [x] **BE:** publish locally; generate bindings into `packages/client/src/bindings`; commit them (`npm run generate -w @contract/server`; client columns are camelCase, e.g. `symbolId`)
-- [ ] **AG:** swap the hand-written row types in `packages/client` for the generated ones
+- [x] **AG:** swap the hand-written row types in `packages/client` for the generated ones (client reads generated rows; re-exported as `rows`)
 
 ## Milestone 2: Skeletons talk
 
 - [x] **BE:** reducers `register_agent` (stores identity), `heartbeat`, `start_run`/`end_run`, `create_task`/`set_task_status`, `publish_plan`, `claim_symbol`, `release_claim`, `log_tokens`
 - [x] **BE:** scheduled `expire_claims` every 30 s (`onSchedule` schedule table; verified on a live server)
-- [ ] **AG:** `connect()`: register, 15 s heartbeat, subscribe to own `instruction`/`agent`/`conflict`/`decision` rows; implement every `ContractClient` method
+- [x] **AG:** `connect()`: register, 15 s heartbeat, subscribe to own `instruction`/`agent`/`conflict`/`decision` rows; implement every `ContractClient` method (`claim()` throws `ClaimedError`; calls fail fast after disconnect; 17 unit + 26 live tests)
 - [ ] **AG:** `packages/mcp`: MCP server exposing `declare_plan`, `claim_symbol`, `release_claim`, `report_change`, `get_context`, `find_existing`, `get_instructions`; connects with `CONTRACT_AGENT_ID` + `CONTRACT_TOKEN`
 - [x] **AG:** worker script skeleton: worktree + branch, mode switch, MCP config, rules prompt, hook settings, token logging, pause → abort → wait for instruction → resume loop, commit
 - [ ] **AG:** worker: release claims + `set_task_status('done')` at the end; real `early_stop` estimate
@@ -53,7 +53,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 ## Milestone 4: Rule 2 end to end
 
 - [x] **BE:** Rule 2 in `publish_plan` (normalized names, same types + shared token), reuse instruction; Rule 3 in `claim_symbol`/`publish_plan` (Rule 2 also re-runs on `report_change('created')` once the signature is known)
-- [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings
+- [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings. **Client part done** (`context_slice` and `cache_hit` savings logged); MCP tools and `reuse` savings still to do.
 - [ ] **CM:** check the duplicate-formatter scenario resolves to "reuse A's"
 
 ## Milestone 5: Without/with runs

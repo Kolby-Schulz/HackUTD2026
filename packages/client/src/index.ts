@@ -147,8 +147,14 @@ function toInstruction(row: {
   };
 }
 
+/** Shared between the connection callbacks and the client: set once the socket closes. */
+interface ConnState {
+  closed: boolean;
+  reason?: string;
+}
+
 /** Opens the WebSocket, waits for the identity/token and the first subscription. */
-function openConnection(opts: ConnectOptions): Promise<{ conn: DbConnection; token: string }> {
+function openConnection(opts: ConnectOptions, state: ConnState): Promise<{ conn: DbConnection; token: string }> {
   const agentId = opts.agent.id;
   // This agent's rows (spec section 10), plus the shared tables the token savers read.
   const queries = [
@@ -188,14 +194,25 @@ function openConnection(opts: ConnectOptions): Promise<{ conn: DbConnection; tok
           .subscribe(queries);
       })
       .onConnectError((_ctx, err) => fail(err))
+      .onDisconnect((_ctx, err) => {
+        if (state.closed) return; // disconnect() already recorded why
+        state.closed = true;
+        state.reason = err ? String(err) : 'connection lost';
+        console.warn(`[contract] ${opts.agent.id}: ${state.reason}`);
+      })
       .build();
   });
 }
 
 /** Calls register_agent, starts a 15 s heartbeat, subscribes to this agent's rows. */
 export async function connect(opts: ConnectOptions): Promise<ContractClient> {
-  const { conn, token } = await openConnection(opts);
+  const state: ConnState = { closed: false };
+  const { conn, token } = await openConnection(opts, state);
   const agentId = opts.agent.id;
+  /** Fail fast instead of hanging when the connection is gone. */
+  const live = () => {
+    if (state.closed) throw new Error(`ContractClient(${agentId}): connection closed (${state.reason ?? 'disconnected'})`);
+  };
   const repoDir = opts.repoDir ?? process.cwd();
   const r = conn.reducers;
   const db = conn.db;
@@ -216,6 +233,7 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
       throw e;
     }
     heartbeat = setInterval(() => {
+      if (state.closed) return clearInterval(heartbeat);
       r.heartbeat({ agentId }).catch((e: unknown) => console.warn(`[contract] heartbeat failed: ${String(e)}`));
     }, HEARTBEAT_MS);
     heartbeat.unref?.();
@@ -252,10 +270,12 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     token,
 
     async publishPlan(taskId, summary, items) {
+      live();
       await r.publishPlan({ agentId, taskId, summary, items: items.map((i) => ({ symbolId: i.symbolId, intent: i.intent })) });
     },
 
     async claim(symbolId, ttlSecs = DEFAULT_CLAIM_TTL_SECS) {
+      live();
       await r.claimSymbol({ agentId, symbolId, ttlSecs: u32(ttlSecs) });
       // claim_symbol never throws on contention (a throw would also roll back the
       // conflict it records); the claim row tells us who holds it.
@@ -264,10 +284,12 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     async release(symbolId) {
+      live();
       await r.releaseClaim({ agentId, symbolId });
     },
 
     async reportChange(symbolId, kind, o) {
+      live();
       await r.reportChange({ agentId, symbolId, kind, newSignature: o.newSignature, description: o.description });
     },
 
@@ -288,6 +310,7 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     async ack(instructionId) {
+      live();
       await r.acknowledgeInstruction({ instructionId });
     },
 
@@ -299,6 +322,7 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     async getContext(symbolIds, depth = 1) {
+      live();
       const symbols = new Map([...db.symbol.iter()].map((s) => [s.id, s]));
       const slice = buildContext(symbolIds, depth, symbols, [...db.symbolEdge.iter()], (file) => cachedSummary(file)?.row.summary);
       // Savings estimate: the whole files these symbols live in vs. the slice returned.
@@ -314,10 +338,12 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     async findExisting(q) {
+      live();
       return rankExisting(q, db.symbol.iter());
     },
 
     async getSummary(file) {
+      live();
       const hit = cachedSummary(file);
       if (!hit) return undefined;
       await r.recordCacheHit({ key: hit.row.key });
@@ -327,12 +353,14 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     async putSummary(file, summary, tokens) {
+      live();
       const content = readRepoFile(file);
       if (content === undefined) throw new Error(`putSummary: can't read ${file} under ${repoDir}`);
       await r.cacheSummary({ key: summaryKey(file, content), summary, summaryTokens: u32(tokens) });
     },
 
     async logTokens(taskId, attempt, purpose, usage) {
+      live();
       await r.logTokens({
         runId: currentRunId(),
         agentId,
@@ -345,15 +373,20 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     async markAttemptWasted(taskId, attempt) {
+      live();
       await r.markAttemptWasted({ taskId, attempt: u32(attempt) });
     },
 
     async logSaving(kind, tokensAvoidedEst, note) {
+      live();
       await r.logSaving({ runId: currentRunId(), agentId, kind, tokensAvoidedEst: u32(tokensAvoidedEst), note });
     },
 
     async disconnect() {
       if (heartbeat) clearInterval(heartbeat);
+      if (state.closed) return;
+      state.closed = true;
+      state.reason = 'disconnect() called';
       conn.disconnect();
     },
   };
