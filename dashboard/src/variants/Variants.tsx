@@ -2,8 +2,8 @@
 // slots from several, and save the result as a mix (final decision or the base for children).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { newComboId, uniqueId } from './files.ts';
-import { buildGraph, childrenOf, comboTitle, makeCombo, parentsOf, problems, resolveAll, resolveSlot, singleSource, treeRows, withNode } from './model.ts';
+import { newComboId } from './files.ts';
+import { buildGraph, childrenOf, comboTitle, makeCombo, parentsOf, problems, resolveSlot, singleSource, treeRows, withNode } from './model.ts';
 import type { GNode } from './model.ts';
 import { codeInfos, registry } from './registry.ts';
 import type { Screen, Variant } from './registry.ts';
@@ -13,13 +13,11 @@ import { Icon } from './icons.tsx';
 import { Menu, MenuItem, MenuLabel, MenuSep } from './ui.tsx';
 import { COLORS, DRAFT, HINT_KEY, LETTERS, MAX_PANES, VIEWPORTS, ZOOMS, readHash, widthName, writeHash, zoomName } from './constants.ts';
 import type { PaneWidth, Viewport } from './constants.ts';
-import { NameDialog, OverlayPane, Seg, WidthDialog } from './parts.tsx';
+import { GenerateDialog, NameDialog, OverlayPane, Seg, WidthDialog } from './parts.tsx';
 import { useScrollSync } from './hooks.ts';
-import { boardNode, listFrames, PLAYGROUND_AVAILABLE, PLAYGROUND_BOARD, playgroundHref, snapshot } from './boards.ts';
-import type { FrameInfo } from './boards.ts';
-import { boardComponents, usePlaygroundBoard } from './BoardView.tsx';
-import { ImportDialog } from './parts.tsx';
-import { useLineage } from './store.ts';
+import { screenState, withGenerated } from './live.ts';
+import { useVariantsStore } from './store.ts';
+import type { VariantsStore } from './store.ts';
 import type { NodeId, SlotId } from './types.ts';
 import './variants.css';
 
@@ -29,7 +27,7 @@ export function Variants() {
   const [screenId, setScreenId] = useState(() => (screens.some((s) => s.id === init.screen) ? init.screen! : screens[0]?.id));
   const [viewport, setViewport] = useState<Viewport>(init.viewport ?? 'desktop');
   const [zoom, setZoom] = useState<Zoom>(init.zoom ?? 'fit');
-  const lineage = useLineage();
+  const store = useVariantsStore();
   const screen = screens.find((s) => s.id === screenId);
   if (!screen) {
     return (
@@ -50,16 +48,15 @@ export function Variants() {
       onViewport={setViewport}
       zoom={zoom}
       onZoom={setZoom}
-      store={lineage}
+      store={store}
     />
   );
 }
 
 type DialogState =
   | { kind: 'mix'; final: boolean; evolve: boolean }
-  | { kind: 'child'; parent: NodeId }
-  | { kind: 'width'; pane: number }
-  | { kind: 'import' };
+  | { kind: 'generate'; parent: NodeId }
+  | { kind: 'width'; pane: number };
 
 interface WorkspaceProps {
   screen: Screen;
@@ -70,29 +67,22 @@ interface WorkspaceProps {
   onViewport: (v: Viewport) => void;
   zoom: Zoom;
   onZoom: (z: Zoom) => void;
-  store: ReturnType<typeof useLineage>;
+  store: VariantsStore;
 }
 
 function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport, zoom, onZoom, store }: WorkspaceProps) {
-  const { lineage, mode, error, setError, save, scaffold } = store;
-  // Frames linked or copied from the playground board join the lineage like code variants.
-  const { board: liveBoard, checkedAt } = usePlaygroundBoard(PLAYGROUND_BOARD);
-  const boardNodes = useMemo(
-    () => lineage.boards.filter((b) => b.screen === screen.id).map((r) => boardNode(r, liveBoard, screen.slots)),
-    [lineage.boards, liveBoard, screen],
-  );
-  const boardById = useMemo(
-    () => new Map(boardNodes.map((n) => [n.ref.id, { ...n, comps: boardComponents(n.data, n.ref.frameId, n.matches) }])),
-    [boardNodes],
-  );
+  const { recs, me, ready, connected, agentsOnline } = store;
+  const [error, setError] = useState<string | null>(null);
+  // Mixes, the final pick, votes and generated variants come from SpacetimeDB; variant code comes from this build.
+  const live = useMemo(() => screenState(screen.id, screen.slotIds, recs, me), [screen, recs, me]);
   const graph = useMemo(
-    () => buildGraph(screen.id, screen.slotIds, [...codeInfos(screen, variants), ...boardNodes.map((n) => n.info)], lineage.combos),
-    [screen, variants, boardNodes, lineage.combos],
+    () => buildGraph(screen.id, screen.slotIds, withGenerated(codeInfos(screen, variants), live.generated), live.combos),
+    [screen, variants, live],
   );
   const rows = useMemo(() => treeRows(graph), [graph]);
   const byId = useMemo(() => new Map(variants.map((v) => [v.id, v])), [variants]);
   const issues = useMemo(() => [...registry.problems.filter((p) => p.includes(`/designs/${screen.id}/`)), ...problems(graph)], [graph, screen.id]);
-  const final = lineage.final[screen.id];
+  const final = live.final;
   const slots = screen.slotIds;
 
   const [panes, setPanes] = useState<NodeId[]>(() => {
@@ -122,13 +112,10 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
   const onScale = (key: string) => (sc: number) => setScales((m) => (m[key] === sc ? m : { ...m, [key]: sc }));
   /** Slot under the pointer in each pane, described in that pane's info row (never drawn over the design). */
   const [hover, setHover] = useState<Record<number, SlotId | null>>({});
-  const [pendingFocus, setPendingFocus] = useState<NodeId | null>(null);
 
   const width = VIEWPORTS[viewport] ?? screen.width;
   const widthOf = (i: number) => {
     const w = paneWidths[i] ?? null;
-    const frame = boardById.get(panes[i])?.frame;
-    if (w === null && frame && graph.nodes.get(panes[i])?.whole) return Math.round(frame.w);
     return w === null ? width : typeof w === 'number' ? w : VIEWPORTS[w] ?? screen.width;
   };
   const labels = screen.slots;
@@ -138,9 +125,7 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
     return () => { document.title = prev; };
   }, [screen.title]);
   const titleOf = useCallback((id: NodeId) => (id === DRAFT ? 'Result' : graph.nodes.get(id)?.title ?? id), [graph]);
-  const comp = useCallback((id: NodeId, slot: SlotId) => byId.get(id)?.slots[slot] ?? boardById.get(id)?.comps.slots[slot], [byId, boardById]);
-  /** A board frame with no parts named after the screen's slots renders as one whole page. */
-  const wholeOf = (id: NodeId) => (graph.nodes.get(id)?.whole ? boardById.get(id)?.comps.Whole : undefined);
+  const comp = useCallback((id: NodeId, slot: SlotId) => byId.get(id)?.slots[slot], [byId]);
 
   useEffect(() => writeHash({ screen: screen.id, panes, viewport, zoom }), [screen.id, panes, viewport, zoom]);
   useEffect(() => {
@@ -149,13 +134,6 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
     return () => clearTimeout(t);
   }, [toast]);
   useEffect(() => { if (focus >= panes.length) setFocus(panes.length - 1); }, [focus, panes.length]);
-  // A child created from the page shows up once Vite hot-reloads the designs glob; open it then.
-  useEffect(() => {
-    if (pendingFocus && graph.nodes.has(pendingFocus)) {
-      setPanes((p) => p.map((id, i) => (i === focus ? pendingFocus : id)));
-      setPendingFocus(null);
-    }
-  }, [graph, pendingFocus, focus]);
 
   // ---- draft (which pane each slot comes from; unpicked slots come from pane A) ----
   const picks = useMemo(() => Object.fromEntries(slots.map((s) => [s, panes[draft[s] ?? 0] ?? panes[0]])) as Record<SlotId, NodeId>, [slots, panes, draft]);
@@ -177,7 +155,7 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
       if (d[slot] === pane) { const { [slot]: _, ...rest } = d; return rest; }
       return { ...d, [slot]: pane };
     });
-  // Only the parts this pane can supply (a playground frame may draw just some of them).
+  // Only the parts this pane can supply (a generated variant still on its way supplies none).
   const takeAll = (pane: number) => {
     setResultOpened(true);
     setShowResult(true);
@@ -200,98 +178,54 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
     setDraft((d) => Object.fromEntries(Object.entries(d).filter(([, v]) => v !== i).map(([k, v]) => [k, v > i ? v - 1 : v])));
   };
 
-  // ---- decisions ----
+  // ---- decisions (reducers; a failed call shows in the toast) ----
   const allIds = () => [...graph.nodes.keys(), ...variants.map((v) => v.id)];
+  const act = (p: Promise<unknown>) => { setError(null); p.catch((e: unknown) => setError(`Not saved: ${e instanceof Error ? e.message : String(e)}`)); };
+
   const chooseFinal = (id: NodeId) => {
-    const before = lineage;
-    const nextFinal = { ...lineage.final };
-    if (nextFinal[screen.id] === id) delete nextFinal[screen.id];
-    else nextFinal[screen.id] = id;
-    void save({ ...lineage, final: nextFinal });
-    const prev = before.final[screen.id];
+    const prev = final;
+    const next = prev === id ? null : id;
+    act(store.pick(screen.id, next));
     setToast(
-      nextFinal[screen.id]
-        ? `Chose “${titleOf(id)}” as the final design${prev ? ` (was “${titleOf(prev)}”)` : ''}`
-        : `Cleared the final design (was “${titleOf(id)}”)`,
-      () => { void save(before); setToast('Undone'); },
+      next ? `Chose “${titleOf(id)}” as the final design${prev ? ` (was “${titleOf(prev)}”)` : ''}` : `Cleared the final design (was “${titleOf(id)}”)`,
+      () => { act(store.pick(screen.id, prev ?? null)); setToast('Undone'); },
     );
   };
 
   const saveMix = (title: string, note: string, asFinal: boolean, evolve: boolean) => {
     const combo = makeCombo(graph, picks, { id: newComboId(allIds()), title, note, labels });
-    const next = { ...lineage, combos: [...lineage.combos, combo], final: asFinal ? { ...lineage.final, [screen.id]: combo.id } : lineage.final };
-    void save(next);
+    act(store.saveMix(combo, combo.parents[0] ?? null).then(() => (asFinal ? store.pick(screen.id, combo.id) : undefined)));
     setPanes((p) => p.map((id, i) => (i === 0 ? combo.id : id)));
     setFocus(0);
     setDraft({});
     setToast(`Saved mix “${combo.title}”${asFinal ? ' as the final design' : ''}`);
-    setDialog(evolve ? { kind: 'child', parent: combo.id } : null);
+    setDialog(evolve ? { kind: 'generate', parent: combo.id } : null);
   };
 
-  const createChild = async (parent: NodeId, title: string, note: string) => {
-    const id = uniqueId(title, allIds());
-    const { sources } = resolveAll(graph, parent);
-    try {
-      const path = await scaffold({
-        screen: screen.id, id, parent, title: title.trim() || id, note,
-        slots: slots.map((s) => ({ slot: s, label: screen.slots[s] ?? s, from: sources[s], path: sources[s] ? byId.get(sources[s]!)?.path : undefined })),
-      });
-      setDialog(null);
-      setPendingFocus(id);
-      setToast(`Created ${path}. Edit its slots; it reloads here.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+  const generate = (parent: NodeId, brief: string) => {
+    act(store.queueJob(screen.id, parent, brief));
+    setDialog(null);
+    setToast(agentsOnline ? `Queued a child of “${titleOf(parent)}”. It appears in Designs when the agent finishes.` : `Queued. It starts when a variant agent comes online.`);
   };
 
-  // ---- playground frames ----
-  const linkFrame = (f: FrameInfo, mode: 'live' | 'copy') => {
-    if (!liveBoard) return;
-    const ref = {
-      id: uniqueId(`pg-${f.name}`, allIds()), screen: screen.id, title: f.name, boardId: PLAYGROUND_BOARD, frameId: f.id, mode,
-      ...(mode === 'copy' ? { shapes: snapshot(liveBoard, f.id) } : {}), importedAt: new Date().toISOString(),
-    };
-    void save({ ...lineage, boards: [...lineage.boards, ref] });
-    if (panes.length < MAX_PANES) { setPanes((p) => [...p, ref.id]); setFocus(panes.length); } else setPane(focus, ref.id);
-    setToast(mode === 'live' ? `Linked “${f.name}”. It updates whenever the playground changes.` : `Copied “${f.name}” into the designs.`);
-  };
-  const freezeBoard = (id: NodeId) => {
-    const n = boardById.get(id);
-    if (!n || !liveBoard || !n.frame) return;
-    const before = lineage;
-    void save({ ...lineage, boards: lineage.boards.map((b) => (b.id === id ? { ...b, mode: 'copy' as const, shapes: snapshot(liveBoard, b.frameId) } : b)) });
-    setToast(`Froze “${n.ref.title}”. Later board edits won’t change it.`, () => { void save(before); setToast('Undone'); });
-  };
-  const removeBoard = (id: NodeId) => {
-    const kids = childrenOf(graph, id);
-    if (kids.length) { setError(`“${titleOf(id)}” has children (${kids.map(titleOf).join(', ')}). Remove those first.`); return; }
-    const before = lineage;
-    const nextFinal = { ...lineage.final };
-    if (nextFinal[screen.id] === id) delete nextFinal[screen.id];
-    void save({ ...lineage, boards: lineage.boards.filter((b) => b.id !== id), final: nextFinal });
-    setPanes((p) => { const left = p.filter((x) => x !== id); return left.length ? left : [rows.find((r) => r.id !== id)?.id ?? p[0]]; });
-    setDraft({});
-    setToast(`Removed “${titleOf(id)}” from the designs. The playground is untouched.`, () => { void save(before); setToast('Restored'); });
-  };
-  const playgroundLink = (id: NodeId) => {
-    const f = boardById.get(id)?.frame;
-    return f ? playgroundHref(f) : '#/playground';
-  };
+  const toggleVote = (id: NodeId) => act(store.vote(screen.id, live.myVote === id ? null : id));
 
   const deleteMix = (id: NodeId) => {
     const kids = childrenOf(graph, id);
     if (kids.length) { setError(`“${titleOf(id)}” has children (${kids.map(titleOf).join(', ')}). Delete those first.`); return; }
-    // No blocking confirm: delete at once and offer Undo (the mix is one JSON record).
-    const before = lineage;
-    const nextFinal = { ...lineage.final };
-    if (nextFinal[screen.id] === id) delete nextFinal[screen.id];
-    void save({ ...lineage, combos: lineage.combos.filter((c) => c.id !== id), final: nextFinal });
+    const combo = live.combos.find((c) => c.id === id);
+    const wasFinal = final === id;
+    // No blocking confirm: delete at once and offer Undo, which saves the same mix again.
+    act((wasFinal ? store.pick(screen.id, null) : Promise.resolve()).then(() => store.deleteMix(screen.id, id)));
     setPanes((p) => {
       const left = p.filter((x) => x !== id);
       return left.length ? left : [rows.find((r) => r.id !== id)?.id ?? p[0]];
     });
     setDraft({});
-    setToast(`Deleted the mix “${titleOf(id)}”. Its code variants are untouched.`, () => { void save(before); setToast('Mix restored'); });
+    setToast(`Deleted the mix “${titleOf(id)}”. Its code variants are untouched.`, combo && (() => {
+      act(store.saveMix(combo, combo.parents[0] ?? null).then(() => (wasFinal ? store.pick(screen.id, id) : undefined)));
+      setToast('Mix restored');
+    }));
   };
 
   // ---- keyboard ----
@@ -345,22 +279,29 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
   const showHint = panes.length > 1 && !hintDone && !hasDraft && !overlayOn;
   const focusedId = panes[focus] ?? panes[0];
   const lastMsg = error ?? toast?.text ?? '';
+  const running = live.jobs.filter((j) => j.status === 'running').length;
+  const queued = live.jobs.filter((j) => j.status === 'queued').length;
+  const lastFinished = live.jobs.find((j) => j.status === 'failed' || j.status === 'done');
+  const jobLine =
+    running || queued ? { text: [running && `Generating ${running}`, queued && `${queued} queued`].filter(Boolean).join(' · '), title: agentsOnline ? `${agentsOnline} variant agent${agentsOnline === 1 ? '' : 's'} online` : 'No variant agent online', bad: false }
+    : lastFinished?.status === 'failed' ? { text: 'Last generation failed', title: lastFinished.error ?? '', bad: true }
+    : null;
 
   /** The ⋯ menu shared by the lineage tree rows and pane headers. */
   const nodeMenuItems = (id: NodeId, close: () => void, paneIndex?: number) => {
     const n = graph.nodes.get(id);
     const inPane = panes.indexOf(id);
-    const bn = boardById.get(id);
     const inAPane = paneIndex !== undefined;
     return (
       <>
         {!inAPane && inPane < 0 && panes.length < MAX_PANES && <MenuItem close={close} onSelect={() => addPane(id)}>Open in a new pane</MenuItem>}
         {!inAPane && <MenuItem close={close} onSelect={() => setPane(focus, id)}>Show in pane {LETTERS[focus]}</MenuItem>}
         {inAPane && <MenuItem close={close} onSelect={() => chooseFinal(id)}>{final === id ? 'Clear the final design' : `Choose ${n?.title ?? id} as final`}</MenuItem>}
-        {inAPane && panes.length > 1 && !n?.whole && (
+        {inAPane && panes.length > 1 && !n?.pending && (
           <MenuItem close={close} onSelect={() => takeAll(paneIndex)} hint={`⇧${LETTERS[paneIndex]}`}>Take every part from {LETTERS[paneIndex]}</MenuItem>
         )}
-        {!n?.whole && <MenuItem close={close} onSelect={() => setDialog({ kind: 'child', parent: id })}>Start a child variant…</MenuItem>}
+        {n && !n.pending && <MenuItem close={close} onSelect={() => setDialog({ kind: 'generate', parent: id })}>Generate a child variant…</MenuItem>}
+        {n && <MenuItem close={close} kind="check" checked={live.myVote === id} onSelect={() => toggleVote(id)}>Vote for this design</MenuItem>}
         {inAPane && (
           <>
             <MenuSep />
@@ -376,18 +317,10 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
             </MenuItem>
           </>
         )}
-        {bn && (
+        {n?.kind === 'combo' && (
           <>
             <MenuSep />
-            <MenuItem close={close} onSelect={() => { location.hash = playgroundLink(id); }}>Open in the playground</MenuItem>
-            {bn.ref.mode === 'live' && <MenuItem close={close} disabled={!bn.frame} onSelect={() => freezeBoard(id)}>Freeze as a copy</MenuItem>}
-          </>
-        )}
-        {(bn || n?.kind === 'combo') && (
-          <>
-            <MenuSep />
-            {bn && <MenuItem close={close} danger onSelect={() => removeBoard(id)}>Remove from designs</MenuItem>}
-            {n?.kind === 'combo' && <MenuItem close={close} danger onSelect={() => deleteMix(id)}>Delete this mix</MenuItem>}
+            <MenuItem close={close} danger onSelect={() => deleteMix(id)}>Delete this mix</MenuItem>
           </>
         )}
       </>
@@ -438,9 +371,12 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
     <div className="vx">
       <header className="vx-top">
         <div className="vx-brand">
-          <a className="vx-iconbtn" href="#/" title="Back to the dashboard" aria-label="Back to the dashboard"><Icon name="back" /></a>
-          <span className="vx-wordmark">InSync</span>
-          <span className="vx-crumb">/ Variants</span>
+          <a className="vx-wordmark" href="#/" title="Back to the dashboard">InSync</a>
+          <nav className="vx-nav" aria-label="Pages">
+            <a href="#/">Dashboard</a>
+            <a href="#/playground">Design board</a>
+            <span aria-current="page">Variants</span>
+          </nav>
         </div>
         <div className="vx-cmd">
           <label>
@@ -493,11 +429,6 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
           <div className="vx-pane-head">
             <span className="vx-hd">Designs</span><span className="vx-count">{rows.length}</span>
             <div className="vx-grow" />
-            {PLAYGROUND_AVAILABLE && (
-              <button className="vx-btn ghost sm" onClick={() => setDialog({ kind: 'import' })} title="Bring frames in from the playground board">
-                <Icon name="import" size={14} />From playground
-              </button>
-            )}
           </div>
           <div className="vx-tree" role="tree" aria-label={`${screen.title} designs`}>
             {rows.map((r) => {
@@ -520,8 +451,14 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
                   {r.depth > 0 && <span className="vx-guide" aria-hidden="true" />}
                   <span className="vx-row-title ellipsis">{n.title}</span>
                   {n.kind === 'combo' && <span className="vx-tag" title={`A mix of ${n.parents.map(titleOf).join(', ')}`}>mix</span>}
-                  {n.source === 'live' && <span className={`vx-tag live${boardById.get(r.id)?.frame ? '' : ' lost'}`} title={n.note}>live</span>}
-                  {n.source === 'copy' && <span className="vx-tag" title={n.note}>copy</span>}
+                  {n.status === 'generating' && <span className="vx-tag gen" title={n.pending}>generating</span>}
+                  {n.status === 'failed' && <span className="vx-tag fail" title={n.pending}>failed</span>}
+                  {n.status === 'ready' && n.pending && <span className="vx-tag" title={n.pending}>not in this build</span>}
+                  {!!live.votes.get(r.id) && (
+                    <span className={`vx-votes${live.myVote === r.id ? ' mine' : ''}`} title={`${live.votes.get(r.id)} vote${live.votes.get(r.id) === 1 ? '' : 's'}${live.myVote === r.id ? ', including yours' : ''}`}>
+                      ▲{live.votes.get(r.id)}
+                    </span>
+                  )}
                   {final === r.id && <span className="vx-pill ok">Final</span>}
                   {inPanes.map((i) => <span key={i} className="vx-badge" style={{ background: COLORS[i] }} title={`Shown in pane ${LETTERS[i]}`}>{LETTERS[i]}</span>)}
                   <span className="vx-row-actions" onClick={(e) => e.stopPropagation()}>
@@ -561,11 +498,11 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
                   <div className="vx-canvas-area" ref={scrollRef(`p${i}`)} onScroll={() => onScroll(`p${i}`)}>
                     {graph.nodes.has(id) ? (
                       <Frame width={widthOf(i)} zoom={zoom} onScale={onScale(`p${i}`)}>
-                        <NodeView screen={screen} graph={graph} nodeId={id} comp={comp} whole={wholeOf(id)} isolate={isolate} color={COLORS[i]} picked={pickedBy(i)}
+                        <NodeView screen={screen} graph={graph} nodeId={id} comp={comp} isolate={isolate} color={COLORS[i]} picked={pickedBy(i)}
                           onTake={panes.length > 1 ? (s) => take(s, i) : undefined} onHover={(s) => setHover((h) => ({ ...h, [i]: s }))} />
                       </Frame>
                     ) : (
-                      <div className="vx-empty">{mode === 'loading' ? 'Loading…' : `“${id}” is not in this screen's designs.`}</div>
+                      <div className="vx-empty">{!ready ? 'Loading…' : `“${id}” is not in this screen's designs.`}</div>
                     )}
                   </div>
                 </section>
@@ -682,12 +619,8 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
         <span>{final ? <>Final: <b>{titleOf(final)}</b></> : 'No final design yet'}</span>
         <span className="vx-grow" />
         <span>{variants.length} design{variants.length === 1 ? '' : 's'} · {comboCount} mix{comboCount === 1 ? '' : 'es'}</span>
-        {boardNodes.some((n) => n.ref.mode === 'live') && (
-          <span title="Live playground frames refresh when the playground saves">
-            {liveBoard ? `Playground synced ${new Date(checkedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}` : 'No playground board in this browser'}
-          </span>
-        )}
-        <span>{mode === 'repo' ? 'Saved to the repo' : mode === 'local' ? 'Saved in this browser only' : 'Loading…'}</span>
+        {jobLine && <span className={`vx-job${jobLine.bad ? ' fail' : ''}`} title={jobLine.title}>{jobLine.text}</span>}
+        <span title={store.error}>{connected ? (ready ? 'Live: shared through SpacetimeDB' : 'Connecting…') : 'Offline: changes can’t be saved'}</span>
       </footer>
 
       {/* Always mounted so screen readers announce changes; the visible toast lives inside. */}
@@ -722,31 +655,8 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
           </ul>
         </NameDialog>
       )}
-      {dialog?.kind === 'child' && (
-        <NameDialog
-          heading={`New child of “${titleOf(dialog.parent)}”`}
-          defaultTitle=""
-          placeholder="e.g. Rounder buttons"
-          confirm="Create files"
-          onCancel={() => setDialog(null)}
-          onConfirm={(t, n) => void createChild(dialog.parent, t || `${titleOf(dialog.parent)} child`, n)}
-        >
-          <p className="vx-note">
-            Creates <code className="mono">src/designs/{screen.id}/&lt;id&gt;/index.tsx</code>. It looks exactly like its parent until you, or an agent,
-            change a part in that file.
-          </p>
-        </NameDialog>
-      )}
-      {dialog?.kind === 'import' && (
-        <ImportDialog
-          board={liveBoard}
-          frames={liveBoard ? listFrames(liveBoard) : []}
-          linked={new Map(lineage.boards.filter((b) => b.screen === screen.id).map((b) => [b.frameId, b]))}
-          slots={screen.slots}
-          onLink={(f, m) => { linkFrame(f, m); setDialog(null); }}
-          onShow={(id) => { setPane(focus, id); setDialog(null); }}
-          onClose={() => setDialog(null)}
-        />
+      {dialog?.kind === 'generate' && (
+        <GenerateDialog parent={titleOf(dialog.parent)} agents={agentsOnline} onCancel={() => setDialog(null)} onConfirm={(brief) => generate(dialog.parent, brief)} />
       )}
       {dialog?.kind === 'width' && (
         <WidthDialog

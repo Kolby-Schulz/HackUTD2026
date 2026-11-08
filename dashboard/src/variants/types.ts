@@ -1,6 +1,7 @@
 // Types for the variant picker (#/variants). A screen declares named slots; a variant is a folder of
 // React components that fill some of them; a combination ("mix") is a saved record of which node
-// supplies each slot. Code variants live in src/designs/, mixes and decisions in src/designs/lineage.json.
+// supplies each slot. Code variants live in src/designs/ (git); mixes, picks, votes and generation jobs live in
+// SpacetimeDB (see live.ts and store.ts).
 import type { ComponentType, ReactNode } from 'react';
 
 export type SlotId = string;
@@ -37,28 +38,4 @@ export interface Combo {
   parents: NodeId[];
   picks: Record<SlotId, NodeId>;
   createdAt: string;
-}
-
-/**
- * A frame brought in from the #/playground board. `live` re-renders whenever the playground saves;
- * `copy` is frozen: its shapes are stored here, so it survives board edits and is shared through git.
- */
-export interface BoardRef {
-  id: NodeId;
-  screen: string;
-  title: string;
-  boardId: string;
-  frameId: string;
-  mode: 'live' | 'copy';
-  /** Copy mode only: the frame and its descendants, as saved by the playground (plain JSON records). */
-  shapes?: Record<string, unknown>[];
-  importedAt: string;
-}
-
-export interface Lineage {
-  version: 1;
-  combos: Combo[];
-  boards: BoardRef[];
-  /** Screen id -> the node chosen as the final design. */
-  final: Record<string, NodeId>;
 }

@@ -11,10 +11,10 @@ import { applyInitialTheme } from './theme.ts';
 
 applyInitialTheme();
 
-// #/variants and #/playground are standalone pages, loaded on demand so the main bundle doesn't grow.
+// #/variants is its own page on the same SpacetimeDB connection, loaded on demand so the main bundle doesn't grow.
 const Variants = lazy(() => import('./variants/Variants.tsx').then((m) => ({ default: m.Variants })));
+// #/playground (the design board) opens its own board connection (playground/net), so it sits outside the provider.
 const Playground = lazy(() => import('./playground/Playground.tsx').then((m) => ({ default: m.Playground })));
-
 type Page = 'variants' | 'playground' | 'app';
 const pageOf = (): Page => (/^#\/?variants/.test(location.hash) ? 'variants' : /^#\/?playground/.test(location.hash) ? 'playground' : 'app');
 
@@ -25,13 +25,17 @@ function Root() {
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
-  if (page === 'variants') return <Suspense fallback={null}><Variants /></Suspense>;
   if (page === 'playground') return <Suspense fallback={null}><Playground /></Suspense>;
+  const variants = page === 'variants';
   return (
     <SpacetimeDBProvider connectionBuilder={connectionBuilder}>
-      <MachineProvider>
-        <App />
-      </MachineProvider>
+      {variants ? (
+        <Suspense fallback={null}><Variants /></Suspense>
+      ) : (
+        <MachineProvider>
+          <App />
+        </MachineProvider>
+      )}
     </SpacetimeDBProvider>
   );
 }

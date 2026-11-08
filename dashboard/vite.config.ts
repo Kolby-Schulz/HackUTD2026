@@ -1,7 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import { variantsPlugin } from './vite-variants.ts';
 
 // The dashboard reads tables through packages/client's generated bindings (spec section 18:
 // shared types come only from there). The client's own index.ts uses node:fs, so we alias the
@@ -17,7 +16,7 @@ export default defineConfig(({ mode }) => {
   const host = env.VITE_SPACETIME_HOST || env.SPACETIME_HOST || '';
   const local = !host || /\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(host);
   return {
-    plugins: [react(), variantsPlugin()],
+    plugins: [react()],
     resolve: { alias: { '@bindings': bindings } },
     define: {
       __SPACETIME_HOST__: JSON.stringify(local ? '' : host),
