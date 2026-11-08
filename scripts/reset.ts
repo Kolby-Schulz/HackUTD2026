@@ -3,12 +3,12 @@
 //
 // Puts everything back so each run starts identically, on the demo or any target repo
 // (--repo / CONTRACT_TARGET, issue #18):
-//  1. removes the run's worktrees (.worktrees/<id> on agent/* and demo/* branches) and
+//  1. removes the run's worktrees (.worktrees/<id>, or .worktrees/<repoKey>/<id> for other repos, on agent/* and demo/* branches) and
 //     deletes those branches; other worktrees in .worktrees/ are left alone
 //  2. restores the target folder (demo-repo/ by default) to its HEAD commit (refuses if it
 //     has uncommitted edits, unless --force)
-//  3. ends any open run and clears per-run server state (unless --offline). Past runs'
-//     rows stay: the scoreboard averages them.
+//  3. ends any open run (never merged, since a merge ends its run) and drops its edits, changes and conflicts, then
+//     clears per-run server state (unless --offline). Past runs' rows stay: the scoreboard averages them.
 // Keeps .contract/ (baseline token log, saved identities, run results, cloned repos).
 import { parseArgs } from 'node:util';
 import { resolveTarget, type Target } from '@contract/client';
@@ -40,10 +40,10 @@ export function resetFiles(force = false, target: Target = resolveTarget(REPO, u
 
   // 2. The target folder back to the committed starting point.
   const dirty = targetChanges(target);
-  if (dirty) {
+  if (dirty.length > 0) {
     const where = target.subdir ? `${target.subdir}/` : `${target.label} (whole repo)`;
     if (!force) {
-      throw new Error(`${where} has uncommitted changes; commit them or rerun with --force to discard:\n${dirty}`);
+      throw new Error(`${where} has uncommitted changes; commit them or rerun with --force to discard:\n${dirty.join('\n')}`);
     }
     const path = target.subdir || '.';
     git(['restore', '--source=HEAD', '--staged', '--worktree', '--', path], target.gitRoot);
@@ -54,18 +54,25 @@ export function resetFiles(force = false, target: Target = resolveTarget(REPO, u
 }
 
 /** Uncommitted changes in the target folder, ignoring a local `npm install` lockfile. */
-export function targetChanges(target: Target = resolveTarget(REPO, undefined, { clone: false })): string {
+export function targetChanges(target: Target = resolveTarget(REPO, undefined, { clone: false })): string[] {
   const path = target.subdir || '.';
-  return git(['status', '--porcelain', '--', path, `:!${target.subdir ? `${target.subdir}/` : ''}package-lock.json`], target.gitRoot);
+  const out = git(['status', '--porcelain', '--', path, `:!${target.subdir ? `${target.subdir}/` : ''}package-lock.json`], target.gitRoot);
+  // git() trims the output, which can eat the first line's leading space, so strip the
+  // status token loosely. For renames ("R  old -> new") keep the new path.
+  return out
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.replace(/^\s*\S+\s+/, '').replace(/^.* -> /, ''))
+    .filter((p) => p !== 'package-lock.json' && !p.endsWith('/package-lock.json'));
 }
 
 /** The demo's name for targetChanges() (run-demo checks demo-repo before a run). */
 export const demoRepoChanges = () => targetChanges(resolveTarget(REPO, ''));
 
-export async function resetRuns() {
+export async function resetRuns(waitSecs = 0) {
   const conn = await adminConnect(['SELECT * FROM run']);
-  const ended = await resetServerState(conn);
-  log('reset', ended.length ? `ended open run(s) ${ended.join(', ')}` : 'no open run');
+  const ended = await resetServerState(conn, waitSecs);
+  log('reset', ended.length ? `ended open run(s) ${ended.join(', ')} and took back their unmerged edits and conflicts` : 'no open run');
   log('reset', 'cleared code map, plans, claims and pending instructions');
   conn.disconnect();
 }

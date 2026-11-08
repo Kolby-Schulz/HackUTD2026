@@ -1,7 +1,8 @@
 // Unit tests for the table -> panel derivations, using the demo story from spec section 3.
 import { describe, expect, it } from 'vitest';
-import type { Tables } from '../src/model.ts';
-import { agentCards, cases, codeMap, coordinator, edits, feed, modeSummary, replayAt, replayMarks, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
+import type { MapNode, Tables } from '../src/model.ts';
+import { GX, langOf, layoutMap, W } from '../src/mapLayout.ts';
+import { agentCards, cases, codeMap, MAP_IDLE_MS, coordinator, edits, feed, modeSummary, replayAt, replayMarks, runWindow, timeline, tokensOf, tokenStats, fmtSecs, resolveTimes } from '../src/model.ts';
 
 const T0 = 1_800_000_000_000;
 const ts = (sec: number) => ({ toMillis: () => BigInt(T0 + Math.round(sec * 1000)) });
@@ -111,6 +112,16 @@ describe('conflicts', () => {
     expect(open.open).toBe(true);
     expect(open.steps.map((s) => s.state)).toEqual(['done', 'running', 'waiting']);
   });
+  it('times resolved conflicts from detection to the last push, and skips open ones', () => {
+    const t = story();
+    const cs = cases(t, runWindow(t.runs[1], NOW));
+    const done = cs.find((c) => c.key === '1')!;
+    expect(done.resolvedMs).toBeGreaterThanOrEqual(2600);
+    expect(cs.find((c) => c.key === '2')!.resolvedMs).toBeUndefined();
+    expect(resolveTimes(cs)).toEqual({ n: 1, avgMs: done.resolvedMs, fastestMs: done.resolvedMs, slowestMs: done.resolvedMs });
+    expect(resolveTimes([])).toBeUndefined();
+    expect([fmtSecs(19_940), fmtSecs(65_000)]).toEqual(['19.9s', '1m 05s']);
+  });
   it('folds a conflict, its decision and its pushes into one thread', () => {
     const t = story();
     const w = runWindow(t.runs[1], NOW);
@@ -143,13 +154,102 @@ describe('conflicts', () => {
 describe('code map', () => {
   it('puts callers left of callees, marks state, and adds planned creates as ghosts', () => {
     const t = story();
-    const m = codeMap(t, runWindow(t.runs[1], NOW), NOW);
+    const m = codeMap(t, runWindow(t.runs[1], NOW), NOW, Infinity);
     const by = Object.fromEntries(m.nodes.map((n) => [n.name, n]));
     expect(by.buildInvoice.col).toBe(0);
     expect(by.calculateFee.col).toBe(1);
     expect(by.calculateFee.state).toBe('conflict');
     expect(by.formatDate).toMatchObject({ ghost: true, state: 'planned' });
     expect(m.edges.every((e) => e.hot)).toBe(true);
+  });
+  it('marks what agents work on as active, their callers as context, and lets work time out', () => {
+    const t = story();
+    const w = runWindow(t.runs[1], NOW);
+    const flags = (now: number) => Object.fromEntries(codeMap(t, w, now).nodes.map((n) => [n.name, n.active ? 'active' : n.context ? 'context' : '-']));
+    // every function stays on the map; untouched callers of calculateFee are context
+    expect(flags(NOW)).toEqual({ buildInvoice: 'context', computeTotal: 'context', calculateFee: 'active', formatDate: 'active' });
+    expect(codeMap(t, w, NOW)).toMatchObject({ total: 3, activeCount: 2 });
+    // conflict resolved and claim released: formatDate (last touched at 8.7s) fades, then goes idle
+    t.conflicts = t.conflicts.map((c) => ({ ...c, status: 'resolved', resolvedAt: c.resolvedAt ?? ts(29) })) as unknown as Tables['conflicts'];
+    t.claims = [];
+    const late = T0 + 8_700 + MAP_IDLE_MS;
+    expect(codeMap(t, w, late - 10_000).nodes.find((n) => n.name === 'formatDate')!.fading).toBe(true);
+    expect(flags(late + 1).formatDate).toBe('-');
+    expect(flags(late + 1).calculateFee).toBe('active');
+    expect(Object.values(flags(T0 + 29_000 + MAP_IDLE_MS + 1))).toEqual(['-', '-', '-', '-']);
+  });
+  it('wraps a crowded call-depth level into extra columns instead of one tall one', () => {
+    const t = story();
+    const extra = Array.from({ length: 100 }, (_, i) => ({ ...t.symbols[0], id: `src/big/f${i}.ts#f${i}`, name: `f${i}`, file: `src/big/f${i}.ts` }));
+    t.symbols = [...t.symbols, ...extra] as unknown as Tables['symbols'];
+    const m = codeMap(t, runWindow(t.runs[1], NOW), NOW, Infinity);
+    const rows = Math.max(...m.nodes.map((n) => n.row)) + 1;
+    const cols = Math.max(...m.nodes.map((n) => n.col)) + 1;
+    expect(rows).toBeLessThanOrEqual(15);
+    expect(cols).toBeGreaterThan(6);
+    // callers still sit left of their callees
+    const at = Object.fromEntries(m.nodes.map((n) => [n.id, n.col]));
+    for (const e of m.edges) expect(at[e.source]).toBeLessThan(at[e.target]);
+  });
+  it('shows a removed function as removed, even after the mapper drops its row, until it goes idle', () => {
+    const t = story();
+    t.conflicts = [];
+    t.claims = [];
+    const removal = { id: 2n, agentId: 'agent-a', symbolId: TOTAL, kind: 'removed', oldSignature: undefined, newSignature: undefined, description: 'gone', createdAt: ts(30) };
+    t.changes = [...t.changes, removal] as unknown as Tables['changes'];
+    const w = runWindow(t.runs[1], NOW);
+    const at = (now: number) => codeMap(t, w, now, MAP_IDLE_MS).nodes.find((n) => n.id === TOTAL);
+    expect(at(T0 + 31_000)).toMatchObject({ state: 'removed', removed: true, ghost: false, active: true });
+    // the mapper deletes the symbol row once the removal lands in the checkout
+    t.symbols = t.symbols.filter((s) => s.id !== TOTAL) as unknown as Tables['symbols'];
+    expect(at(T0 + 31_000)).toMatchObject({ state: 'removed', removed: true, ghost: false, active: true, name: 'computeTotal' });
+    expect(at(T0 + 30_000 + MAP_IDLE_MS + 1)).toBeUndefined();
+  });
+  it('keeps a claimed function active however long it sits idle', () => {
+    const t = story();
+    t.conflicts = [];
+    t.claims = [{ symbolId: FEES, agentId: 'agent-a', claimedAt: ts(4), expiresAt: ts(10_000) }] as unknown as Tables['claims'];
+    const m = codeMap(t, runWindow(t.runs[1], NOW), T0 + 5_000_000);
+    expect(m.nodes.filter((n) => n.active).map((n) => n.name)).toEqual(['calculateFee']);
+  });
+});
+
+describe('code map layout', () => {
+  const node = (id: string, col: number, row: number, active = false, context = false) =>
+    ({ id, name: id, file: `src/${id}.py`, kind: 'function', version: 1, owners: [], state: 'idle', ghost: false, removed: false, active, context, fading: false, col, row }) as MapNode;
+  // three columns of five; agents work on a0 and c4, a1 calls a0 (context);
+  // a0 reaches c4 only through b2 and b3, which are collapsed
+  const grid = ['a', 'b', 'c'].flatMap((k, col) => Array.from({ length: 5 }, (_, row) => node(`${k}${row}`, col, row, `${k}${row}` === 'a0' || `${k}${row}` === 'c4', `${k}${row}` === 'a1')));
+  const edges = [
+    { id: '1', source: 'a1', target: 'a0', hot: false },
+    { id: '2', source: 'a0', target: 'b2', hot: false }, { id: '3', source: 'b2', target: 'b3', hot: false }, { id: '4', source: 'b3', target: 'c4', hot: false },
+    { id: '5', source: 'b0', target: 'b1', hot: false },
+  ];
+
+  it('draws every function when nobody is working or the user expanded the map', () => {
+    const idle = grid.map((n) => ({ ...n, active: false, context: false }));
+    expect(layoutMap(idle, edges, false)).toMatchObject({ focused: false, shown: 15 });
+    const full = layoutMap(grid, edges, true);
+    expect(full.items).toHaveLength(15);
+    // the agents' section stands out: everything not in play is dimmed
+    expect(full.items.filter((i) => !i.dim).map((i) => i.id).sort()).toEqual(['a0', 'a1', 'c4']);
+  });
+  it('draws only the functions in play, packed, with a "â‹¯" link through collapsed ones', () => {
+    const l = layoutMap(grid, edges, false);
+    expect(l).toMatchObject({ focused: true, shown: 3 });
+    // a1 -> a0 -> (b2, b3 collapsed) -> c4: three columns, nothing else drawn
+    expect(l.items.map((i) => `${i.id}@${i.x / (W + GX)},${i.y}`)).toEqual(['a1@0,0', 'a0@1,0', 'c4@2,0']);
+    expect(l.items.find((i) => i.id === 'a1')).toMatchObject({ faded: true });
+    expect(l.edges).toEqual([
+      { id: '1', source: 'a1', target: 'a0', hot: false },
+      { id: 'via:a0>c4', source: 'a0', target: 'c4', hot: false, via: true },
+    ]);
+  });
+  it('names the language of a file for its badge', () => {
+    expect(langOf('src/a.tsx')?.label).toBe('TS');
+    expect(langOf('pkg/x.py')?.name).toBe('Python');
+    expect(langOf('main.go')?.label).toBe('GO');
+    expect(langOf('README')).toBeUndefined();
   });
 });
 
@@ -246,5 +346,78 @@ describe('replay (issue #27)', () => {
   it('lists conflicts as jump marks', () => {
     const t = ended();
     expect(replayMarks(t, t.runs[1])).toEqual([{ at: 6000, label: '#1 Duplicate implementation' }, { at: 28000, label: '#2 Broken dependency' }]);
+  });
+});
+
+describe('workbench', () => {
+  it('lists every agent planning a ghost symbol, and the holder of a claimed one', async () => {
+    const { codeMap } = await import('../src/model.ts');
+    const t = story();
+    const by = Object.fromEntries(codeMap(t, runWindow(t.runs[1], NOW), NOW, Infinity).nodes.map((n) => [n.name, n]));
+    expect(by.formatDate.owners.map((p) => p.id)).toEqual(['agent-a']);
+    expect(by.calculateFee.owners.map((p) => p.id)).toEqual(['agent-a']);
+    expect(by.buildInvoice.owners).toEqual([]);
+  });
+  it('tells one symbol\u2019s story oldest first, ending with how its conflict was resolved', async () => {
+    const { symbolHistory } = await import('../src/model.ts');
+    const t = story();
+    const h = symbolHistory(t, runWindow(t.runs[1], NOW), DATES);
+    expect(h.map((x) => x.tone)).toEqual(['plan', 'conflict', 'resolved']);
+    expect(h[2].title).toBe('Resolved in 2.6s');
+  });
+  it('measures tokens saved against the last without run at the same point, never estimated', async () => {
+    const { savingsNow } = await import('../src/model.ts');
+    const t = story();
+    expect(savingsNow(t, t.runs[1], NOW)).toEqual({ current: 6700, base: 0, saved: 0 });
+    expect(savingsNow(t, t.runs[1], T0 + 220_000)).toEqual({ current: 6700, base: 15000, saved: 8300 });
+    expect(savingsNow(t, t.runs[0], NOW)).toEqual({ current: 15000 });
+  });
+  it('puts the coordinator on the open conflict and the run in the code stage after a change', async () => {
+    const { coordFocus, runStage } = await import('../src/model.ts');
+    const t = story();
+    const w = runWindow(t.runs[1], NOW);
+    expect(coordFocus(t, w)).toEqual({ symbolId: FEES, conflict: '2', resolving: true });
+    expect(runStage(t, t.runs[1], w)).toBe('Code');
+    expect(runStage(t, t.runs[0], runWindow(t.runs[0], NOW))).toBe('Merge');
+  });
+});
+
+describe('changes tab', () => {
+  it('numbers diff lines from the hunk header and drops file headers', async () => {
+    const { diffLines } = await import('../src/Changes.tsx');
+    const d = 'diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n@@ -10,3 +10,3 @@ export function fee()\n const a = 1;\n-return Math.trunc(fee);\n+return Math.round(fee * 100) / 100;\n }\n';
+    const l = diffLines(d);
+    expect(l.map((x) => x.kind)).toEqual(['hunk', 'ctx', 'del', 'add', 'ctx']);
+    expect(l[1]).toMatchObject({ oldNo: 10, newNo: 10 });
+    expect(l[2]).toMatchObject({ oldNo: 11, text: 'return Math.trunc(fee);' });
+    expect(l[3]).toMatchObject({ newNo: 11 });
+    expect(l[4]).toMatchObject({ oldNo: 12, newNo: 12 });
+    expect(l[0].text).toBe('export function fee()');
+  });
+});
+
+describe('called agents', () => {
+  it('lists agents with work in the run and leaves registered idle workers out', async () => {
+    const { calledAgents } = await import('../src/model.ts');
+    const t = story();
+    const c = { ...t.agents[0], id: 'agent-c', name: 'Agent C', status: 'idle', currentTaskId: undefined };
+    const withC = { ...t, agents: [...t.agents, c] } as unknown as Tables;
+    expect([...calledAgents(withC, withC.runs[1], NOW)].sort()).toEqual(['agent-a', 'agent-b']);
+    expect(calledAgents(withC, undefined, NOW).size).toBe(0);
+  });
+});
+
+describe('chat recipient on a shared database', () => {
+  it('defaults to the assistant, else your own laptop\'s agent, never a teammate\'s', async () => {
+    const { defaultRecipient, sameMachine } = await import('../src/model.ts');
+    const a = (id: string, machine: string, offline = false) => ({ id, machine, offline });
+    const agents = [a('agent-k', 'kolbys-mbp'), a('agent-e', 'Ethans-MacBook-Pro.local'), a('agent-z', 'ethans-macbook-pro', true)];
+    expect(defaultRecipient(agents, 'ethans-macbook-pro', true)).toBe('insync');
+    expect(defaultRecipient(agents, 'ethans-macbook-pro', false)).toBe('agent-e'); // case and .local differ, same laptop
+    expect(defaultRecipient(agents, 'tylers-mbp', false)).toBe(''); // only other laptops' agents online
+    expect(defaultRecipient(agents, undefined, false)).toBe(''); // nothing paired
+    expect(sameMachine('Ethans-MacBook-Pro.local', 'ethans-macbook-pro')).toBe(true);
+    expect(sameMachine('ethans-macbook-pro', 'ethans-macbook-pro-k7q4')).toBe(false);
+    expect(sameMachine(undefined, 'x')).toBe(false);
   });
 });

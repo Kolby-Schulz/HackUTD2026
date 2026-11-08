@@ -36,5 +36,5 @@ while code is written, not at merge. Source of truth stays `docs/SPEC.md` and `C
 - Frontmatter + a `Summary:` line of at most 3 lines on every note. One subject per note, under ~150 lines.
 - Cite `file:line`; mark guesses "(unverified)". Update a note in place; don't append a diary.
 - Found a note wrong? Fix it in the same change and bump `verified:` to the current commit.
-- Every new note gets linked from here or its Area note. Check with:
-  `python <orchestrate-skill>/scripts/vaultcheck.py vault --stale`
+- Every new note gets linked from here or its Area note.
+- Workflow rules for all contributors' agents are in `CLAUDE.md` under "Shared vault". The vault is context, never a gate.

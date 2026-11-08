@@ -10,11 +10,10 @@
 //   - a fresh worktree for every task (no leftovers from the previous judge's task).
 // Needs an open run (`npm run session -- start`) and the coordinator running somewhere.
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { resolveTarget } from '@contract/client';
+import { resolveTarget, worktreeDir } from '@contract/client';
 import { run } from './merge.ts';
-import { git, log, REPO, WORKTREES } from './lib.ts';
+import { git, log, REPO } from './lib.ts';
 
 const { values } = parseArgs({
   options: {
@@ -31,7 +30,7 @@ const target = resolveTarget(REPO, values.repo);
 
 /** The worker refuses to reuse a worktree cleanly; give each judge task a fresh one. */
 function freshWorktree() {
-  const dir = join(WORKTREES, id);
+  const dir = worktreeDir(REPO, target, id);
   if (existsSync(dir)) git(['worktree', 'remove', '--force', dir], target.gitRoot);
   try {
     git(['branch', '-D', `agent/${id}`], target.gitRoot);

@@ -27,7 +27,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { checkTools, connect, isOperatorInstruction, noopClient, resolveTarget, type ContractClient, type Instruction } from '@contract/client';
+import { checkTools, connect, DEP_DIRS, isOperatorInstruction, noopClient, resolveTarget, runInstall, stageAll, toolPath, worktreeDir, type ContractClient, type Instruction } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
@@ -81,15 +81,24 @@ let attempt = 1;
 const target = resolveTarget(REPO, values.repo);
 if (!target.demo && !session && values.task !== undefined) die('--task runs the canned demo tasks; use --prompt or --wait with --repo/CONTRACT_TARGET');
 const base = values.base ?? (session ? target.base : 'HEAD');
-const worktree = join(REPO, '.worktrees', agentId);
+// The demo's worktrees are .worktrees/<id>; any other repo's .worktrees/<repoKey>/<id>, so an
+// agent never reuses a folder from a different repository.
+const worktree = worktreeDir(REPO, target, agentId);
+let fresh = false;
 if (!existsSync(worktree)) {
+  fresh = true;
   if (base.startsWith('origin/')) execFileSync('git', ['fetch', 'origin', base.slice('origin/'.length)], { cwd: target.gitRoot, stdio: 'inherit' });
-  mkdirSync(join(REPO, '.worktrees'), { recursive: true });
+  mkdirSync(dirname(worktree), { recursive: true });
   execFileSync('git', ['worktree', 'add', '--no-track', '-B', `agent/${agentId}`, worktree, base], { cwd: target.gitRoot, stdio: 'inherit' });
 } else if (session) {
   console.warn(`[${agentId}] reusing ${worktree} from an earlier run; \`npm run reset\` first for a clean start from ${base}`);
 }
 const cwd = target.subdir ? join(worktree, target.subdir) : worktree;
+// Dependencies (npm ci, pip into .venv, go mod download, ...), so the agent and its tests can
+// run. Also on a reused worktree that never got them (an install interrupted last time).
+if (target.install.length && (fresh || !DEP_DIRS.some((d) => existsSync(join(cwd, d))))) {
+  runInstall(cwd, target, (m) => console.log(`[${agentId}] ${m}`));
+}
 if (!target.demo) console.log(`[${agentId}] target ${target.label}: ${cwd}`);
 
 // 2. Join Contract (or not).
@@ -152,6 +161,8 @@ const env: Record<string, string> = {
   CONTRACT_TASK_ID: String(taskId),
   CONTRACT_REPO: REPO,
   CONTRACT_REPO_DIR: cwd,
+  // The checkout's own tools first: .venv/bin (pytest), node_modules/.bin (vitest, tsc).
+  PATH: toolPath(cwd),
   SPACETIME_HOST: process.env.SPACETIME_HOST ?? '',
   SPACETIME_DB_NAME: process.env.SPACETIME_DB_NAME ?? '',
 };
@@ -289,14 +300,15 @@ for (;;) {
 if (stopReason) {
   // Guard rail hit: drop the half-done work and mark the task discarded, not done.
   execFileSync('git', ['checkout', '--', '.'], { cwd: worktree });
-  execFileSync('git', ['clean', '-fd'], { cwd: worktree });
+  execFileSync('git', ['clean', '-fd', ...DEP_DIRS.flatMap((d) => ['-e', d])], { cwd: worktree }); // keep installed deps
   for (const symbolId of contract.myClaims()) await contract.release(symbolId).catch(() => undefined);
   await contract.setTaskStatus(taskId, 'discarded').catch((e: unknown) => console.warn(`[${agentId}] set_task_status: ${String(e)}`));
   await contract.disconnect();
   console.log(`[${agentId}] task ${taskId} discarded (${stopReason})`);
   process.exit(3);
 }
-execFileSync('git', ['add', '-A'], { cwd: worktree });
+// Never commit installed dependencies (node_modules, .venv, ...) even if the repo doesn't ignore them.
+stageAll(worktree);
 execFileSync('git', ['commit', '-m', `${agentId}: ${task.slice(0, 60)}`, '--allow-empty'], { cwd: worktree, stdio: 'inherit' });
 for (const symbolId of contract.myClaims()) {
   await contract.release(symbolId).catch((e: unknown) => console.warn(`[${agentId}] release ${symbolId}: ${String(e)}`));

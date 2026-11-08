@@ -25,12 +25,16 @@
     "session": "tsx scripts/session.ts",
     "join": "tsx scripts/join.ts",
     "judge": "tsx scripts/judge.ts",
-    "bench": "tsx scripts/bench.ts"
+    "bench": "tsx scripts/bench.ts",
+    "control": "tsx scripts/control.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "dotenv": "^18.0.9",
     "tsx": "^4.23.15",
     "typescript": "~5.9.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

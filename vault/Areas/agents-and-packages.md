@@ -2,10 +2,12 @@
 title: Agents and shared packages
 area: agents
 sources: [packages/client, packages/mcp, packages/llm, agents/worker]
-verified: 87debe9
+verified: self-run-checkpoint
 ---
 Summary: `packages/llm` is the only model gateway (`decide` for one structured answer, `runWorker` for a Claude Code run). `packages/client` wraps SpacetimeDB and is the only way a process joins Contract. `packages/mcp` exposes nine tools to workers, and `agents/worker` runs a headless Claude Code session in a git worktree with hooks for claims, change reports and summary caching.
 Spec basis: docs/SPEC.md sections 4, 10, 11, 12, plus docs/spec-additions-live-code.md and docs/spec-additions-summary-tools.md (both already built, per their status lines).
+
+Claim guard (`agents/worker/src/claim-guard.ts`) also enforces the protocol since the self-run: no plan -> no edits to mapped source; no own claim -> no edit to a mapped symbol. `CONTRACT_PROTOCOL=off` disables that part.
 
 ## packages/llm (sections 4, 12)
 
@@ -88,7 +90,7 @@ Startup (index.ts:288-331): needs `CONTRACT_AGENT_ID`, `CONTRACT_TASK_ID`, and `
 Entry: `agents/worker/src/index.ts`, run as `npm run worker -- --id agent-a --task 1 --mode with_contract|without_contract`. Other entry points: `--prompt` and `--wait` (two-laptop session flow), `watch.ts` (sidecar for non-Claude editors), `session-task.ts` (task rows).
 
 Lifecycle of one run:
-1. Target and worktree (index.ts:81-93). Target from `--repo`, `CONTRACT_TARGET`, else the demo repo. Worktree is `.worktrees/<id>` on branch `agent/<id>` (index.ts:84-88). Work happens in `cwd`, the target's subdir inside it.
+1. Target and worktree (index.ts:81-93). Target from `--repo`, `CONTRACT_TARGET`, else the demo repo. Worktree is `worktreeDir(REPO, target, id)` (`packages/client/src/target.ts`): `.worktrees/<id>` for the demo, `.worktrees/<repoKey>/<id>` for any other repo, on branch `agent/<id>`. Then `runInstall` installs the target's dependencies (`target.install`, detected from lockfiles or `contract.json` `install`), and the agent's env gets `toolPath(cwd)` (`.venv/bin`, `node_modules/.bin` first). Commits use `DEP_PATHSPEC` so installed folders are never committed. Work happens in `cwd`, the target's subdir inside it.
 2. Connect (index.ts:103-126). `with_contract` calls `connect`. `without_contract` uses a fake client (`noopClient`) and logs tokens locally to `.contract/tokens.jsonl` (index.ts:98).
 3. Task (index.ts:129-142). Canned from `TASKS` (`tasks.ts`), `--task-text`, `--prompt`, or `--wait`.
 4. Wiring (index.ts:148-172). Writes `.contract/mcp/<id>.json` (index.ts:159). Passes `appendSystemPrompt: CONTRACT_RULES` (rules.ts:3), `--settings agents/worker/hook-settings.json`, and `allowedTools` including `mcp__contract`.

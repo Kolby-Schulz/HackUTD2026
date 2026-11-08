@@ -2,17 +2,17 @@
 title: Coordinator, mapper, triage, demo-repo
 area: coordinator
 sources: [mapper/, agents/coordinator/, agents/triage/, demo-repo/]
-verified: 87debe9
+verified: af2707c+standby
 ---
 Summary: The mapper parses demo-repo into symbol and edge rows and pushes them through upsert_symbols. The coordinator asks a model (Nemotron or Claude Code) to resolve each open conflict, validates the answer, and falls back to a first-claimant rule. Triage (Jev) is a stub that exits unless TRIAGE=on. Demo-repo is the billing app with two planted conflicts; its integration test is red by design.
 
 ## Mapper (spec 9)
 
 - Parser: `mapper/src/map.ts`. Maps exported functions, arrow/function consts, other exported consts, classes and their methods (header rules at `map.ts:1-31`). Edges are value references that resolve to mapped symbols, not only calls (`map.ts:1-31`). Type-only references are not edges.
-- `RepoMapper` (`map.ts:544`) builds a ts-morph project over the repo. `SKIP_DIRS` at `map.ts:376`; `test/tests/__tests__/scripts` are non-source (`map.ts:383`).
+- TS/JS: `RepoMapper` (`map.ts`) builds a ts-morph project over the repo. Exports-only rule, except a JS file with no exports at all (browser script or entry module, e.g. demoRepo's `js/checkout.js`): its top-level declarations are mapped (`isPlainScript`). Before this, agents planning on such a file got `publish_plan: plan item references unknown symbol`. Python, Go, Java, Rust, Ruby, PHP, C#, C/C++: `mapper/src/polyglot.ts` + `lang.ts` via tree-sitter (`@vscode/tree-sitter-wasm` pinned 0.3.1); signatures are canonical `name(p: T): R` so Rule 2 parses them unchanged; call edges are matched by name (same file first, else a unique repo-wide name). `createRepoMapper(dir)` (async) combines both; hooks use `mapFileAsync` / `symbolRangesAsync`. `SKIP_DIRS` at `map.ts:377`; `test/tests/__tests__/scripts` are non-source (`NON_SOURCE_DIRS`), unless the target's `contract.json` has `"map": { "include": [...], "exclude": [...] }` (`MapPolicy` in `map.ts`; module state set by `useMapPolicy(repoDir)`, which `listMappableFiles`/`mapFile` and the worker hooks call). The monorepo's own `contract.json` includes `scripts/` and excludes `demo-repo/` so Contract can run on itself (`--repo .`).
 - Output: `FileMap` per file, pushed by `MapSync.push` (`mapper/src/sync.ts:127`). `planUpsert` (`sync.ts:41`) sends only when symbols, hashes or edges differ, so restarts and no-op saves bump nothing.
 - Sync never sends `behavior_note`; it always sends `''` (`sync.ts:6-8`). Agents set it through `report_change`.
-- CLI (`mapper/src/cli.ts`): `--repo` (default `CONTRACT_TARGET`, else demo-repo, `cli.ts:106`); refuses `.worktrees/` paths (`cli.ts:107`). `--watch` takes the `mapper` service lock (`cli.ts:137`), debounces 150 ms or 1 s in bursts (`cli.ts:33-35`), and re-maps the whole repo above 50 changed files (`cli.ts:37`).
+- CLI (`mapper/src/cli.ts`): `--repo` (default `CONTRACT_TARGET`, else demo-repo, `cli.ts:106`); refuses `.worktrees/` paths (`cli.ts:107`). every run takes the `mapper` service lock (one-shot releases it after the push; the server accepts `upsert_symbols` only from its holder, #62), debounces 150 ms or 1 s in bursts (`cli.ts:33-35`), and re-maps the whole repo above 50 changed files (`cli.ts:37`).
 - Feeds the server through `upsert_symbols`; the coordinator reads the same rows via `client.getContext`.
 
 ## Coordinator (spec 12)
@@ -23,7 +23,7 @@ Summary: The mapper parses demo-repo into symbol and edge rows and pushes them t
 - `handleConflict` (`live.ts:106`): mark `resolving`, build context, decide, then `resolve_conflict` or `dismiss_conflict`. Any error after marking applies the fallback so workers are not left paused.
 - Serial queue, deduped by conflict id (`live.ts:136`). Subscribes to `conflict`, `decision`, `plan`, `plan_item`, `task`, `change`, `run` (`live.ts:192-200`), and only handles `status === 'open'` (`live.ts:231`).
 - Prior decisions: up to 6 earlier decisions from the current run that involve either agent (`live.ts:27-43`, `MAX_PRIOR` at `live.ts:24`).
-- Lock and identity: `holdService` "coordinator" (`live.ts:204`); saved token in `.contract/coordinator-tokens.json`, or `COORDINATOR_TOKEN` (`live.ts:182`).
+- Lock and identity: `acquire()` in `runLive` connects, registers `coordinator` and takes the `holdService` "coordinator" lock; saved token in `.contract/coordinator-tokens.json`, or `COORDINATOR_TOKEN`. If the server refuses because another coordinator is live (`takenBy`), it stands by and retries every 10 s, taking over when the lock is released (Ctrl-C or SIGTERM from the control daemon release it). `COORDINATOR_STANDBY=off` fails fast instead.
 - Prompt: `buildPrompt` (`decide.ts:63-74`). Per-kind hint for `duplicate` says agent A came first and B reuses A's function (`decide.ts:54-61`). Says "what, not how": no code or formulas. Output schema `DECISION_SCHEMA` (`decide.ts:28-39`): action, owner_agent, instructions_a, instructions_b, reason.
 - Nemotron provider: `packages/llm/src/nemotron.ts`, `temperature: 0` (`nemotron.ts:100`), `response_format: json_schema` (`nemotron.ts:109`). `createLLM('nemotron')` in `packages/llm/src/index.ts:16`. Workers stay on Claude Code; Nemotron `runWorker` is phase 2 (unverified in this pass, per `docs/nemotron-coordinator-plan.md` section 6).
 - Planted fixtures: `FEE_CONFLICT` (`fixtures.ts:8`, broken_dependency on calculateFee, owner agent-a) and `DUPLICATE_CONFLICT` (`fixtures.ts:22`, owner agent-a, B reuses formatDate).

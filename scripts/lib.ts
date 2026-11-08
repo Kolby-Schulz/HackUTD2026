@@ -2,6 +2,7 @@
 import { config as loadEnv } from 'dotenv';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DbConnection } from '@contract/client';
@@ -13,7 +14,11 @@ export const DEMO_REPO = join(REPO, 'demo-repo');
 export const WORKTREES = join(REPO, '.worktrees');
 export const STATE_DIR = join(REPO, '.contract'); // gitignored; reset keeps it
 export const RESULTS_DIR = join(STATE_DIR, 'runs');
-export const TSX = join(REPO, 'node_modules/.bin/tsx');
+/** Start tsx as `TSX` with `TSX_CLI` as the first argument. node_modules/.bin/tsx is a shell script
+ *  on macOS/Linux and tsx.cmd on Windows, which spawn() can't start without a shell; running tsx's
+ *  own entry with this node binary works the same on every OS. */
+export const TSX = process.execPath;
+export const TSX_CLI = join(REPO, 'node_modules/tsx/dist/cli.mjs');
 
 /** The two demo agents and the TASKS key each one runs (spec section 14). */
 export const AGENTS = [
@@ -28,32 +33,88 @@ export function git(args: string[], cwd = REPO): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+/**
+ * Brings this laptop's checkout of a target up to `base` ("origin/main"), already fetched, so
+ * session start maps what was merged instead of a stale checkout. Only a fast-forward, and only
+ * when HEAD is on the base branch: a checkout on another branch, with commits of its own, or with
+ * edits the update would overwrite is left alone (`skipped`, with the reason).
+ */
+export function fastForwardToBase(gitRoot: string, base: string): { status: 'updated' | 'current' | 'skipped'; reason?: string } {
+  const branch = base.replace(/^origin\//, '');
+  const head = git(['rev-parse', '--abbrev-ref', 'HEAD'], gitRoot);
+  if (head !== branch) return { status: 'skipped', reason: `on branch ${head}, not ${branch}` };
+  if (git(['rev-parse', 'HEAD'], gitRoot) === git(['rev-parse', base], gitRoot)) return { status: 'current' };
+  try {
+    git(['merge-base', '--is-ancestor', 'HEAD', base], gitRoot);
+  } catch {
+    return { status: 'skipped', reason: `local ${branch} has commits that are not on ${base}` };
+  }
+  try {
+    git(['merge', '--ff-only', '--quiet', base], gitRoot);
+  } catch {
+    return { status: 'skipped', reason: 'local changes would be overwritten' };
+  }
+  return { status: 'updated' };
+}
+
 export function log(scope: string, msg: string) {
   console.log(`[${scope}] ${msg}`);
 }
 
+/** This laptop's machine id: the hostname, lowercased (override with --machine or CONTRACT_MACHINE). */
+export function machineId(name = hostname()): string {
+  const id = name.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
+  return id || 'laptop';
+}
+
+/** The identities.json key the control daemon and the scripts share for this laptop's machine row. */
+export const machineTokenKey = (id: string) => `machine:${id}`;
+
 /**
- * A plain SpacetimeDB connection (not an agent) for run bookkeeping: start_run, end_run,
- * create_task, mark_attempt_wasted, and reading token_usage. None of those reducers check
- * the caller's identity.
+ * An operator connection for run bookkeeping: start_run, end_run, create_task,
+ * mark_attempt_wasted, reset_demo_state, and reading token_usage. Those reducers accept only
+ * operators (a registered agent, a laptop's control daemon, or a dashboard paired with one),
+ * so this connects as this laptop's `machine` row with the same saved token `npm run control`
+ * uses (.contract/identities.json). Without a daemon it registers the machine row itself; the
+ * daemon later re-registers it with the same identity, so nothing is lost. A machine row held
+ * by another identity (a daemon from another checkout of this repo) is left alone: set
+ * CONTRACT_MACHINE to a different name for this checkout.
  */
 export function adminConnect(queries: string[], timeoutMs = 10_000): Promise<DbConnection> {
   const host = process.env.SPACETIME_HOST;
   const dbName = process.env.SPACETIME_DB_NAME;
   if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
+  const id = machineId(process.env.CONTRACT_MACHINE);
+  const tokenKey = machineTokenKey(id);
+  const machineQuery = `SELECT * FROM machine WHERE id = '${id.replace(/'/g, "''")}'`;
   return new Promise((res, rej) => {
     const timer = setTimeout(() => rej(new Error(`no response from ${host} (${dbName}) within ${timeoutMs} ms`)), timeoutMs);
+    const fail = (e: unknown) => (clearTimeout(timer), rej(e instanceof Error ? e : new Error(String(e))));
     const conn: DbConnection = DbConnection.builder()
       .withUri(host)
       .withDatabaseName(dbName)
-      .onConnect(() => {
+      .withToken(savedToken(tokenKey))
+      .onConnect((_ctx, identity, token) => {
+        saveToken(tokenKey, token);
         conn
           .subscriptionBuilder()
-          .onApplied(() => (clearTimeout(timer), res(conn)))
-          .onError((ctx) => (clearTimeout(timer), rej(new Error(`subscription failed: ${String(ctx.event ?? 'unknown')}`))))
-          .subscribe(queries);
+          .onApplied(() => {
+            const row = conn.db.machine.id.find(id);
+            if (row && !row.identity.equals(identity)) {
+              conn.disconnect();
+              fail(new Error(
+                `machine '${id}' belongs to another identity (npm run control from another checkout of this repo?). ` +
+                  `Run the scripts from that checkout, or set CONTRACT_MACHINE=<another name> for this one.`,
+              ));
+              return;
+            }
+            const ready = row ? Promise.resolve() : conn.reducers.registerMachine({ id });
+            ready.then(() => (clearTimeout(timer), res(conn)), fail);
+          })
+          .onError((ctx) => fail(new Error(`subscription failed: ${String(ctx.event ?? 'unknown')}`)))
+          .subscribe(queries.includes(machineQuery) ? queries : [...queries, machineQuery]);
       })
-      .onConnectError((_ctx, err) => (clearTimeout(timer), rej(err)))
+      .onConnectError((_ctx, err) => fail(err))
       .build();
   });
 }
@@ -70,10 +131,31 @@ export async function endOpenRuns(conn: DbConnection): Promise<bigint[]> {
  * instructions; see reset_demo_state) so nothing from the last run leaks into the next.
  * `conn` must subscribe to the run table.
  */
-export async function resetServerState(conn: DbConnection): Promise<bigint[]> {
+/**
+ * Ends open runs and clears the demo state. reset_demo_state refuses while a worker's heartbeat is
+ * under 60 s old; with waitSecs > 0 (back-to-back benchmark runs, whose workers just exited) it
+ * retries until those heartbeats age out instead of failing.
+ */
+export async function resetServerState(conn: DbConnection, waitSecs = 0): Promise<bigint[]> {
   const ended = await endOpenRuns(conn);
-  await conn.reducers.resetDemoState({});
-  return ended;
+  // A merge ends its run itself, so a run still open here was never merged: its worktrees are
+  // about to go, so its edits, changes and the conflicts they caused leave the dashboard too.
+  // An older published module has no discard_unmerged_run; the reset still goes on without it.
+  for (const runId of ended) {
+    await conn.reducers.discardUnmergedRun({ runId }).catch((e) => log('reset', `kept run ${runId}'s edits and conflicts: ${e instanceof Error ? e.message : String(e)}`));
+  }
+  const deadline = Date.now() + waitSecs * 1000;
+  for (let said = false; ; said = true) {
+    try {
+      await conn.reducers.resetDemoState({});
+      return ended;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/still running/.test(msg) || Date.now() > deadline) throw e;
+      if (!said) log('reset', `${msg}; waiting up to ${waitSecs} s for those heartbeats to expire`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
 }
 
 /** Waits until `check()` is true after reducer results reach the local cache. */

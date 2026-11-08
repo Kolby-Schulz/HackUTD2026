@@ -1,10 +1,10 @@
-import { cpSync, mkdtempSync, rmSync, unlinkSync, writeFileSync, readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { duplicateReason, parseSignature } from '@contract/server/rules';
-import { checkFileCount, isMappable, mapFile, maxFiles, RepoMapper, signatureHash, type FileMap } from '../src/index.ts';
+import { checkFileCount, isMappable, mapFile, maxFiles, readMapPolicy, RepoMapper, setMapPolicy, signatureHash, useMapPolicy, type FileMap } from '../src/index.ts';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/repo', import.meta.url));
 
@@ -265,6 +265,44 @@ describe('isMappable', () => {
   ])('%s -> %s', (path, want) => expect(isMappable(path)).toBe(want));
 });
 
+describe('map policy (contract.json "map")', () => {
+  afterEach(() => setMapPolicy());
+
+  it('include maps a tooling folder, minus its tests and configs; exclude hides a folder', () => {
+    setMapPolicy({ include: ['scripts'], exclude: ['demo-repo'] });
+    expect(isMappable('scripts/lib.ts')).toBe(true);
+    expect(isMappable('scripts/nested/daemon.ts')).toBe(true);
+    expect(isMappable('scripts/test/daemon.test.ts')).toBe(false);
+    expect(isMappable('scripts/vitest.config.ts')).toBe(false);
+    expect(isMappable('other/scripts/x.ts')).toBe(false); // include is a repo-relative prefix
+    expect(isMappable('demo-repo/src/fees.ts')).toBe(false);
+    expect(isMappable('demo-repo-two/src/fees.ts')).toBe(true);
+    expect(isMappable('node_modules/scripts/x.ts')).toBe(false);
+  });
+
+  it('is read from the repo\'s contract.json and applied by RepoMapper', () => {
+    const work = mkdtempSync(join(tmpdir(), 'mapper-policy-'));
+    try {
+      cpSync(FIXTURE, work, { recursive: true });
+      mkdirSync(join(work, 'scripts'));
+      writeFileSync(join(work, 'scripts', 'tool.ts'), 'export function toolMain(argv: string[]): number { return argv.length; }\n');
+      expect(new RepoMapper(work).files()).not.toContain('scripts/tool.ts');
+      writeFileSync(join(work, 'contract.json'), JSON.stringify({ map: { include: ['scripts'], exclude: ['src/billing'] } }));
+      // a fresh dir has a fresh policy (the cache is per directory)
+      const dir2 = mkdtempSync(join(tmpdir(), 'mapper-policy-'));
+      cpSync(work, dir2, { recursive: true });
+      const files = new RepoMapper(dir2).files();
+      expect(files).toContain('scripts/tool.ts');
+      expect(files.some((f) => f.startsWith('src/billing/'))).toBe(false);
+      expect(readMapPolicy(dir2)).toEqual({ include: ['scripts'], exclude: ['src/billing'] });
+      expect(useMapPolicy(FIXTURE)).toEqual({ include: [], exclude: [] });
+      rmSync(dir2, { recursive: true, force: true });
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('watch primitives: refresh + dependents', () => {
   let work: string;
   let mapper: RepoMapper;
@@ -415,5 +453,34 @@ describe('size check', () => {
   it('RepoMapper refuses a repo over the limit before parsing it', () => {
     process.env.CONTRACT_MAPPER_MAX_FILES = '3';
     expect(() => new RepoMapper(FIXTURE)).toThrow(/has 6 source files, over the limit of 3/);
+  });
+});
+
+describe('JavaScript files with no exports (browser scripts and entry modules)', () => {
+  const maps = new RepoMapper(fixture('script-repo')).mapAll();
+
+  it('maps their top-level declarations; library modules and CommonJS keep the exports-only rule', () => {
+    expect(allSymbols(maps).map((s) => `${s.kind} ${s.id}  ${s.signature}`)).toEqual([
+      'const js/bootstrap.js#VERSION  const VERSION = "1.0"',
+      'function js/bootstrap.js#boot  boot()',
+      'function js/lib.js#formatCents  formatCents(cents)',
+      'function js/lib.js#total  total(items)',
+      'const js/page.js#cart  const cart',
+      'function js/page.js#renderTotal  renderTotal(items)',
+      'function js/page.js#checkTotals  checkTotals()',
+      'class js/page.js#Page  class Page',
+      'method js/page.js#Page.refresh  refresh()',
+    ]);
+  });
+
+  it('resolves edges from the entry module into the library it imports', () => {
+    expect(edgeList(maps)).toEqual([
+      'js/bootstrap.js#boot -> js/bootstrap.js#VERSION',
+      'js/page.js#Page.refresh -> js/page.js#checkTotals',
+      'js/page.js#checkTotals -> js/page.js#cart',
+      'js/page.js#checkTotals -> js/page.js#renderTotal',
+      'js/page.js#renderTotal -> js/lib.js#formatCents',
+      'js/page.js#renderTotal -> js/lib.js#total',
+    ]);
   });
 });

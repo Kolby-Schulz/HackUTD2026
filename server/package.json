@@ -8,7 +8,7 @@
     "./rules": "./src/rules.ts"
   },
   "scripts": {
-    "postinstall": "mkdir -p node_modules/.bin && ln -sf ../../../node_modules/.bin/tsc node_modules/.bin/tsc",
+    "postinstall": "node scripts/link-tsc.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "build": "spacetime build --module-path .",

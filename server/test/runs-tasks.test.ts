@@ -1,14 +1,14 @@
 // start_run, end_run, create_task, set_task_status (spec section 7).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { makeHarness, register, mod, all, type Harness } from './helpers';
+import { makeHarness, register, mod, all, type Harness, type Who, asOperator } from './helpers';
 
 function startRun(t: Harness, mode = 'with_contract', seed = 7) {
-  t.as('outsider', (ctx) => mod.start_run(ctx, { mode, seed }));
+  asOperator(t, (ctx) => mod.start_run(ctx, { mode, seed }));
   return all(t.db.run.iter()).at(-1)!;
 }
 
 function createTask(t: Harness, runId: bigint, agent_id = 'agent-a') {
-  t.as('outsider', (ctx) =>
+  asOperator(t, (ctx) =>
     mod.create_task(ctx, { title: 'Late fees', description: 'Add late fees', agent_id, run_id: runId }),
   );
   return all(t.db.task.iter()).at(-1)!;
@@ -62,7 +62,7 @@ describe('start_run / end_run', () => {
     t.advance(90);
 
     // Act
-    t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: run.id }));
+    asOperator(t, (ctx) => mod.end_run(ctx, { run_id: run.id }));
     const next = startRun(t, 'without_contract');
 
     // Assert
@@ -73,11 +73,11 @@ describe('start_run / end_run', () => {
   it('rejects ending an unknown or already-ended run', () => {
     // Arrange
     const run = startRun(t);
-    t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: run.id }));
+    asOperator(t, (ctx) => mod.end_run(ctx, { run_id: run.id }));
 
     // Act
-    const endTwice = () => t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: run.id }));
-    const endUnknown = () => t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: 999n }));
+    const endTwice = () => asOperator(t, (ctx) => mod.end_run(ctx, { run_id: run.id }));
+    const endUnknown = () => asOperator(t, (ctx) => mod.end_run(ctx, { run_id: 999n }));
 
     // Assert
     expect(endTwice).toThrow(/already ended/);
@@ -125,8 +125,8 @@ describe('create_task', () => {
 describe('set_task_status', () => {
   let t: Harness;
   let taskId: bigint;
-  const setStatus = (status: string, task_id = taskId) =>
-    t.as('outsider', (ctx) => mod.set_task_status(ctx, { task_id, status }));
+  const setStatus = (status: string, task_id = taskId, who: Who = 'worker-a') =>
+    t.as(who, (ctx) => mod.set_task_status(ctx, { task_id, status }));
 
   beforeEach(() => {
     t = makeHarness();
@@ -174,6 +174,22 @@ describe('set_task_status', () => {
     // Assert
     expect(act).toThrow(/invalid status change/);
     expect(t.db.task.id.find(taskId)!.status).toBe(from);
+  });
+
+  it('is refused from anyone but the task agent or the coordinator', () => {
+    // Arrange
+    register(t, 'coordinator');
+
+    // Act
+    const outsider = () => setStatus('in_progress', taskId, 'outsider');
+    const otherWorker = () => setStatus('in_progress', taskId, 'worker-b');
+
+    // Assert
+    expect(outsider).toThrow(/only agent-a or the coordinator/);
+    expect(otherWorker).toThrow(/only agent-a or the coordinator/);
+    expect(t.db.task.id.find(taskId)!.status).toBe('todo');
+    setStatus('in_progress', taskId, 'coordinator');
+    expect(t.db.task.id.find(taskId)!.status).toBe('in_progress');
   });
 
   it('rejects an unknown status value', () => {
@@ -237,15 +253,17 @@ describe('set_task_status', () => {
     expect(t.db.agent.id.find('agent-a')).toMatchObject({ status: 'idle', current_task_id: undefined });
   });
 
-  it('works for a task whose agent has not registered yet', () => {
+  it('a task whose agent has not registered yet can only be moved by the coordinator', () => {
     // Arrange
+    register(t, 'coordinator');
     const orphan = createTask(t, all(t.db.run.iter())[0].id, 'agent-z').id;
 
     // Act
-    const act = () => setStatus('in_progress', orphan);
+    const stranger = () => setStatus('in_progress', orphan, 'outsider');
 
     // Assert
-    expect(act).not.toThrow();
+    expect(stranger).toThrow(/only agent-z or the coordinator/);
+    setStatus('in_progress', orphan, 'coordinator');
     expect(t.db.task.id.find(orphan)!.status).toBe('in_progress');
   });
 });

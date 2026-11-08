@@ -95,7 +95,8 @@ export function people(agents: Rows<R.Agent>): Map<string, Person> {
   const map = new Map<string, Person>();
   const workers = agents.filter((a) => !SYSTEM_IDS.has(a.id)).slice().sort((a, b) => a.id.localeCompare(b.id));
   workers.forEach((a, i) => {
-    const tail = a.name.replace(/^agent\s+/i, '').trim();
+    // "Agent B", "agent-b" and "agent_b" are all B (not A); "agent-judge" is J
+    const tail = (a.name || a.id).replace(/^agent[\s_-]*/i, '').trim();
     map.set(a.id, { id: a.id, name: a.name || a.id, letter: (tail[0] || a.id[0] || '?').toUpperCase(), color: AGENT_COLORS[i % AGENT_COLORS.length] });
   });
   map.set('coordinator', { id: 'coordinator', name: 'Coordinator', letter: 'C', color: COORD_COLOR });
@@ -139,6 +140,8 @@ export interface CaseView {
   instructionsA?: string;
   instructionsB?: string;
   durationText?: string;
+  /** Resolved conflicts only: ms from detection until both agents were told (the last push), else until the decision. */
+  resolvedMs?: number;
   steps: Step[];
 }
 
@@ -174,9 +177,27 @@ export function cases(t: Tables, w: Window): CaseView[] {
         opened: rel(openedAt), openedAt, decidedAt,
         owner: d ? person(ppl, d.ownerAgent) : undefined, reason: d?.reason, instructionsA: d?.instructionsA, instructionsB: d?.instructionsB,
         durationText: decidedAt !== undefined && !open ? ((decidedAt - openedAt) / 1000).toFixed(1) + 's' : undefined,
+        resolvedMs: c.status === 'resolved' && decidedAt !== undefined ? Math.max(pushedAt ?? decidedAt, decidedAt) - openedAt : undefined,
         steps,
       };
     });
+}
+
+export interface ResolveTimes { n: number; avgMs: number; fastestMs: number; slowestMs: number }
+
+/** How fast conflicts get settled: detection to agents told, over the resolved ones. */
+export function resolveTimes(cs: CaseView[]): ResolveTimes | undefined {
+  const xs = cs.map((c) => c.resolvedMs).filter((x): x is number => x !== undefined);
+  if (!xs.length) return undefined;
+  return { n: xs.length, avgMs: sum(xs) / xs.length, fastestMs: Math.min(...xs), slowestMs: Math.max(...xs) };
+}
+
+/** 19.9s, or 1m 05s once it passes a minute. */
+export function fmtSecs(msv: number): string {
+  const s = msv / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const whole = Math.round(s);
+  return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, '0')}s`;
 }
 
 function statusLabel(s: string): string {
@@ -185,6 +206,23 @@ function statusLabel(s: string): string {
 }
 
 /* ---------------- agents ---------------- */
+
+/** Workers used to report the raw hostname while the daemon lowercases it (and drops `.local`), so compare loosely. */
+export function sameMachine(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const norm = (s: string) => s.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '');
+  return norm(a) === norm(b);
+}
+
+/**
+ * Who the chat composer addresses before the user picks anyone: the assistant on the paired laptop,
+ * else the first online agent on that laptop, else nobody. Never an agent on a teammate's laptop:
+ * the database is shared, so "the first agent online" is often someone else's.
+ */
+export function defaultRecipient(agents: readonly Pick<AgentCard, 'id' | 'machine' | 'offline'>[], machine: string | undefined, assistantUp: boolean): string {
+  if (assistantUp) return 'insync';
+  return agents.find((a) => !a.offline && sameMachine(a.machine, machine))?.id ?? '';
+}
 
 export interface AgentCard {
   id: string;
@@ -386,7 +424,7 @@ export function timeline(events: FeedEvent[], cs: CaseView[]): Entry[] {
 
 /* ---------------- code map ---------------- */
 
-export type NodeState = 'conflict' | 'changed' | 'claimed' | 'planned' | 'idle';
+export type NodeState = 'conflict' | 'removed' | 'changed' | 'claimed' | 'planned' | 'idle';
 
 export interface MapNode {
   id: string;
@@ -395,30 +433,97 @@ export interface MapNode {
   kind: string;
   version: number;
   owner?: Person;
+  /** Who is on this symbol: the claim holder, or every agent planning to create it. */
+  owners: Person[];
   state: NodeState;
   ghost: boolean;
+  /** An agent removed it; kept on the map (struck through) while recent, even after the mapper drops its row. */
+  removed: boolean;
+  /** An agent is working on it: claimed, in conflict, or touched within the idle limit. */
+  active: boolean;
+  /** Not active itself, but directly calls an active function (shown faded for context). */
+  context: boolean;
+  /** Active, but close to timing out: no agent has touched it for most of the idle limit. */
+  fading: boolean;
   col: number;
   row: number;
 }
 export interface MapEdge { id: string; source: string; target: string; hot: boolean }
 
-/** Symbols as nodes (callers left of their callees), planned creates as dashed ghosts. */
-export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; edges: MapEdge[] } {
+/** How long a function counts as worked on after the last agent activity on it. */
+export const MAP_IDLE_MS = 3 * 60_000;
+const FADE_MS = 30_000;
+
+/** Last time an agent touched each symbol (planned, claimed, changed, edited, conflicted on),
+ *  ignoring rows newer than `now` so a replay shows the map as it was. */
+export function symbolActivity(t: Tables, now: number): Map<string, number> {
+  const last = new Map<string, number>();
+  const touch = (id: string, at: number) => { if (at <= now && at > (last.get(id) ?? -Infinity)) last.set(id, at); };
+  const planAt = new Map(t.plans.map((p) => [p.id, ms(p.createdAt)]));
+  for (const i of t.planItems) { const at = planAt.get(i.planId); if (at !== undefined) touch(i.symbolId, at); }
+  for (const c of t.claims) touch(c.symbolId, ms(c.claimedAt));
+  for (const c of t.changes) touch(c.symbolId, ms(c.createdAt));
+  for (const e of t.fileEdits ?? []) for (const id of e.symbolIds) touch(id, ms(e.createdAt));
+  for (const c of t.conflicts) {
+    touch(c.symbolId, ms(c.createdAt));
+    if (c.resolvedAt) touch(c.symbolId, ms(c.resolvedAt));
+  }
+  return last;
+}
+
+/** Most callers of one active function shown as context, so a widely used helper does not
+ *  pull half the repo into the focused view. */
+const CONTEXT_CALLERS = 3;
+
+/** Every symbol as a node (callers left of their callees), planned creates as dashed ghosts.
+ *  A function is `active` while it is claimed or has an open conflict, and for `idleMs` after the
+ *  last agent activity on it; its direct callers are `context`. The code map focuses on those
+ *  and collapses the rest. */
+export function codeMap(t: Tables, w: Window, now: number, idleMs = MAP_IDLE_MS): { nodes: MapNode[]; edges: MapEdge[]; total: number; activeCount: number } {
   const ppl = people(t.agents);
   const ids = new Set(t.symbols.map((s) => s.id));
   const active = new Set(t.plans.filter((p) => p.active).map((p) => p.id));
-  const ghosts = new Map<string, string>(); // symbol id -> agent id
-  for (const i of t.planItems) if (i.intent === 'create' && active.has(i.planId) && !ids.has(i.symbolId)) ghosts.set(i.symbolId, i.agentId);
+  const ghosts = new Map<string, string[]>(); // symbol id -> agents planning to create it
+  for (const i of t.planItems) {
+    if (i.intent !== 'create' || !active.has(i.planId) || ids.has(i.symbolId)) continue;
+    const xs = ghosts.get(i.symbolId) ?? [];
+    if (!xs.includes(i.agentId)) xs.push(i.agentId);
+    ghosts.set(i.symbolId, xs);
+  }
 
   const hotSyms = new Set(t.conflicts.filter((c) => (c.status === 'open' || c.status === 'resolving') && inWin(w, ms(c.createdAt))).map((c) => c.symbolId));
-  const changed = new Set(t.changes.filter((c) => inWin(w, ms(c.createdAt))).map((c) => c.symbolId));
+  const winChanges = t.changes.filter((c) => inWin(w, ms(c.createdAt)));
+  const changed = new Set(winChanges.map((c) => c.symbolId));
+  // removed: the symbol's latest change in the window is a removal
+  const latest = new Map<string, (typeof winChanges)[number]>();
+  for (const c of winChanges) {
+    const cur = latest.get(c.symbolId);
+    if (!cur || ms(c.createdAt) > ms(cur.createdAt) || (ms(c.createdAt) === ms(cur.createdAt) && c.id > cur.id)) latest.set(c.symbolId, c);
+  }
+  const removed = new Set([...latest.values()].filter((c) => c.kind === 'removed').map((c) => c.symbolId));
   const claimBy = new Map<string, string>();
   for (const c of t.claims) if (ms(c.expiresAt) > now) claimBy.set(c.symbolId, c.agentId);
 
-  const all = [...ids, ...ghosts.keys()];
-  const edges = t.edges.filter((e) => (ids.has(e.callerId) || ghosts.has(e.callerId)) && (ids.has(e.calleeId) || ghosts.has(e.calleeId)));
+  // worked on: anything held or contested right now, or touched within idleMs
+  const lastAt = symbolActivity(t, now);
+  const idleOf = (id: string) => (claimBy.has(id) || hotSyms.has(id) ? 0 : now - (lastAt.get(id) ?? -Infinity));
+  // A removed function whose row the mapper already dropped stays on the map while it is recent,
+  // so the removal is visible instead of the box just vanishing.
+  const gone = [...removed].filter((id) => !ids.has(id) && idleOf(id) <= idleMs);
+  for (const id of gone) ghosts.delete(id);
+
+  const all = [...ids, ...gone, ...ghosts.keys()];
+  const shown = new Set(all);
+  const edges = t.edges.filter((e) => shown.has(e.callerId) && shown.has(e.calleeId));
   const callers = new Map<string, string[]>();
   for (const e of edges) callers.set(e.calleeId, [...(callers.get(e.calleeId) ?? []), e.callerId]);
+
+  const activeIds = new Set(all.filter((id) => idleOf(id) <= idleMs));
+  const contextIds = new Set<string>();
+  for (const id of activeIds) {
+    const cs = (callers.get(id) ?? []).filter((c) => !activeIds.has(c)).sort();
+    for (const c of cs.slice(0, CONTEXT_CALLERS)) contextIds.add(c);
+  }
 
   // column = longest chain of callers above a symbol
   const col = new Map<string, number>();
@@ -434,23 +539,43 @@ export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; 
   };
   all.forEach(depth);
 
-  const rows = new Map<number, number>();
+  // A call-depth level with many functions would make one very tall column, so each level wraps
+  // into extra columns after `maxRows`, keeping the whole map roughly screen-shaped.
+  const maxRows = Math.max(6, Math.ceil(1.4 * Math.sqrt(all.length)));
+  const perDepth = new Map<number, number>();
+  for (const id of all) perDepth.set(col.get(id)!, (perDepth.get(col.get(id)!) ?? 0) + 1);
+  const firstCol = new Map<number, number>();
+  let next = 0;
+  for (const d of [...perDepth.keys()].sort((a, b) => a - b)) {
+    firstCol.set(d, next);
+    next += Math.ceil(perDepth.get(d)! / maxRows);
+  }
+  const placed = new Map<number, number>(); // depth -> functions placed so far
+  const symById = new Map(t.symbols.map((x) => [x.id, x]));
   const sorted = all.slice().sort((a, b) => (col.get(a)! - col.get(b)!) || symbolFile(a).localeCompare(symbolFile(b)) || a.localeCompare(b));
   const nodes: MapNode[] = sorted.map((id) => {
-    const s = t.symbols.find((x) => x.id === id);
-    const c = col.get(id)!;
-    const r = rows.get(c) ?? 0;
-    rows.set(c, r + 1);
-    const ghost = !s;
-    const ownerId = claimBy.get(id) ?? (ghost ? ghosts.get(id) : undefined);
-    const state: NodeState = hotSyms.has(id) ? 'conflict' : changed.has(id) ? 'changed' : ghost ? 'planned' : claimBy.has(id) ? 'claimed' : 'idle';
+    const s = symById.get(id);
+    const d = col.get(id)!;
+    const i = placed.get(d) ?? 0;
+    placed.set(d, i + 1);
+    const c = firstCol.get(d)! + Math.floor(i / maxRows);
+    const r = i % maxRows;
+    const isRemoved = removed.has(id);
+    const ghost = !s && !isRemoved;
+    const ownerIds = claimBy.has(id) ? [claimBy.get(id)!] : ghost ? ghosts.get(id) ?? [] : [];
+    const ownerId = ownerIds[0];
+    const state: NodeState = hotSyms.has(id) ? 'conflict' : isRemoved ? 'removed' : changed.has(id) ? 'changed' : ghost ? 'planned' : claimBy.has(id) ? 'claimed' : 'idle';
     return {
       id, name: s?.name ?? symbolName(id), file: s?.file ?? symbolFile(id), kind: s?.kind ?? 'function', version: s?.version ?? 0,
-      owner: ownerId ? person(ppl, ownerId) : undefined, state, ghost, col: c, row: r,
+      owner: ownerId ? person(ppl, ownerId) : undefined, owners: ownerIds.map((x) => person(ppl, x)), state, ghost, removed: isRemoved, col: c, row: r,
+      active: activeIds.has(id), context: contextIds.has(id),
+      fading: activeIds.has(id) && idleOf(id) > idleMs - FADE_MS,
     };
   });
   return {
     nodes,
+    total: t.symbols.length,
+    activeCount: activeIds.size,
     edges: edges.map((e) => ({ id: String(e.id), source: e.callerId, target: e.calleeId, hot: hotSyms.has(e.calleeId) || hotSyms.has(e.callerId) })),
   };
 }
@@ -619,4 +744,106 @@ export function replayMarks(t: Tables, run: R.Run): { at: number; label: string 
     .filter((c) => ms(c.createdAt) >= start && ms(c.createdAt) <= end)
     .sort((a, b) => Number(a.id - b.id))
     .map((c) => ({ at: ms(c.createdAt) - start, label: `#${c.id} ${CONFLICT_KIND[c.kind]?.label ?? c.kind}` }));
+}
+
+/* ---------------- workbench (one-screen dashboard) ---------------- */
+
+export type HistoryTone = 'agent' | 'plan' | 'change' | 'conflict' | 'resolved';
+export interface HistoryItem { key: string; at: number; time: string; title: string; sub: string; tone: HistoryTone; color?: string }
+
+/** What happened to one symbol in this run, oldest first: plans, claim, changes, conflicts, rulings. */
+export function symbolHistory(t: Tables, w: Window, symbolId: string): HistoryItem[] {
+  const ppl = people(t.agents);
+  const rel = (x: number) => fmtClock(x - w.start);
+  const out: HistoryItem[] = [];
+  const INTENT: Record<string, string> = { modify: 'plans to change it', create: 'plans to create it', depend: 'depends on it' };
+  for (const i of t.planItems) {
+    if (i.symbolId !== symbolId) continue;
+    const p = t.plans.find((x) => x.id === i.planId);
+    if (!p || !inWin(w, ms(p.createdAt))) continue;
+    const who = person(ppl, i.agentId);
+    out.push({ key: 'plan' + i.id, at: ms(p.createdAt), time: rel(ms(p.createdAt)), title: `Planned by ${who.name}`, sub: INTENT[i.intent] ?? i.intent, tone: 'plan', color: who.color });
+  }
+  for (const c of t.claims) {
+    if (c.symbolId !== symbolId || !inWin(w, ms(c.claimedAt))) continue;
+    const who = person(ppl, c.agentId);
+    out.push({ key: 'claim', at: ms(c.claimedAt), time: rel(ms(c.claimedAt)), title: `Claimed by ${who.name}`, sub: `held until T+${fmtClock(ms(c.expiresAt) - w.start, false)}`, tone: 'agent', color: who.color });
+  }
+  for (const c of t.changes) {
+    if (c.symbolId !== symbolId || !inWin(w, ms(c.createdAt))) continue;
+    const title = c.kind === 'created' ? 'Created' : c.kind === 'removed' ? 'Removed' : `Changed (${c.kind})`;
+    out.push({ key: 'change' + c.id, at: ms(c.createdAt), time: rel(ms(c.createdAt)), title, sub: c.description || c.newSignature || `by ${person(ppl, c.agentId).name}`, tone: 'change' });
+  }
+  for (const c of t.conflicts) {
+    if (c.symbolId !== symbolId || !inWin(w, ms(c.createdAt))) continue;
+    const k = CONFLICT_KIND[c.kind] ?? { label: c.kind, rule: '' };
+    out.push({ key: 'conflict' + c.id, at: ms(c.createdAt), time: rel(ms(c.createdAt)), title: `Conflict #${c.id} opened`,
+      sub: `${k.label} between ${person(ppl, c.agentA).name} and ${person(ppl, c.agentB).name}`, tone: 'conflict' });
+    const d = t.decisions.find((x) => x.conflictId === c.id);
+    const doneAt = d ? ms(d.createdAt) : c.resolvedAt ? ms(c.resolvedAt) : undefined;
+    if (doneAt !== undefined && (c.status === 'resolved' || c.status === 'dismissed')) {
+      const secs = ((doneAt - ms(c.createdAt)) / 1000).toFixed(1);
+      out.push({ key: 'resolved' + c.id, at: doneAt, time: rel(doneAt), title: c.status === 'dismissed' ? `Dismissed in ${secs}s` : `Resolved in ${secs}s`,
+        sub: d ? `${person(ppl, d.ownerAgent).name} owns it` : 'no change needed', tone: 'resolved' });
+    }
+  }
+  const order: Record<HistoryTone, number> = { plan: 0, agent: 1, change: 2, conflict: 3, resolved: 4 };
+  return out.sort((x, y) => x.at - y.at || order[x.tone] - order[y.tone]);
+}
+
+export interface Savings {
+  /** Tokens this run has spent so far. */
+  current: number;
+  /** Tokens the newest finished without-Contract run had spent at the same point, if there is one. */
+  base?: number;
+  saved?: number;
+}
+
+/** Tokens saved so far: the baseline (newest finished without_contract run) at the same elapsed
+ *  time minus this run's spend. Measured, never estimated; no baseline means no number. */
+export function savingsNow(t: Tables, run: R.Run | undefined, now: number): Savings {
+  const w = runWindow(run, now);
+  const current = run ? sum(t.usage.filter((u) => u.runId === run.id).map(tokensOf)) : 0;
+  const baseRun = t.runs.filter((r) => r.mode === 'without_contract' && r.endedAt && r.id !== run?.id).sort((a, b) => Number(b.id - a.id))[0];
+  // nothing to compare until this run has spent something: an idle run would look like a saving
+  if (!run || run.mode === 'without_contract' || !baseRun || current === 0) return { current };
+  const elapsed = w.end - w.start;
+  const start = ms(baseRun.startedAt);
+  const base = sum(t.usage.filter((u) => u.runId === baseRun.id && ms(u.createdAt) - start <= elapsed).map(tokensOf));
+  return { current, base, saved: Math.max(0, base - current) };
+}
+
+export type Stage = 'Plan' | 'Code' | 'Merge';
+
+/** Where the run is: planning until the first code change or edit, coding until it ends. */
+export function runStage(t: Tables, run: R.Run | undefined, w: Window): Stage {
+  if (run?.endedAt) return 'Merge';
+  const coding = t.changes.some((c) => inWin(w, ms(c.createdAt))) || (t.fileEdits ?? []).some((e) => inWin(w, ms(e.createdAt)));
+  return coding ? 'Code' : 'Plan';
+}
+
+/** The symbol the coordinator is working on: the newest open or resolving conflict's symbol. */
+export function coordFocus(t: Tables, w: Window): { symbolId: string; conflict: string; resolving: boolean } | undefined {
+  const c = t.conflicts
+    .filter((x) => (x.status === 'open' || x.status === 'resolving') && inWin(w, ms(x.createdAt)))
+    .sort((a, b) => Number(b.id - a.id))[0];
+  return c ? { symbolId: c.symbolId, conflict: String(c.id), resolving: c.status === 'resolving' } : undefined;
+}
+
+/** Agents that have been called in this run: given a task in it, did anything in it (a plan,
+ *  claim, change, edit, token row), or are working / paused right now. Registered workers that
+ *  are just waiting stay out of the side bar until they get work. */
+export function calledAgents(t: Tables, run: R.Run | undefined, now: number): Set<string> {
+  const out = new Set<string>();
+  if (!run) return out;
+  const w = runWindow(run, now);
+  for (const x of t.tasks) if (x.runId === run.id && x.agentId) out.add(x.agentId);
+  for (const u of t.usage) if (u.runId === run.id) out.add(u.agentId);
+  for (const p of t.plans) if (inWin(w, ms(p.createdAt))) out.add(p.agentId);
+  for (const c of t.claims) if (inWin(w, ms(c.claimedAt))) out.add(c.agentId);
+  for (const c of t.changes) if (inWin(w, ms(c.createdAt))) out.add(c.agentId);
+  for (const e of t.fileEdits ?? []) if (inWin(w, ms(e.createdAt))) out.add(e.agentId);
+  if (w.live) for (const a of t.agents) if (a.status === 'working' || a.status === 'paused') out.add(a.id);
+  for (const id of SYSTEM_IDS) out.delete(id);
+  return out;
 }

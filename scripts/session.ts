@@ -7,12 +7,14 @@
 //   Each worker pushes agent/<id> to origin when it finishes.
 //
 // npm run session -- merge [--agents agent-a,agent-b] [--integration] [--no-fix]
-//                          [--fixer <id>] [--fix-passes 2] [--push]
+//                          [--fixer <id>] [--fix-passes 2] [--push] [--land]
 //   On either laptop, once every agent is done: fetches origin/agent/<id> for each agent
 //   with a task in the open run, merges them onto origin/main in .worktrees/merge-<run>,
 //   runs the checks, lets one local agent fix the merged code if they fail, then ends the run.
 //   --integration adds demo-repo's integration test, which only passes for the two canned
 //   tasks (agents/worker/src/tasks.ts); free-form prompts get unit tests, typecheck, check-dupes.
+//   --land pushes the merge commit to the base branch on origin (e.g. main) when every check
+//   passes; otherwise the merged code only stays on demo/merge-<run>.
 //
 // Any repo (issue #18): add --repo <path|git URL> (or set CONTRACT_TARGET) to start, merge,
 // the workers and reset. start maps that repo; merge runs its contract.json checks (or
@@ -20,12 +22,12 @@
 //   [{ "agent": "agent-a", "task": "Add a dark mode toggle" }, ...]   ("title" optional)
 //
 // Needs `npm run coordinator` running on one laptop while the workers run.
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { resolveTarget, subdirPrefix, type DbConnection } from '@contract/client';
+import { resolveTarget, runInstall, stageAll, subdirPrefix, worktreeDir, type DbConnection } from '@contract/client';
 import { conflictMarkers, merge, mergeFix, run, runChecks, warnIfNoCoordinator } from './merge.ts';
-import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, waitFor, WORKTREES } from './lib.ts';
+import { adminConnect, fastForwardToBase, git, log, REPO, resetServerState, savedToken, TSX, TSX_CLI, waitFor } from './lib.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -37,6 +39,7 @@ const { values, positionals } = parseArgs({
     fixer: { type: 'string' },
     'fix-passes': { type: 'string', default: '2' },
     push: { type: 'boolean', default: false },
+    land: { type: 'boolean', default: false },
     repo: { type: 'string' },
     tasks: { type: 'string' },
   },
@@ -69,6 +72,11 @@ async function start() {
     if (target.base.startsWith('origin/')) {
       try {
         git(['fetch', 'origin', target.base.slice('origin/'.length)], target.gitRoot);
+        // A merge that landed since the last session (Merge and check's --land) is on origin only:
+        // fast-forward the checkout so the code map shows it.
+        const ff = fastForwardToBase(target.gitRoot, target.base);
+        if (ff.status === 'updated') log('session', `updated ${target.label} to ${target.base}`);
+        else if (ff.status === 'skipped') log('session', `not updating ${target.label} to ${target.base}: ${ff.reason}`);
         if (git(['diff', '--name-only', target.base, '--', path, `:!${subdirPrefix(target)}package-lock.json`], target.gitRoot)) {
           log('session', `WARNING: local ${target.label} differs from ${target.base}; the code map will not match what the workers start from`);
         }
@@ -76,7 +84,7 @@ async function start() {
         log('session', `WARNING: could not fetch ${target.base} to compare ${target.label}`);
       }
     }
-    const r = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts'), '--repo', target.dir], REPO, 5 * 60_000);
+    const r = await run('mapper', TSX, [TSX_CLI, join(REPO, 'mapper/src/cli.ts'), '--repo', target.dir], REPO, 5 * 60_000);
     if (r.exitCode !== 0) throw new Error('mapper failed; is the server reachable?');
   }
 
@@ -123,13 +131,15 @@ async function mergeSession() {
 
   // 2. Merge onto the base in a fresh worktree.
   const mergeBranch = `demo/merge-${runRow.id}`;
-  const mergeDir = join(WORKTREES, `merge-${runRow.id}`);
+  const mergeDir = worktreeDir(REPO, target, `merge-${runRow.id}`);
   if (existsSync(mergeDir)) throw new Error(`${mergeDir} already exists; \`npm run reset\` removes it`);
+  mkdirSync(dirname(mergeDir), { recursive: true });
   git(['worktree', 'add', '-B', mergeBranch, mergeDir, base], root);
   const conflicts: string[] = [];
   for (const b of branches) conflicts.push(...merge(mergeDir, b, subdirPrefix(target)));
   if (conflicts.length) log('session', `git conflicts in ${conflicts.join(', ')} (left with markers for the fix pass)`);
   const demoDir = target.subdir ? join(mergeDir, target.subdir) : mergeDir;
+  if (target.install.length) runInstall(demoDir, target, (m) => log('session', m)); // so the checks can run
 
   // 3. Checks: the target's own (contract.json / npm test); the demo can add its integration test.
   const checkList = [...target.checks, ...(target.demo && values.integration ? [{ name: 'integration test', cmd: 'npm run --silent test:integration' }] : [])];
@@ -159,17 +169,39 @@ async function mergeSession() {
       }
     }
   }
-  git(['add', '-A'], mergeDir);
+  stageAll(mergeDir); // never installed dependencies
   git(['commit', '-m', `merge run ${runRow.id} (session: ${agents.join(', ')})`, '--allow-empty', '--no-verify'], mergeDir);
   if (values.push) git(['push', '--force', '-u', 'origin', mergeBranch], mergeDir);
+  const landed = values.land && land(mergeDir, base, mergeBranch, green());
 
   // 5. Close the run.
   await conn.reducers.endRun({ runId: runRow.id });
   conn.disconnect();
   log('session', `run ${runRow.id} ended: ${green() ? 'ALL CHECKS PASS' : 'checks still failing'}` +
     ` (${final.tests.passed} tests passed, ${final.tests.failed} failed, ${final.dateFormatters} date formatter(s),` +
-    ` ${passes} fix pass(es)); merged code on branch ${mergeBranch}${values.push ? ' (pushed)' : ''}`);
+    ` ${passes} fix pass(es)); merged code on branch ${mergeBranch}${values.push ? ' (pushed)' : ''}${landed ? `, landed on ${base}` : ''}`);
   if (!green()) process.exit(1);
+}
+
+/** --land: fast-forward the base branch on origin to the merge commit, only when the checks pass. */
+function land(mergeDir: string, base: string, mergeBranch: string, green: boolean): boolean {
+  if (!green) {
+    log('session', `not landing: checks fail; the merged code stays on ${mergeBranch}`);
+    return false;
+  }
+  if (!base.startsWith('origin/')) {
+    log('session', `not landing: ${target.label} has no origin branch to push to; the merged code stays on ${mergeBranch}`);
+    return false;
+  }
+  try {
+    // No --force: if someone pushed to the base since the fetch, this fails instead of dropping their commits.
+    git(['push', 'origin', `HEAD:refs/heads/${base.slice('origin/'.length)}`], mergeDir);
+    log('session', `landed on ${base}`);
+    return true;
+  } catch (e) {
+    log('session', `could not push to ${base} (did it move since the merge started?): ${e instanceof Error ? e.message : String(e)}; the merged code stays on ${mergeBranch}`);
+    return false;
+  }
 }
 
 function openRun(conn: DbConnection) {

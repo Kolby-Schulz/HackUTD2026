@@ -12,7 +12,9 @@
 // - report_change accepts changes on unclaimed symbols (REQUIRE_CLAIM_FOR_CHANGE) so
 //   contract-hook's auto-detected changes still run Rule 1. See "Decisions needed".
 // - register_agent lets an id move to a new identity only when the old link has gone
-//   stale (no heartbeat for 60 s), so restarted demos don't get locked out.
+//   stale (no heartbeat for 60 s), so restarted demos don't get locked out. The fixed
+//   `coordinator` id follows the `coordinator` service lock instead: whoever may hold the
+//   lock may own the row, so a second laptop takes over as soon as the first lets go.
 
 import { schema, table, t, SenderError, type InferSchema, type ReducerCtx } from 'spacetimedb/server';
 import { ScheduleAt, Timestamp } from 'spacetimedb';
@@ -23,6 +25,8 @@ import { duplicateReason, nameOf } from './rules';
 // ---------------------------------------------------------------------------------
 
 const COORDINATOR_ID = 'coordinator';
+/** The service lock (claim_service) the mapper holds while it writes the code map. */
+const MAPPER_SERVICE = 'mapper';
 const FILE_EDITS_PER_AGENT = 50;
 const SERVICE_TIMEOUT_SECS = 30;
 const MAX_DIFF_CHARS = 20_000;
@@ -32,6 +36,8 @@ const DEFAULT_CLAIM_TTL_SECS = 300;
 const HEARTBEAT_TIMEOUT_SECS = 60;
 const EXPIRE_EVERY_MICROS = 30_000_000n; // 30 s
 const REQUIRE_CLAIM_FOR_CHANGE = false;
+/** Rule 1 follows callers this many hops up from a changed symbol (1 = direct callers only). */
+const RULE1_MAX_HOPS = 3;
 
 const TASK_STATUSES = ['todo', 'in_progress', 'paused', 'done', 'discarded'] as const;
 const SYMBOL_KINDS = ['function', 'class', 'method', 'const'] as const;
@@ -286,6 +292,94 @@ const tokenSaving = table(
   },
 );
 
+// Laptop daemons (scripts/control.ts): each laptop's control daemon registers a machine row,
+// paired dashboards queue commands for it, and it reports its processes, logs and chat back.
+// Nothing listens on a port, so the hosted dashboard can drive any paired laptop.
+const machine = table(
+  { name: 'machine', public: true },
+  {
+    id: t.string().primaryKey(), // the laptop's name, e.g. "ethan-mbp"
+    identity: t.identity(), // the daemon; only it may write this machine's state
+    repo: t.string(), // CONTRACT_TARGET ('' = built-in demo-repo)
+    repo_label: t.string(),
+    info_json: t.string(), // RepoInfo as JSON ('' = unknown)
+    needs_session: t.bool(),
+    chat_busy: t.bool(),
+    started_at: t.timestamp(),
+    heartbeat_at: t.timestamp(),
+  },
+);
+
+// Who may send commands to a machine. Only the machine's daemon adds rows (after pairing).
+const machineAccess = table(
+  { name: 'machine_access', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    identity: t.identity(),
+    label: t.string(),
+    added_at: t.timestamp(),
+  },
+);
+
+// Commands for a daemon. Dashboards insert them; the daemon runs them and marks them done.
+const machineCommand = table(
+  { name: 'machine_command', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    sender: t.identity(),
+    action: t.string(), // MachineAction
+    args_json: t.string(),
+    status: t.string(), // 'pending' | 'done' | 'failed'
+    error: t.string(),
+    created_at: t.timestamp(),
+  },
+);
+
+// One row per process a daemon started (key = "<machine_id>/<proc key>"), log = last lines.
+const machineProcess = table(
+  { name: 'machine_process', public: true },
+  {
+    key: t.string().primaryKey(),
+    machine_id: t.string().index('btree'),
+    proc_key: t.string(),
+    label: t.string(),
+    long: t.bool(),
+    status: t.string(), // 'running' | 'exited' | 'stopped'
+    code: t.option(t.i32()),
+    started_at_ms: t.f64(),
+    ended_at_ms: t.option(t.f64()),
+    log: t.string(), // newline-joined tail
+  },
+);
+
+// The daemon's chat assistant transcript, mirrored for every viewer.
+const machineChat = table(
+  { name: 'machine_chat', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    role: t.string(), // 'user' | 'assistant' | 'event'
+    text: t.string(),
+    at_ms: t.f64(),
+  },
+);
+
+// A dashboard asking to pair with a machine: proof = sha256("<code>:<its identity hex>"), where
+// the code is the one the daemon printed. The daemon checks it, grants access, and deletes the row.
+// The code itself never reaches the database, so watching this table doesn't help anyone pair.
+const machinePairRequest = table(
+  { name: 'machine_pair_request', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    identity: t.identity(),
+    proof: t.string(),
+    created_at: t.timestamp(),
+  },
+);
+
 // Drives the scheduled expire_claims reducer (every 30 s). Private: nobody subscribes.
 const expireClaimsSchedule = table(
   { name: 'expire_claims_schedule' },
@@ -314,6 +408,12 @@ const spacetimedb = schema({
   expireClaimsSchedule,
   fileEdit,
   service,
+  machine,
+  machineAccess,
+  machineCommand,
+  machineProcess,
+  machineChat,
+  machinePairRequest,
 });
 export default spacetimedb;
 
@@ -378,6 +478,48 @@ function requireCoordinator(ctx: Ctx): void {
   }
 }
 
+/**
+ * An operator: a caller that is already known to the database in some way. The identity of
+ * a registered agent (any id), of a laptop's control daemon (`machine`), or of a dashboard
+ * paired with one (`machine_access`). The scripts in scripts/lib.ts connect as this laptop's
+ * machine (same saved token as `npm run control`), so run bookkeeping needs no extra setup,
+ * while a connection that only knows the public database name can't reset or open runs.
+ */
+function requireOperator(ctx: Ctx): void {
+  for (const a of ctx.db.agent.iter()) if (a.identity.equals(ctx.sender)) return;
+  for (const m of ctx.db.machine.iter()) if (m.identity.equals(ctx.sender)) return;
+  for (const a of ctx.db.machineAccess.iter()) if (a.identity.equals(ctx.sender)) return;
+  throw new SenderError('only an operator can do this: a registered agent, a laptop running npm run control, or a dashboard paired with one');
+}
+
+/** The caller must hold the `mapper` service lock (claim_service), as the mapper CLI does. */
+function requireMapper(ctx: Ctx): void {
+  const row = ctx.db.service.name.find(MAPPER_SERVICE);
+  if (!row || !row.identity.equals(ctx.sender)) {
+    throw new SenderError('only the mapper can write the code map (hold the mapper service lock first)');
+  }
+}
+
+/** The caller must be the identity of some registered agent (any id). */
+function requireRegistered(ctx: Ctx): void {
+  for (const a of ctx.db.agent.iter()) if (a.identity.equals(ctx.sender)) return;
+  throw new SenderError('only a registered agent can do this');
+}
+
+/** Working or paused, with a heartbeat inside HEARTBEAT_TIMEOUT_SECS: a worker that is really running. */
+function isLiveWorker(ctx: Ctx, a: { status: string; last_heartbeat: Timestamp }): boolean {
+  if (a.status !== 'working' && a.status !== 'paused') return false;
+  return micros(ctx.timestamp) - micros(a.last_heartbeat) < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n;
+}
+
+/** The `service` row for `name` if another identity holds it with a heartbeat inside SERVICE_TIMEOUT_SECS. */
+function liveServiceHeldByOther(ctx: Ctx, name: string) {
+  const row = ctx.db.service.name.find(name);
+  if (!row || row.identity.equals(ctx.sender)) return undefined;
+  const stale = micros(ctx.timestamp) - micros(row.heartbeat_at) > BigInt(SERVICE_TIMEOUT_SECS) * 1_000_000n;
+  return stale ? undefined : row;
+}
+
 function setAgentStatus(ctx: Ctx, agentId: string, status: string): void {
   const row = ctx.db.agent.id.find(agentId);
   if (row && row.status !== status) ctx.db.agent.id.update({ ...row, status });
@@ -431,6 +573,30 @@ function sendInstruction(ctx: Ctx, agentId: string, text: string, conflictId?: b
 }
 
 /** Active plan items on symbolId, from any agent. */
+/**
+ * Symbols that reach `symbolId` through calls, at most `maxHops` callers up, nearest first.
+ * `chain` runs from the caller down to (not including) `symbolId`. Cycles are visited once.
+ */
+function callersUpTo(ctx: Ctx, symbolId: string, maxHops: number) {
+  const out: { id: string; chain: string[] }[] = [];
+  const seen = new Set([symbolId]);
+  let frontier = [{ id: symbolId, chain: [] as string[] }];
+  for (let hop = 0; hop < maxHops && frontier.length; hop++) {
+    const next: typeof frontier = [];
+    for (const f of frontier) {
+      const callers = [...ctx.db.symbolEdge.callee_id.filter(f.id)].map((e) => e.caller_id).sort();
+      for (const c of callers) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        next.push({ id: c, chain: [c, ...f.chain] });
+      }
+    }
+    out.push(...next);
+    frontier = next;
+  }
+  return out;
+}
+
 function activePlanItemsOn(ctx: Ctx, symbolId: string) {
   const items = [];
   for (const item of ctx.db.planItem.symbol_id.filter(symbolId)) {
@@ -580,9 +746,24 @@ export const register_agent = spacetimedb.reducer(
       return;
     }
     if (!existing.identity.equals(ctx.sender)) {
-      const silentFor = micros(ctx.timestamp) - micros(existing.last_heartbeat);
-      if (silentFor < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n) {
-        throw new SenderError(`agent id '${id}' is already linked to another identity`);
+      if (id === COORDINATOR_ID) {
+        // The coordinator row belongs to whoever holds (or may take) the coordinator service
+        // lock, so a standby on another laptop takes over the moment the lock is released.
+        const lock = liveServiceHeldByOther(ctx, COORDINATOR_ID);
+        if (lock) {
+          throw new SenderError(
+            `coordinator is already running on ${lock.machine}; stop it there first (or wait ${SERVICE_TIMEOUT_SECS} s after it crashed)`,
+          );
+        }
+      } else {
+        const silentFor = micros(ctx.timestamp) - micros(existing.last_heartbeat);
+        if (silentFor < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n) {
+          const secs = silentFor / 1_000_000n;
+          throw new SenderError(
+            `agent id '${id}' is already linked to another identity (registered from ${existing.machine}, heartbeat ${secs} s ago); ` +
+              `use a different id on this laptop, or wait ${HEARTBEAT_TIMEOUT_SECS} s after it stops`,
+          );
+        }
       }
     }
     ctx.db.agent.id.update({
@@ -604,6 +785,7 @@ export const heartbeat = spacetimedb.reducer({ agent_id: t.string() }, (ctx, { a
 });
 
 export const start_run = spacetimedb.reducer({ mode: t.string(), seed: t.u32() }, (ctx, { mode, seed }) => {
+  requireOperator(ctx);
   oneOf(mode, RUN_MODES, 'run mode');
   for (const r of ctx.db.run.iter()) {
     if (r.ended_at === undefined) throw new SenderError(`run ${r.id} is already open`);
@@ -612,10 +794,38 @@ export const start_run = spacetimedb.reducer({ mode: t.string(), seed: t.u32() }
 });
 
 export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }) => {
+  requireOperator(ctx);
   const r = ctx.db.run.id.find(run_id);
   if (!r) throw new SenderError(`unknown run ${run_id}`);
   if (r.ended_at !== undefined) throw new SenderError(`run ${run_id} already ended`);
   ctx.db.run.id.update({ ...r, ended_at: ctx.timestamp });
+});
+
+/**
+ * Takes back what an ended run produced that never reached a merge: its file_edit diffs, its
+ * reported changes, and the conflicts they caused (with their decisions and instructions), so the
+ * Changes tab, "Conflicts caught" and "Merge failures avoided" stop counting them. `npm run reset`
+ * calls it for each run it has to end itself: a merge always ends its run first, so those runs
+ * were never merged and their worktrees are gone. Merged runs keep everything. Token usage, tasks
+ * and the run row stay (those tokens were really spent). Refused while the run is open.
+ */
+export const discard_unmerged_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }) => {
+  requireOperator(ctx);
+  const r = ctx.db.run.id.find(run_id);
+  if (!r) throw new SenderError(`unknown run ${run_id}`);
+  if (r.ended_at === undefined) throw new SenderError(`run ${run_id} is still open; end it first`);
+  const from = r.started_at.microsSinceUnixEpoch, to = r.ended_at.microsSinceUnixEpoch;
+  const inRun = (ts: { microsSinceUnixEpoch: bigint }) => ts.microsSinceUnixEpoch >= from && ts.microsSinceUnixEpoch <= to;
+  for (const e of [...ctx.db.fileEdit.iter()]) if (inRun(e.created_at)) ctx.db.fileEdit.id.delete(e.id);
+  for (const c of [...ctx.db.change.iter()]) if (inRun(c.created_at)) ctx.db.change.id.delete(c.id);
+  const gone = new Set<bigint>();
+  for (const c of [...ctx.db.conflict.iter()]) {
+    if (!inRun(c.created_at)) continue;
+    gone.add(c.id);
+    ctx.db.conflict.id.delete(c.id);
+  }
+  for (const d of [...ctx.db.decision.iter()]) if (gone.has(d.conflict_id)) ctx.db.decision.id.delete(d.id);
+  for (const i of [...ctx.db.instruction.iter()]) if (i.conflict_id !== undefined && gone.has(i.conflict_id)) ctx.db.instruction.id.delete(i.id);
 });
 
 /**
@@ -624,11 +834,19 @@ export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }
  * otherwise survive, since upsert_symbols keeps stored signature text while the hash matches),
  * plans, claims, and undelivered instructions. Live conflicts are dismissed and agents set idle.
  * History the dashboard shows per run (change, conflict, decision, token rows) is kept, as is
- * the summary cache (keyed by content hash, so it stays correct). Refused while a run is open.
+ * the summary cache (keyed by content hash, so it stays correct). Refused while a run is open,
+ * and while any worker is still running (working or paused with a fresh heartbeat): the database
+ * is shared, and a reset under a live worker would strip its plan and claims mid-task.
+ * Operators only (requireOperator): the database name is public.
  */
 export const reset_demo_state = spacetimedb.reducer({}, (ctx) => {
+  requireOperator(ctx);
   for (const r of ctx.db.run.iter()) {
     if (r.ended_at === undefined) throw new SenderError(`run ${r.id} is still open; end it first`);
+  }
+  const live = [...ctx.db.agent.iter()].filter((a) => isLiveWorker(ctx, a)).map((a) => a.id);
+  if (live.length) {
+    throw new SenderError(`${live.join(', ')} still running (heartbeat under ${HEARTBEAT_TIMEOUT_SECS} s ago); stop them first`);
   }
   for (const row of [...ctx.db.symbolEdge.iter()]) ctx.db.symbolEdge.id.delete(row.id);
   for (const row of [...ctx.db.symbol.iter()]) ctx.db.symbol.id.delete(row.id);
@@ -657,6 +875,7 @@ export const reset_demo_state = spacetimedb.reducer({}, (ctx) => {
 export const upsert_symbols = spacetimedb.reducer(
   { file: t.string(), symbols: t.array(SymbolInput), edges: t.array(EdgeInput) },
   (ctx, { file, symbols, edges }) => {
+    requireMapper(ctx);
     const oldById = new Map([...ctx.db.symbol.file.filter(file)].map((s) => [s.id, s]));
     const newIds = new Set(symbols.map((s) => s.id));
 
@@ -704,6 +923,7 @@ export const upsert_symbols = spacetimedb.reducer(
 export const create_task = spacetimedb.reducer(
   { title: t.string(), description: t.string(), agent_id: t.string(), run_id: t.u64() },
   (ctx, { title, description, agent_id, run_id }) => {
+    requireOperator(ctx);
     if (!ctx.db.run.id.find(run_id)) throw new SenderError(`unknown run ${run_id}`);
     ctx.db.task.insert({ id: 0n, title, description, agent_id, status: 'todo', attempt: 1, run_id });
   },
@@ -715,6 +935,12 @@ export const set_task_status = spacetimedb.reducer(
     oneOf(status, TASK_STATUSES, 'task status');
     const row = ctx.db.task.id.find(task_id);
     if (!row) throw new SenderError(`unknown task ${task_id}`);
+    // Only the task's agent (the worker running it) or the coordinator may move a task.
+    const a = ctx.db.agent.id.find(row.agent_id);
+    const coord = ctx.db.agent.id.find(COORDINATOR_ID);
+    if (!(a && a.identity.equals(ctx.sender)) && !(coord && coord.identity.equals(ctx.sender))) {
+      throw new SenderError(`only ${row.agent_id} or the coordinator can change task ${task_id}`);
+    }
     if (row.status === status) return;
     if (!TASK_TRANSITIONS[row.status]?.includes(status)) {
       throw new SenderError(`invalid status change ${row.status} -> ${status}`);
@@ -722,7 +948,6 @@ export const set_task_status = spacetimedb.reducer(
     ctx.db.task.id.update({ ...row, status });
 
     // Keep the assigned agent's row in step so the dashboard reads one place.
-    const a = ctx.db.agent.id.find(row.agent_id);
     if (!a) return;
     if (status === 'in_progress') {
       ctx.db.agent.id.update({ ...a, status: 'working', current_task_id: task_id });
@@ -871,19 +1096,20 @@ export const report_change = spacetimedb.reducer(
     }
 
     // Rule 1: who is affected? (a) active plans that depend on S;
-    // (b) active plans that modify, create or depend on a symbol that calls S (one level:
-    // depending on computeTotal means relying on what calculateFee returns through it).
+    // (b) active plans that modify, create or depend on a symbol that reaches S through calls,
+    // up to RULE1_MAX_HOPS callers up (depending on checkout means relying on what
+    // calculateFee returns through computeTotal). Breadth-first, so the nearest path wins.
     const affected = new Map<string, string>(); // agent id -> why
     for (const item of activePlanItemsOn(ctx, symbol_id)) {
       if (item.agent_id !== agent_id && item.intent === 'depend') {
         affected.set(item.agent_id, `its plan depends on ${symbol_id}`);
       }
     }
-    for (const edge of ctx.db.symbolEdge.callee_id.filter(symbol_id)) {
-      for (const item of activePlanItemsOn(ctx, edge.caller_id)) {
+    for (const { id: callerId, chain } of callersUpTo(ctx, symbol_id, RULE1_MAX_HOPS)) {
+      for (const item of activePlanItemsOn(ctx, callerId)) {
         if (item.agent_id !== agent_id && !affected.has(item.agent_id)) {
           const verb = item.intent === 'depend' ? 'depends on' : 'changes';
-          affected.set(item.agent_id, `its plan ${verb} ${edge.caller_id}, which calls ${symbol_id}`);
+          affected.set(item.agent_id, `its plan ${verb} ${chain.map((id) => `${id}, which calls `).join('')}${symbol_id}`);
         }
       }
     }
@@ -892,7 +1118,9 @@ export const report_change = spacetimedb.reducer(
       const details = `${agent_id} reported a ${kind} change to ${symbol_id} (${description}); ${other} is affected because ${why}.`;
       const c = openConflict(ctx, 'broken_dependency', symbol_id, agent_id, other, details);
       if (!c) continue; // already an open conflict for this pair
-      setAgentStatus(ctx, other, 'paused');
+      // A finished agent can't pause: it keeps 'done' (the conflict still
+      // opens and the coordinator still rules) instead of looking live to reset_demo_state.
+      if (ctx.db.agent.id.find(other)?.status !== 'done') setAgentStatus(ctx, other, 'paused');
       sendInstruction(ctx, other, `${symbol_id} was changed by ${agent_id}. Pause and wait for the coordinator.`, c.id);
     }
   },
@@ -1085,6 +1313,7 @@ export const log_tokens = spacetimedb.reducer(
 export const mark_attempt_wasted = spacetimedb.reducer(
   { task_id: t.u64(), attempt: t.u32() },
   (ctx, { task_id, attempt }) => {
+    requireOperator(ctx);
     for (const row of [...ctx.db.tokenUsage.iter()]) {
       if (row.task_id === task_id && row.attempt === attempt && !row.wasted) {
         ctx.db.tokenUsage.id.update({ ...row, wasted: true });
@@ -1098,6 +1327,7 @@ export const mark_attempt_wasted = spacetimedb.reducer(
 export const log_saving = spacetimedb.reducer(
   { run_id: t.u64(), agent_id: t.string(), kind: t.string(), tokens_avoided_est: t.u32(), note: t.string() },
   (ctx, args) => {
+    requireAgent(ctx, args.agent_id);
     oneOf(args.kind, SAVING_KINDS, 'saving kind');
     ctx.db.tokenSaving.insert({ id: 0n, ...args, created_at: ctx.timestamp });
   },
@@ -1106,6 +1336,7 @@ export const log_saving = spacetimedb.reducer(
 export const cache_summary = spacetimedb.reducer(
   { key: t.string(), summary: t.string(), summary_tokens: t.u32() },
   (ctx, { key, summary, summary_tokens }) => {
+    requireRegistered(ctx);
     const old = ctx.db.summaryCache.key.find(key);
     if (old) ctx.db.summaryCache.key.update({ ...old, summary, summary_tokens });
     else ctx.db.summaryCache.insert({ key, summary, summary_tokens, hits: 0 });
@@ -1113,6 +1344,7 @@ export const cache_summary = spacetimedb.reducer(
 );
 
 export const record_cache_hit = spacetimedb.reducer({ key: t.string() }, (ctx, { key }) => {
+  requireRegistered(ctx);
   const old = ctx.db.summaryCache.key.find(key);
   if (old) ctx.db.summaryCache.key.update({ ...old, hits: old.hits + 1 });
 });
@@ -1136,5 +1368,183 @@ export const expire_claims = spacetimedb.reducer(
         ctx.db.agent.id.update({ ...a, status: 'idle' });
       }
     }
+  },
+);
+
+// ---------------------------------------------------------------------------------
+// Laptop daemons (scripts/control.ts)
+// ---------------------------------------------------------------------------------
+
+const MACHINE_ACTIONS = ['coordinator', 'session-start', 'session-merge', 'worker', 'judge', 'reset', 'repo', 'stop', 'forget', 'chat'] as const;
+const MACHINE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const MAX_COMMAND_ARGS = 8_000;
+const MAX_PENDING_COMMANDS = 20;
+const COMMANDS_KEPT = 50;
+const CHAT_KEPT = 200;
+const MAX_PROCESS_LOG = 16_000;
+const MAX_CHAT_TEXT = 8_000;
+
+/** The machine row, which must belong to the caller (its daemon). */
+function requireMachine(ctx: Ctx, machineId: string) {
+  const row = ctx.db.machine.id.find(machineId);
+  if (!row) throw new SenderError(`unknown machine '${machineId}'`);
+  if (!row.identity.equals(ctx.sender)) throw new SenderError(`machine '${machineId}' belongs to another daemon`);
+  return row;
+}
+
+function hasMachineAccess(ctx: Ctx, machineId: string): boolean {
+  for (const a of ctx.db.machineAccess.machine_id.filter(machineId)) if (a.identity.equals(ctx.sender)) return true;
+  return false;
+}
+
+/**
+ * A daemon claims its machine id. The same identity re-registers freely (restart); another
+ * identity can take the id only after HEARTBEAT_TIMEOUT_SECS of silence, and the takeover
+ * drops every pairing, queued command and process row, so old dashboards can't drive the
+ * new daemon and the new daemon never sees the old one's commands.
+ */
+export const register_machine = spacetimedb.reducer({ id: t.string() }, (ctx, { id }) => {
+  if (!MACHINE_ID.test(id)) throw new SenderError('machine id: lowercase letters, digits, dots, dashes and underscores');
+  const existing = ctx.db.machine.id.find(id);
+  const fresh = { id, identity: ctx.sender, repo: '', repo_label: 'demo-repo', info_json: '', needs_session: false, chat_busy: false, started_at: ctx.timestamp, heartbeat_at: ctx.timestamp };
+  if (!existing) {
+    ctx.db.machine.insert(fresh);
+    return;
+  }
+  if (existing.identity.equals(ctx.sender)) {
+    ctx.db.machine.id.update({ ...existing, started_at: ctx.timestamp, heartbeat_at: ctx.timestamp, chat_busy: false });
+    return;
+  }
+  if (micros(ctx.timestamp) - micros(existing.heartbeat_at) < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n) {
+    throw new SenderError(`machine '${id}' is online with another daemon; stop it first (or wait ${HEARTBEAT_TIMEOUT_SECS} s)`);
+  }
+  for (const a of [...ctx.db.machineAccess.machine_id.filter(id)]) ctx.db.machineAccess.id.delete(a.id);
+  for (const c of [...ctx.db.machineCommand.machine_id.filter(id)]) ctx.db.machineCommand.id.delete(c.id);
+  for (const p of [...ctx.db.machineProcess.machine_id.filter(id)]) ctx.db.machineProcess.key.delete(p.key);
+  for (const m of [...ctx.db.machineChat.machine_id.filter(id)]) ctx.db.machineChat.id.delete(m.id);
+  for (const r of [...ctx.db.machinePairRequest.machine_id.filter(id)]) ctx.db.machinePairRequest.id.delete(r.id);
+  ctx.db.machine.id.update(fresh);
+});
+
+/** The daemon's heartbeat, carrying what the dashboard shows about the laptop. */
+export const update_machine = spacetimedb.reducer(
+  { id: t.string(), repo: t.string(), repo_label: t.string(), info_json: t.string(), needs_session: t.bool(), chat_busy: t.bool() },
+  (ctx, { id, repo, repo_label, info_json, needs_session, chat_busy }) => {
+    const row = requireMachine(ctx, id);
+    if (info_json.length > MAX_COMMAND_ARGS) throw new SenderError('info_json is too long');
+    ctx.db.machine.id.update({ ...row, repo, repo_label, info_json, needs_session, chat_busy, heartbeat_at: ctx.timestamp });
+  },
+);
+
+/** Pairs a dashboard identity with this machine. Only the machine's daemon can do it. */
+export const grant_machine_access = spacetimedb.reducer(
+  { machine_id: t.string(), identity: t.identity(), label: t.string() },
+  (ctx, { machine_id, identity, label }) => {
+    requireMachine(ctx, machine_id);
+    for (const a of ctx.db.machineAccess.machine_id.filter(machine_id)) if (a.identity.equals(identity)) return;
+    ctx.db.machineAccess.insert({ id: 0n, machine_id, identity, label: label.slice(0, 80), added_at: ctx.timestamp });
+  },
+);
+
+/** Unpairs a dashboard: the daemon can remove anyone, a dashboard only itself. */
+export const revoke_machine_access = spacetimedb.reducer(
+  { machine_id: t.string(), identity: t.identity() },
+  (ctx, { machine_id, identity }) => {
+    const m = ctx.db.machine.id.find(machine_id);
+    const daemon = m?.identity.equals(ctx.sender) ?? false;
+    if (!daemon && !identity.equals(ctx.sender)) throw new SenderError('only the daemon can unpair other dashboards');
+    for (const a of [...ctx.db.machineAccess.machine_id.filter(machine_id)]) if (a.identity.equals(identity)) ctx.db.machineAccess.id.delete(a.id);
+  },
+);
+
+/** Queues a command for a machine's daemon. The caller must be paired with that machine. */
+export const send_machine_command = spacetimedb.reducer(
+  { machine_id: t.string(), action: t.string(), args_json: t.string() },
+  (ctx, { machine_id, action, args_json }) => {
+    const m = ctx.db.machine.id.find(machine_id);
+    if (!m) throw new SenderError(`unknown machine '${machine_id}'`);
+    if (!m.identity.equals(ctx.sender) && !hasMachineAccess(ctx, machine_id)) {
+      throw new SenderError(`this dashboard isn't paired with ${machine_id}; pair it from the daemon's terminal first`);
+    }
+    if (!(MACHINE_ACTIONS as readonly string[]).includes(action)) throw new SenderError(`unknown action '${action}'`);
+    if (args_json.length > MAX_COMMAND_ARGS) throw new SenderError('command is too long');
+    const queued = [...ctx.db.machineCommand.machine_id.filter(machine_id)].filter((c) => c.status === 'pending').length;
+    if (queued >= MAX_PENDING_COMMANDS) throw new SenderError(`${machine_id} has ${queued} commands waiting; is its daemon running?`);
+    ctx.db.machineCommand.insert({ id: 0n, machine_id, sender: ctx.sender, action, args_json, status: 'pending', error: '', created_at: ctx.timestamp });
+  },
+);
+
+/** The daemon marks a command done or failed; only the newest COMMANDS_KEPT per machine stay. */
+export const finish_machine_command = spacetimedb.reducer(
+  { command_id: t.u64(), ok: t.bool(), error: t.string() },
+  (ctx, { command_id, ok, error }) => {
+    const c = ctx.db.machineCommand.id.find(command_id);
+    if (!c) throw new SenderError(`unknown command ${command_id}`);
+    requireMachine(ctx, c.machine_id);
+    ctx.db.machineCommand.id.update({ ...c, status: ok ? 'done' : 'failed', error: error.slice(0, 2000) });
+    const done = [...ctx.db.machineCommand.machine_id.filter(c.machine_id)].filter((r) => r.status !== 'pending').sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of done.slice(0, Math.max(0, done.length - COMMANDS_KEPT))) ctx.db.machineCommand.id.delete(old.id);
+  },
+);
+
+/** The daemon reports one process (insert or update). */
+export const put_machine_process = spacetimedb.reducer(
+  {
+    machine_id: t.string(), proc_key: t.string(), label: t.string(), long: t.bool(), status: t.string(),
+    code: t.option(t.i32()), started_at_ms: t.f64(), ended_at_ms: t.option(t.f64()), log: t.string(),
+  },
+  (ctx, a) => {
+    requireMachine(ctx, a.machine_id);
+    if (!a.proc_key) throw new SenderError('proc_key is empty');
+    const log = a.log.length > MAX_PROCESS_LOG ? a.log.slice(-MAX_PROCESS_LOG) : a.log;
+    if (!['running', 'exited', 'stopped'].includes(a.status)) throw new SenderError(`unknown process status '${a.status}'`);
+    const row = { ...a, code: a.code, ended_at_ms: a.ended_at_ms, key: `${a.machine_id}/${a.proc_key}`, log };
+    if (ctx.db.machineProcess.key.find(row.key)) ctx.db.machineProcess.key.update(row);
+    else ctx.db.machineProcess.insert(row);
+  },
+);
+
+export const delete_machine_process = spacetimedb.reducer({ machine_id: t.string(), proc_key: t.string() }, (ctx, { machine_id, proc_key }) => {
+  requireMachine(ctx, machine_id);
+  ctx.db.machineProcess.key.delete(`${machine_id}/${proc_key}`);
+});
+
+/** The daemon appends a chat line; only the newest CHAT_KEPT per machine stay. */
+export const post_machine_chat = spacetimedb.reducer(
+  { machine_id: t.string(), role: t.string(), text: t.string(), at_ms: t.f64() },
+  (ctx, { machine_id, role, text, at_ms }) => {
+    requireMachine(ctx, machine_id);
+    if (!['user', 'assistant', 'event'].includes(role)) throw new SenderError(`unknown chat role '${role}'`);
+    ctx.db.machineChat.insert({ id: 0n, machine_id, role, text: text.slice(0, MAX_CHAT_TEXT), at_ms });
+    const mine = [...ctx.db.machineChat.machine_id.filter(machine_id)].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of mine.slice(0, Math.max(0, mine.length - CHAT_KEPT))) ctx.db.machineChat.id.delete(old.id);
+  },
+);
+
+const MAX_PAIR_REQUESTS = 20;
+
+/** A dashboard asks to pair with a machine (see machine_pair_request). Oldest requests drop past the cap. */
+export const request_machine_pairing = spacetimedb.reducer(
+  { machine_id: t.string(), proof: t.string() },
+  (ctx, { machine_id, proof }) => {
+    if (!ctx.db.machine.id.find(machine_id)) throw new SenderError(`unknown machine '${machine_id}'`);
+    if (!/^[0-9a-f]{64}$/.test(proof)) throw new SenderError('proof must be a sha256 hex digest');
+    const reqs = [...ctx.db.machinePairRequest.machine_id.filter(machine_id)].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of reqs.slice(0, Math.max(0, reqs.length - MAX_PAIR_REQUESTS + 1))) ctx.db.machinePairRequest.id.delete(old.id);
+    ctx.db.machinePairRequest.insert({ id: 0n, machine_id, identity: ctx.sender, proof, created_at: ctx.timestamp });
+  },
+);
+
+/** The daemon answers a pairing request: grants access when the proof matched, and always deletes the request. */
+export const resolve_machine_pairing = spacetimedb.reducer(
+  { request_id: t.u64(), accept: t.bool(), label: t.string() },
+  (ctx, { request_id, accept, label }) => {
+    const r = ctx.db.machinePairRequest.id.find(request_id);
+    if (!r) return; // already answered
+    requireMachine(ctx, r.machine_id);
+    ctx.db.machinePairRequest.id.delete(r.id);
+    if (!accept) return;
+    for (const a of ctx.db.machineAccess.machine_id.filter(r.machine_id)) if (a.identity.equals(r.identity)) return;
+    ctx.db.machineAccess.insert({ id: 0n, machine_id: r.machine_id, identity: r.identity, label: label.slice(0, 80), added_at: ctx.timestamp });
   },
 );
