@@ -1,0 +1,48 @@
+/* Comment pins on the board and the comment popover. */
+.pg-pins { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.pg-pin { position: absolute; pointer-events: auto; transform: translate(-2px, -100%); border: 0; padding: 0; background: none; }
+.pg-pin span { display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; background: var(--c); color: var(--pg-white); font-size: 11px; font-weight: 700; border: 2px solid var(--pg-white); border-radius: 12px 12px 12px 2px; box-shadow: var(--pg-shadow-pin); }
+.pg-pin.done span { background: var(--pg-white); color: var(--c); border-color: var(--c); }
+.pg-pin:hover span { transform: scale(1.1); }
+
+.pg-pop { pointer-events: auto; position: absolute; z-index: 4; width: 280px; background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 14px; box-shadow: var(--pg-shadow-pop); padding: 10px 12px; cursor: default; border-top: 3px solid var(--c); }
+.pg-pop-to { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.pg-pop-to i { width: 8px; height: 8px; border-radius: 50%; }
+.pg-pop-to small { color: var(--pg-muted); }
+.pg-pop-ctx { color: var(--pg-muted); font-size: 11px; margin: 2px 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-pop textarea { width: 100%; border: 1px solid var(--pg-line); border-radius: 8px; outline: 0; resize: none; font: inherit; padding: 6px 8px; }
+.pg-pop textarea:focus { border-color: var(--c); }
+.pg-pop-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; color: var(--pg-muted); font-size: 11px; }
+.pg-pop button[type=submit] { width: 30px; height: 30px; border-radius: 9px; border: 0; background: var(--pg-accent); color: var(--pg-white); font-size: 15px; font-weight: 700; }
+
+/* Thread pins: orphan ghost, thread popover */
+.pg-pin.orphan span { background: var(--pg-panel); color: var(--c); border: 2px dashed var(--c); }
+.pg-thread-actions { margin-left: auto; display: flex; gap: 4px; }
+.pg-thread-actions button { border: 0; background: none; color: var(--pg-muted); font-size: 12px; cursor: pointer; }
+.pg-thread-actions button:hover { color: var(--pg-accent); }
+.pg-thread-msgs { max-height: 180px; overflow: auto; margin: 6px 0; font-size: 12px; }
+.pg-thread-msgs p { margin: 0 0 4px; }
+
+/* orphan comments (their layer was deleted), listed in the right panel */
+.pg-orphans { padding: 8px 12px; border-top: 1px solid var(--pg-line); font-size: 12px; color: var(--pg-ink); }
+.pg-orphans h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; color: var(--pg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.pg-orphans ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pg-orphans li { display: flex; align-items: center; gap: 8px; }
+.pg-orphans .n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: var(--pg-white); font-size: 10px; font-weight: 700; flex-shrink: 0; }
+.pg-orphans .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-orphans button { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-ink); border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+.pg-pop .pg-mention { bottom: auto; top: 100%; margin: 4px 0 0; }
+
+/* Pin hover/hot state, hover card, comment list filters and rows (WP-80). */
+.pg-pin.hot span { transform: scale(1.15); }
+.pg-pin-card { display: none; position: absolute; left: 0; top: 100%; margin-top: 6px; width: 220px; padding: 8px 10px; text-align: left; font-size: 12px; font-weight: 400; color: var(--pg-ink); background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 10px; box-shadow: var(--pg-shadow-menu); z-index: 5; pointer-events: none; }
+.pg-pin:hover .pg-pin-card, .pg-pin:focus-visible .pg-pin-card { display: block; }
+.pg-pin-card .x { display: block; margin: 2px 0; color: var(--pg-ink-body); overflow-wrap: anywhere; }
+.pg-pin-card small { color: var(--pg-muted); }
+.pg-cl-filters { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.pg-cl-filters button { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-ink-soft); border-radius: 10px; padding: 2px 9px; font-size: 11px; cursor: pointer; }
+.pg-cl-filters button:hover { background: var(--pg-hover); }
+.pg-cl-filters button[aria-pressed=true] { background: var(--pg-accent-soft); border-color: var(--pg-accent-line); color: var(--pg-accent); }
+.pg-cl-empty { margin: 4px 0; color: var(--pg-muted); font-size: 12px; }
+.pg-cl-row.resolved { opacity: .5; }
+.pg-cl-row.hot { background: var(--pg-hover-faint); border-radius: 6px; }

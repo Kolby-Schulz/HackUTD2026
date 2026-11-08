@@ -1,0 +1,84 @@
+/* Chat column: thread switcher, conversation, composer. */
+.pg-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.pg-threads { display: flex; gap: 6px; padding: 10px 12px; overflow-x: auto; scrollbar-width: none; flex-shrink: 0; }
+.pg-thread { display: flex; align-items: center; gap: 6px; border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 999px; padding: 4px 10px 4px 8px; white-space: nowrap; font-size: 12px; transition: box-shadow .2s, transform .2s; }
+.pg-thread i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.pg-thread .hash { color: var(--c); font-weight: 700; }
+.pg-thread em { font-style: normal; background: var(--c); color: var(--pg-white); border-radius: 999px; font-size: 10px; padding: 0 6px; font-weight: 600; }
+.pg-thread.on { border-color: var(--c); box-shadow: 0 0 0 1px var(--c) inset; }
+.pg-thread.gone { opacity: .55; }
+.pg-thread.flash { animation: pg-flash 1.2s ease-out; }
+@keyframes pg-flash { 0% { transform: scale(1.12); box-shadow: 0 0 0 6px color-mix(in srgb, var(--c) 30%, transparent); } 100% { transform: scale(1); } }
+
+.pg-thead { display: flex; align-items: center; gap: 10px; padding: 4px 16px 10px; border-bottom: 1px solid var(--pg-line); flex-shrink: 0; }
+.pg-thead > div { display: flex; flex-direction: column; min-width: 0; }
+.pg-thead small { color: var(--pg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg .av { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--pg-white); font-weight: 600; font-size: 12px; flex-shrink: 0; }
+
+.pg-msgs { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; user-select: text; }
+.pg-hello { margin: auto 0; text-align: center; color: var(--pg-muted); padding: 0 12px; }
+.pg-hello .spark { color: var(--pg-accent); font-size: 26px; }
+.pg-hello p { font-size: 15px; line-height: 1.5; color: var(--pg-ink-soft); }
+.pg-hello button { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 8px; padding: 6px 12px; }
+.pg-msg { display: flex; gap: 10px; border-radius: 10px; transition: background .3s; }
+.pg-msg.hl { background: var(--pg-accent-wash); box-shadow: 0 0 0 6px var(--pg-accent-wash); }
+.pg-msg.you { flex-direction: column; align-items: flex-end; gap: 4px; }
+.pg-msg.you .bubble { background: var(--pg-active); padding: 8px 12px; border-radius: 14px; max-width: 88%; white-space: pre-wrap; }
+.pg-msg.agent .pg-msg-body { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.pg-msg.agent b { font-size: 12px; }
+.pg-msg.agent p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--pg-ink-body); }
+.pg-ctx { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-muted); font-size: 11px; border-radius: 6px; padding: 1px 7px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-ctx:not(:disabled):hover { color: var(--pg-ink); border-color: var(--pg-line-hover); }
+
+.pg-compose { margin: 0 12px 12px; background: var(--pg-panel); border: 1px solid var(--pg-line-strong); border-radius: 16px; box-shadow: var(--pg-shadow-compose); padding: 8px 10px 8px; flex-shrink: 0; }
+.pg-compose:focus-within { border-color: var(--pg-line-focus); }
+.pg-compose textarea { width: 100%; border: 0; outline: 0; resize: none; font: inherit; font-size: 14px; background: none; padding: 4px 2px; color: var(--pg-ink); }
+.pg-attach { display: flex; align-items: center; gap: 6px; background: color-mix(in srgb, var(--c) 10%, var(--pg-white)); border: 1px solid color-mix(in srgb, var(--c) 35%, var(--pg-white)); color: var(--pg-ink); border-radius: 8px; padding: 3px 4px 3px 8px; font-size: 12px; margin-bottom: 4px; }
+.pg-attach span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-attach .to { color: var(--c); font-weight: 600; white-space: nowrap; }
+.pg-attach button { border: 0; background: none; color: var(--pg-muted); font-size: 10px; padding: 2px 5px; border-radius: 4px; }
+.pg-compose-foot { display: flex; justify-content: space-between; align-items: center; }
+.pg-mini-tool { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-muted); border-radius: 8px; padding: 3px 9px; font-size: 12px; }
+.pg-mini-tool.on { color: var(--pg-accent); border-color: var(--pg-accent-line); background: var(--pg-accent-faint); }
+.pg-compose .send { width: 30px; height: 30px; border-radius: 9px; border: 0; background: var(--pg-accent); color: var(--pg-white); font-size: 15px; font-weight: 700; }
+.pg-compose .send:disabled { background: var(--pg-accent-disabled); cursor: default; }
+
+/* Message kinds (COMMENT-11) */
+.pg-msg.status { align-items: center; gap: 7px; color: var(--pg-muted); font-size: 12px; padding-left: 36px; margin-top: -8px; }
+.pg-msg.status i { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.pg-more { align-self: flex-start; margin-left: 36px; border: 0; background: none; color: var(--pg-muted); font-size: 12px; text-decoration: underline; padding: 0; }
+.pg-more:hover { color: var(--pg-ink); }
+.pg-msg.system { justify-content: center; color: var(--pg-muted); font-size: 11.5px; text-align: center; }
+.pg-msg.routing { justify-content: center; }
+.pg-msg.routing .pg-msg-chip { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-muted); border-radius: 999px; padding: 2px 10px; font-size: 11.5px; }
+.pg-msg.error, .pg-msg.conflict { flex-direction: column; gap: 2px; background: var(--pg-danger-bg); border: 1px solid var(--pg-danger); border-radius: 10px; padding: 8px 12px; color: var(--pg-danger); font-size: 13px; }
+.pg-msg.conflict { background: var(--pg-accent-faint); border-color: var(--pg-accent-line); color: var(--pg-ink-body); }
+.pg-msg.error p, .pg-msg.conflict p { margin: 0; }
+.pg-msg.action .pg-act-card { flex: 1; min-width: 0; border: 1px solid var(--pg-line); border-left: 3px solid var(--c); background: var(--pg-panel); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.pg-msg.action .sum { font-size: 13px; color: var(--pg-ink-body); display: flex; gap: 6px; align-items: baseline; }
+.pg-msg.action .sum .ic { color: var(--c); }
+.pg-msg.action .sum em { font-style: normal; margin-left: auto; font-size: 11px; color: var(--pg-muted); border: 1px solid var(--pg-line); border-radius: 999px; padding: 0 7px; }
+.pg-msg.action.undone .sum { color: var(--pg-muted); text-decoration: line-through; }
+.pg-msg.action .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.pg-msg.action .chips .more { color: var(--pg-muted); font-size: 11px; align-self: center; }
+.pg-msg.action .foot { display: flex; justify-content: space-between; align-items: center; color: var(--pg-muted); font-size: 11px; }
+.pg-msg.action .foot button { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 6px; padding: 1px 8px; font-size: 11.5px; color: var(--pg-ink); }
+.pg-msg.action .foot button:hover { border-color: var(--pg-line-hover); background: var(--pg-hover); }
+.pg-msg.agent b small { font-weight: 400; color: var(--pg-muted); }
+
+/* thinking placeholder pulses until the reply or action card replaces it */
+@keyframes pg-think { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.pg-msg.thinking { animation: pg-think 1.2s ease-in-out infinite; }
+.pg-msg.thinking i { animation: pg-think 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pg-msg.thinking, .pg-msg.thinking i { animation: none; } }
+
+/* @mention autocomplete above the composer (also used in the comment popover) */
+.pg-compose { position: relative; }
+.pg-mention { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 4px; padding: 4px; list-style: none; z-index: 5;
+  background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 10px; box-shadow: var(--pg-shadow-pop); max-height: 180px; overflow: auto; }
+.pg-mention li { display: flex; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 7px; font-size: 13px; cursor: pointer; color: var(--pg-ink); }
+.pg-mention li.on, .pg-mention li:hover { background: var(--pg-line); }
+.pg-mention small { color: var(--pg-muted); font-size: 11px; }
+
+/* Action-card diff row (old -> new). Scoped name: the main dashboard's global `.diff` is its dark code-diff viewer. */
+.pg-card-diff { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12px; color: var(--pg-muted); }

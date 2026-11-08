@@ -1,0 +1,63 @@
+/* Design tokens (SHELL-6). Every colour used by styles/*.css is defined here and nowhere else.
+   The board follows the main dashboard's theme: each token points at a dashboard token (src/styles.css), so the
+   dashboard's light / dark switch (<html data-theme>) restyles the board too. */
+.pg {
+  /* surfaces */
+  --pg-bg: var(--bg);                 /* board background */
+  --pg-dot: var(--faint);             /* board dot grid */
+  --pg-panel: var(--chrome);          /* panels, top bar, cards, inputs */
+  --pg-sunken: var(--chrome);         /* left column */
+  --pg-white: #ffffff;                /* text on coloured fills, avatar rings */
+  --pg-scrim: color-mix(in srgb, var(--bg) 70%, transparent);
+  --pg-cursor-fill: color-mix(in srgb, var(--surface) 92%, transparent);
+
+  /* lines */
+  --pg-line: var(--line);
+  --pg-line-strong: var(--border);
+  --pg-line-hover: var(--border);
+  --pg-line-focus: var(--accent);
+
+  /* text */
+  --pg-ink: var(--text);
+  --pg-ink-soft: var(--text2);
+  --pg-ink-body: var(--text);
+  --pg-muted: var(--text3);
+  --pg-code-ink: #e7e5e0;
+
+  /* hover and states */
+  --pg-hover: var(--hover);
+  --pg-hover-soft: var(--hover);
+  --pg-hover-faint: var(--hover);
+  --pg-hover-toolbar: var(--hover);
+  --pg-hover-strong: var(--soft);
+  --pg-chip: var(--soft);
+  --pg-active: var(--accent-soft);
+  --pg-ink-hover: var(--text2);
+  --pg-on-ink: var(--bg);             /* text on an ink-coloured surface (toasts, primary buttons) */
+
+  /* accents */
+  --pg-sel: var(--accent);
+  --pg-guide: #f24822;   /* smart guides (ALIGN-2), same in both themes */
+  --pg-sel-bg: var(--accent-soft);
+  --pg-accent: var(--accent);
+  --pg-accent-soft: var(--accent-soft);
+  --pg-accent-wash: var(--accent-soft);
+  --pg-accent-faint: var(--accent-soft);
+  --pg-accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
+  --pg-accent-disabled: var(--faint);
+  --pg-danger: var(--danger);
+  --pg-danger-bg: var(--danger-soft);
+  --pg-success: var(--ok);
+
+  /* shadows */
+  --pg-shadow-frame: 0 1px 3px var(--lift);
+  --pg-shadow-toolbar: var(--pop);
+  --pg-shadow-menu: var(--pop);
+  --pg-shadow-pop: var(--pop);
+  --pg-shadow-compose: 0 1px 3px var(--lift);
+  --pg-shadow-seg: 0 1px 2px var(--lift);
+  --pg-shadow-tag: 0 1px 3px var(--lift);
+  --pg-shadow-pin: 0 2px 6px var(--lift);
+  --pg-shadow-cursor: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .18));
+}
+

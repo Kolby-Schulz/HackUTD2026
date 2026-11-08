@@ -1,0 +1,9 @@
+/* Floating tool palette and the controls hint. */
+.pg-toolbar { pointer-events: auto; position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; gap: 2px; padding: 5px; background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 12px; box-shadow: var(--pg-shadow-toolbar); z-index: 2; cursor: default; }
+.pg-toolbar button { width: 36px; height: 36px; border: 0; background: none; border-radius: 8px; display: grid; place-items: center; }
+.pg-toolbar button:hover { background: var(--pg-hover-toolbar); }
+.pg-toolbar button.on { background: var(--pg-accent); color: var(--pg-white); }
+.pg-toolbar svg path { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pg-hint { position: absolute; left: 14px; top: 12px; color: var(--pg-muted); font-size: 11px; background: var(--pg-scrim); padding: 3px 8px; border-radius: 6px; z-index: 2; }
+
+@media (max-width: 900px) { .pg-hint { display: none; } }

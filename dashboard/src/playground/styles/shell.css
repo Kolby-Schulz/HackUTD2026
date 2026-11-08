@@ -1,0 +1,44 @@
+/* Shell: collapsible, resizable panels (SHELL-4/5/8) and the top bar additions (file name, save dot). */
+.pg .pg-body { position: relative; }
+.pg .pg-panel { position: relative; display: block; flex: none; box-sizing: border-box; width: var(--panel-w, 240px); transition: width .16s ease; }
+.pg .pg-left { --panel-w: var(--left-w, 240px); }
+.pg .pg-right { --panel-w: var(--right-w, 260px); }
+.pg .pg-panel[data-open='false'] { width: 0; border-width: 0; visibility: hidden; transition: width .16s ease, visibility 0s .16s; }
+.pg .pg-panel-in { position: absolute; top: 0; bottom: 0; left: 0; width: var(--panel-w); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.pg .pg-right .pg-panel-in { left: auto; right: 0; }
+.pg .pg-panel[data-overlay='true'] { position: absolute; top: 0; bottom: 0; z-index: 6; box-shadow: var(--pg-shadow-menu); }
+.pg .pg-left[data-overlay='true'] { left: 0; }
+.pg .pg-right[data-overlay='true'] { right: 0; }
+
+/* drag handle on the inner edge */
+.pg-resize { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 3; touch-action: none; }
+.pg-left .pg-resize { right: -3px; }
+.pg-right .pg-resize { left: -3px; }
+.pg-resize:hover, .pg-resize:focus-visible, .pg-resize:active { background: var(--pg-sel); opacity: .35; outline: none; }
+
+/* chevron at the edge; stays visible when the panel is collapsed (aside has width 0 but visibility is overridden here) */
+.pg .pg-edge { position: absolute; top: 50%; width: 16px; height: 44px; margin-top: -22px; padding: 0; border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-muted); line-height: 1; font-size: 14px; z-index: 4; visibility: visible; opacity: 0; transition: opacity .12s; }
+.pg .pg-left .pg-edge { left: 100%; border-left: 0; border-radius: 0 8px 8px 0; }
+.pg .pg-right .pg-edge { right: 100%; border-right: 0; border-radius: 8px 0 0 8px; }
+.pg .pg-panel:hover .pg-edge, .pg .pg-edge:focus-visible, .pg .pg-panel[data-open='false'] .pg-edge { opacity: 1; }
+.pg .pg-edge:hover { color: var(--pg-ink); background: var(--pg-hover); }
+.pg .pg-panel[data-open='false'] .pg-edge { transition: opacity .12s .16s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pg .pg-panel, .pg .pg-panel[data-open='false'] { transition: none; }
+}
+
+/* top bar: nothing wraps; the subtitle goes first, then the file name truncates */
+.pg-top { min-width: 0; white-space: nowrap; }
+.pg-top > * { flex: none; }
+.pg-top .pg-grow { flex: 1 1 0; min-width: 0; }
+.pg-file { flex: 0 1 auto; min-width: 40px; max-width: 280px; }
+.pg-file-btn, .pg-file-in { font: inherit; font-weight: 600; color: var(--pg-ink); border: 1px solid transparent; border-radius: 6px; padding: 3px 7px; background: none; max-width: 100%; box-sizing: border-box; }
+.pg-file-btn { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-file-btn:hover { background: var(--pg-hover); }
+.pg-file-in { width: 220px; background: var(--pg-panel); border-color: var(--pg-sel); outline: none; user-select: text; }
+.pg-save { width: 8px; height: 8px; border-radius: 50%; background: var(--pg-success); }
+.pg-save[data-status='saving'] { background: var(--pg-accent); }
+.pg-save[data-status='error'], .pg-save[data-status='full'] { background: var(--pg-danger); }
+
+@media (max-width: 900px) { .pg-top { gap: 6px; padding: 0 8px; } .pg-top .pg-share span { display: none; } .pg-file { max-width: 140px; } }

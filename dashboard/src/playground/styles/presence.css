@@ -1,0 +1,38 @@
+/* Presence list (everyone with a cursor). */
+.pg-cursorlist { flex: 1; overflow: auto; border-top: 1px solid var(--pg-line); padding: 6px; }
+.pg-crow { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 7px; }
+.pg-crow:hover { background: var(--pg-hover-faint); }
+.pg-mini path { fill: var(--pg-white); stroke: var(--c); stroke-width: 2.2; stroke-linejoin: round; }
+.pg-cname { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pg-cname small { color: var(--pg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg .ghost { border: 0; background: none; color: var(--pg-muted); padding: 2px 5px; border-radius: 5px; font-size: 11px; }
+.pg .ghost:hover { background: var(--pg-hover-strong); color: var(--pg-ink); }
+
+/* Remote selection / editing outlines (screen space, constant-size labels). */
+.pg-rsel { position: absolute; left: 0; top: 0; box-sizing: border-box; pointer-events: none; border: 1px solid var(--c); }
+.pg-rsel.editing { border-width: 2px; background: color-mix(in srgb, var(--c) 7%, transparent); }
+.pg-rtag { position: absolute; left: -2px; top: -20px; background: var(--c); color: var(--pg-white); white-space: nowrap; font-weight: 600; font-size: 11px; padding: 1px 6px; border-radius: 4px; }
+.pg-pulse { position: absolute; left: 0; top: 0; pointer-events: none; }
+.pg-pulse i { position: absolute; left: -18px; top: -18px; width: 36px; height: 36px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--c); animation: pg-pulse 1s ease-out 1; }
+@keyframes pg-pulse { from { transform: scale(.3); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+
+/* Presence rows: state dot, detail line, row click jumps to the actor. */
+.pg-crow { cursor: pointer; }
+.pg-crow .pg-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pg-muted); flex: none; }
+.pg-crow .pg-dot.working { background: var(--pg-sel); }
+.pg-crow .pg-dot.idle { background: var(--pg-success); }
+.pg-crow .pg-dot.waiting { background: var(--pg-accent); }
+.pg-crow .pg-dot.blocked { background: var(--pg-danger); }
+
+/* Avatar stack (MULTI-4): up to 5 overlapping circles then +N. */
+.pg-avstack { display: flex; align-items: center; }
+.pg-av { width: 24px; height: 24px; margin-left: -6px; border-radius: 50%; border: 2px solid var(--pg-white); background: var(--c); color: var(--pg-white); font-size: 11px; font-weight: 600; display: grid; place-items: center; padding: 0; cursor: pointer; }
+.pg-av:first-child { margin-left: 0; }
+.pg-av.more { background: var(--pg-chip); color: var(--pg-ink-soft); }
+.pg-av.ring-working { box-shadow: 0 0 0 2px var(--pg-sel); }
+.pg-av.ring-idle { box-shadow: 0 0 0 2px var(--pg-success); }
+.pg-av.ring-waiting { box-shadow: 0 0 0 2px var(--pg-accent); }
+.pg-av.ring-blocked { box-shadow: 0 0 0 2px var(--pg-danger); }
+
+/* Per-agent usage chip in a presence row (WP-83). */
+.pg-crow .pg-usage { flex: none; font-size: 10px; color: var(--pg-muted); background: var(--pg-chip); border-radius: 8px; padding: 1px 6px; white-space: nowrap; }

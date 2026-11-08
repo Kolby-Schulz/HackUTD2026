@@ -1,0 +1,15 @@
+/* Layers panel. */
+.pg-layers { flex: 1; overflow: auto; padding: 0 6px 12px; }
+.pg-left .pg-layers { padding-top: 8px; }
+.pg-layer { display: flex; align-items: center; gap: 4px; padding-right: 8px; box-sizing: border-box; border-radius: 6px; cursor: default; white-space: nowrap; font-size: 12px; }
+.pg-layer:hover { background: var(--pg-hover-soft); }
+.pg-layer.on { background: var(--pg-sel-bg); }
+.pg-layer.sub { background: var(--pg-hover-soft); }
+.pg-layer .chev { width: 12px; height: 12px; flex: none; color: var(--pg-muted); display: inline-flex; }
+.pg-layer .chev svg { transition: transform 0.1s; }
+.pg-layer .ic { width: 16px; height: 16px; flex: none; color: var(--pg-muted); display: inline-flex; }
+.pg-layer.on .ic { color: var(--pg-sel); }
+.pg-layer.comp .ic { color: var(--pg-accent); }
+.pg-layer .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pg-layer .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.pg-empty { color: var(--pg-muted); padding: 8px; }

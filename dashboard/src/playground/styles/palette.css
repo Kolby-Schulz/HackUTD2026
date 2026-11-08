@@ -1,0 +1,17 @@
+/* Command palette (KEYS-9): centered 560px card over a scrim; the board stays visible but inert. */
+.pg-pal-scrim { position: fixed; inset: 0; z-index: 50; background: var(--pg-scrim); display: flex; justify-content: center; align-items: flex-start; padding-top: 14vh; }
+.pg-pal { width: 560px; max-width: calc(100vw - 32px); background: var(--pg-panel); border: 1px solid var(--pg-line-strong); border-radius: 12px; box-shadow: var(--pg-shadow-pop); overflow: hidden; display: flex; flex-direction: column; color: var(--pg-ink); }
+.pg-pal-input { border: 0; border-bottom: 1px solid var(--pg-line); outline: none; padding: 14px 16px; font: inherit; font-size: 15px; background: transparent; color: var(--pg-ink); }
+.pg-pal-input::placeholder { color: var(--pg-muted); }
+.pg-pal-list { max-height: min(380px, 60vh); overflow-y: auto; padding: 6px; }
+.pg-pal-head { padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--pg-muted); }
+.pg-pal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 8px; font-size: 13px; cursor: pointer; color: var(--pg-ink-body); }
+.pg-pal-row[data-sel="true"] { background: var(--pg-hover); }
+.pg-pal-row[data-disabled="true"] { cursor: default; color: var(--pg-muted); }
+.pg-pal-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-pal-group { margin-left: 8px; font-size: 11px; color: var(--pg-muted); }
+.pg-pal-hit { background: none; color: var(--pg-accent); font-weight: 600; }
+.pg-pal-keys { display: flex; gap: 4px; flex-shrink: 0; }
+.pg-pal-keys kbd { font: inherit; font-size: 11px; padding: 1px 6px; border-radius: 5px; background: var(--pg-chip); color: var(--pg-ink-soft); }
+.pg-pal-reason { font-size: 11px; color: var(--pg-muted); flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-pal-empty { padding: 20px; text-align: center; font-size: 13px; color: var(--pg-muted); }

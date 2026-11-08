@@ -1,0 +1,46 @@
+/* Cursors: coloured outline arrow + name tag; the human's comment-tool bubble. */
+.pg-cursors { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+.pg-cursor { position: absolute; left: 0; top: 0; will-change: transform; transition: opacity .15s; }
+.pg-cursor svg { display: block; margin: -2px 0 0 -2px; transition: transform .12s ease-out; transform-origin: 3px 3px; filter: var(--pg-shadow-cursor); }
+.pg-cursor path { fill: var(--pg-cursor-fill); stroke: var(--c); stroke-width: 2; stroke-linejoin: round; }
+.pg-cursor.down svg { transform: scale(.86); }
+.pg-cursor.down path { fill: color-mix(in srgb, var(--c) 22%, var(--pg-white)); }
+.pg-tag { display: flex; align-items: center; gap: 4px; max-width: 220px; position: absolute; left: 16px; top: 18px; background: var(--pg-panel); color: var(--c); border: 1.5px solid var(--c); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; white-space: nowrap; box-shadow: var(--pg-shadow-tag); }
+.pg-tag em { font-style: normal; font-weight: 400; color: var(--pg-muted); }
+.pg-cursor.human .pg-tag { display: none; }
+
+.pg-cursor .bub { display: none; }
+.pg-cursor.bubble .arrow { display: none; }
+.pg-cursor.bubble .bub { display: block; margin: -22px 0 0 -2px; }
+.pg-cursor .bub path { fill: var(--pg-panel); stroke: var(--pg-accent); stroke-width: 2; stroke-linejoin: round; }
+
+/* tool / status glyph: every glyph is rendered, the one matching data-glyph shows */
+.pg-tag .glyphs { display: inline-flex; width: 14px; height: 14px; flex: none; }
+.pg-tag .g { display: none; fill: none; stroke: var(--c); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pg-cursor[data-glyph="select"] .g-select, .pg-cursor[data-glyph="rect"] .g-rect, .pg-cursor[data-glyph="ellipse"] .g-ellipse,
+.pg-cursor[data-glyph="text"] .g-text, .pg-cursor[data-glyph="comment"] .g-comment, .pg-cursor[data-glyph="hand"] .g-hand,
+.pg-cursor[data-glyph="pen"] .g-pen, .pg-cursor[data-glyph="thinking"] .g-thinking, .pg-cursor[data-glyph="drawing"] .g-drawing,
+.pg-cursor[data-glyph="waiting"] .g-waiting, .pg-cursor[data-glyph="blocked"] .g-blocked, .pg-cursor[data-glyph="paused"] .g-paused,
+.pg-cursor[data-glyph="stopped"] .g-stopped, .pg-cursor[data-glyph="error"] .g-error { display: block; }
+.pg-tag .nm { overflow: hidden; text-overflow: ellipsis; max-width: 18ch; }
+.pg-tag em { white-space: nowrap; }
+.pg-tag .badge { background: var(--c); color: var(--pg-white); border-radius: 50%; width: 14px; height: 14px; display: inline-grid; place-items: center; font-size: 9px; font-weight: 700; flex: none; }
+.pg-cursor.light .pg-tag .badge { color: var(--pg-ink); }
+/* idle fading: the tag dims when the cursor has been still for a while */
+
+.pg-cursor.still .pg-tag { opacity: .55; }
+/* names show on hover only; the pill pins at your pointer (.pinned) and eases back on release */
+.pg-cursor:not(.hot) .pg-tag .nm { display: none; }
+.pg-cursor.hot .pg-tag .nm + .st::before { content: '· '; }
+.pg-cursor.quiet:not(.hot) .pg-tag { opacity: 0; }
+.pg-cursor.hot { z-index: 2; }
+.pg-cursor.hot .pg-tag { opacity: 1; }
+.pg-tag { transition: opacity .4s, transform .22s cubic-bezier(.2, .8, .2, 1); }
+.pg-cursor.pinned .pg-tag { transition: opacity .15s; }
+
+/* WP-53: zoomed-out arrows shrink; crowded tags lose the action text, then become dots with a +n chip.
+   A hovered (.hot) tag is never decluttered. */
+.pg-cursor .arrow { scale: var(--cs, 1); }
+/* names are already hover-only, so the action is the whole tag: "short" keeps it and only "dot" hides the pill */
+.pg-cursor.t-dot:not(.hot) .pg-tag { display: none; }
+.pg-tag[data-more]::after { content: '+' attr(data-more); font-weight: 700; color: var(--pg-muted); }

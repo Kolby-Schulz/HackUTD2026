@@ -1,0 +1,12 @@
+/* Page root and resets shared by every component. Scoped under .pg. Colours come from tokens.css. */
+.pg {
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  background: var(--pg-bg); color: var(--pg-ink);
+  font: 13px/1.35 var(--font);
+  color-scheme: light;
+  user-select: none;
+}
+.pg button { font: inherit; color: inherit; cursor: pointer; }
+.pg-grow { flex: 1; }
+.pg-body { flex: 1; display: flex; min-height: 0; }

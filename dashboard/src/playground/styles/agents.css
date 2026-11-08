@@ -1,0 +1,13 @@
+/* Agent controls and footer in the right panel. */
+.pg-actions { display: flex; gap: 6px; padding: 0 14px 10px; }
+.pg-actions button, .pg-foot > button { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 7px; padding: 5px 10px; }
+.pg-actions button:hover, .pg-foot > button:hover { background: var(--pg-hover-faint); }
+.pg-actions .primary { background: var(--pg-ink); color: var(--pg-on-ink); border-color: var(--pg-ink); }
+.pg-actions .primary:hover { background: var(--pg-ink-hover); }
+.pg-row { display: flex; align-items: center; justify-content: space-between; padding: 0 14px 10px; color: var(--pg-muted); }
+.pg-seg { display: flex; background: var(--pg-hover); border-radius: 7px; padding: 2px; }
+.pg-seg button { border: 0; background: none; padding: 3px 8px; border-radius: 5px; font-size: 12px; }
+.pg-seg button.on { background: var(--pg-panel); box-shadow: var(--pg-shadow-seg); }
+.pg-foot { border-top: 1px solid var(--pg-line); padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.pg-foot summary { color: var(--pg-muted); cursor: pointer; font-size: 12px; }
+.pg-foot pre { margin: 6px 0 0; background: var(--pg-ink); color: var(--pg-code-ink); padding: 10px; border-radius: 8px; font: 11px/1.5 ui-monospace, Menlo, monospace; user-select: text; white-space: pre-wrap; }
