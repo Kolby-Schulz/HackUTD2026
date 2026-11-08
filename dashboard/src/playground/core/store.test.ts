@@ -219,3 +219,40 @@ describe('snapshot, load, log', () => {
       remote.log().at(-1)!.lamport).toBeGreaterThan(Math.max(...second.map((e) => e.lamport)));
   });
 });
+
+describe('long gestures stay cheap', () => {
+  it('folds per-frame sets so other actors commits do not replay every frame', () => {
+    for (let i = 0; i < 2000; i++) store.dispatch(H, 'Seed', [rect(`s${i}`, { x: i })]);
+    // an agent builds a frame as one gesture: create, then 3000 per-frame sets and typed characters
+    const g = store.begin(A, 'Build');
+    g.apply([rect('f', { createdBy: A, kind: 'frame' })]);
+    for (let i = 1; i <= 1500; i++) g.apply([{ t: 'set', id: 'f', patch: { w: i, h: i } }]);
+    g.apply([rect('t', { createdBy: A, kind: 'text', parent: 'f' })]);
+    for (let i = 1; i <= 1500; i++) g.apply([{ t: 'set', id: 't', patch: { text: 'x'.repeat(i) } }]);
+    // the human keeps working; each commit replays the agent's open gesture
+    const t0 = performance.now();
+    for (let i = 0; i < 30; i++) store.dispatch(H, 'Nudge', [{ t: 'set', id: 's0', patch: { x: i } }]);
+    const ms = performance.now() - t0;
+    expect(ms).toBeLessThan(1500); // without folding this replays 90k map copies of 2k shapes
+    expect(shape(store, 'f').w).toBe(1500); // the agent's gesture is still visible
+    const tx = g.commit()!;
+    expect(tx.ops.map((o) => o.t)).toEqual(['create', 'create']); // one create each, final values folded in
+    expect(shape(store, 'f').w).toBe(1500);
+    expect(shape(store, 't').text).toBe('x'.repeat(1500));
+  });
+
+  it('keeps a set that follows a place or remove on the same shape in order', () => {
+    store.dispatch(H, 'Draw', [rect('a'), rect('p', { kind: 'frame' })]);
+    const g = store.begin(H, 'Drag');
+    g.apply([{ t: 'set', id: 'a', patch: { x: 1 } }]);
+    g.apply([{ t: 'place', id: 'a', parent: 'p', index: 'V' }]);
+    g.apply([{ t: 'set', id: 'a', patch: { x: 2 } }]);
+    g.apply([{ t: 'remove', id: 'a' }]);
+    g.apply([{ t: 'set', id: 'a', patch: { x: 3 } }]); // dropped: delete wins
+    g.apply([{ t: 'restore', id: 'a' }]);
+    g.apply([{ t: 'set', id: 'a', patch: { x: 4 } }]);
+    g.commit();
+    const a = shape(store, 'a');
+    expect([a.x, a.parent, !!a.deleted]).toEqual([4, 'p', false]);
+  });
+});

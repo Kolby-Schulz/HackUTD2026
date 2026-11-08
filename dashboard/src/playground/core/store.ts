@@ -92,7 +92,27 @@ function isDev(): boolean {
   return (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV !== false;
 }
 
-interface Open { id: string; actor: ActorId; label: string; coalesceKey?: string; ops: Op[]; done: boolean }
+interface Open { id: string; actor: ActorId; label: string; coalesceKey?: string; ops: Op[]; n: number; done: boolean }
+
+/**
+ * Append gesture ops, folding a `set` into the latest earlier `set` on the same shape when nothing else touched
+ * that shape in between. A drag or an agent's typing then keeps one set per shape instead of one per frame, so
+ * replaying open gestures (on every other actor's commit) stays cheap. Final values are unchanged.
+ */
+function pushCompact(list: Op[], ops: readonly Op[]) {
+  for (const op of ops) {
+    if (op.t === 'set') {
+      let j = list.length - 1;
+      while (j >= 0 && !touches(list[j], op.id)) j--;
+      const prev = j >= 0 ? list[j] : undefined;
+      if (prev && prev.t === 'set') { list[j] = { t: 'set', id: op.id, patch: { ...prev.patch, ...op.patch } }; continue; }
+    }
+    list.push(op);
+  }
+}
+function touches(op: Op, id: ShapeId): boolean {
+  return op.t === 'create' ? op.shape.id === id : op.t === 'board' ? false : op.id === id;
+}
 
 export function createDocStore(opts: { boardId?: string } = {}): DocStore {
   const emptyState = (rev: number, lamport: number): DocState =>
@@ -192,18 +212,17 @@ export function createDocStore(opts: { boardId?: string } = {}): DocStore {
       if (isDev()) throw new Error(`begin(${actor}): a transaction is already open ("${prev.label}")`);
       prev.done = true; open.delete(actor); // production: drop the stale gesture rather than wedge the actor
     }
-    const t: Open = { id: newId('tx'), actor, label, ops: [], done: false };
+    const t: Open = { id: newId('tx'), actor, label, ops: [], n: 0, done: false };
     if (o.coalesceKey !== undefined) t.coalesceKey = o.coalesceKey;
     open.set(actor, t);
     return {
       apply(ops) {
         if (t.done) throw new Error('transaction already finished');
         if (ops.length === 0) return;
-        const probe = view;
-        let next = probe;
-        const start = t.ops.length;
-        ops.forEach((op, i) => { next = applyOp(next, tenv(t, op, start + i)); }); // throws before anything is kept
-        t.ops.push(...ops);
+        let next = view;
+        // t.n only grows (>= t.ops.length), so each frame's transient stamp beats the previous frame's
+        ops.forEach((op) => { next = applyOp(next, tenv(t, op, t.n++)); }); // throws before anything is kept
+        pushCompact(t.ops, ops);
         setView(next);
       },
       commit() {
