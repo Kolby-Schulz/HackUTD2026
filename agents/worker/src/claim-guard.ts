@@ -4,12 +4,16 @@
 // touches; if another agent holds an unexpired claim on one, it exits 2 with a message on
 // stderr, which makes Claude Code block the edit and show the model that message.
 //
+// It also blocks every edit while this agent is paused (Rule 1, issue #22): a worker stops on
+// its own, but a joined interactive Claude Code session needs the hook to make it wait.
+//
 // Fails open: no Contract env, a parse error or a server problem lets the edit through.
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SymbolRange } from '@contract/mapper';
 import { repoFile } from './summary-hook.ts';
+import { hookAgent } from './hook.ts';
 
 export interface GuardInput {
   cwd: string;
@@ -74,6 +78,13 @@ export function blockingClaims(claims: ClaimRow[], symbolIds: string[], me: stri
   return claims.filter((c) => ids.has(c.symbolId) && c.agentId !== me && c.expiresAtMs > nowMs);
 }
 
+export function pausedMessage(conflictHint: string): string {
+  return [
+    `Contract: you are paused${conflictHint}. Another agent changed code your plan depends on, and the coordinator is deciding who changes what.`,
+    "Don't edit anything yet. Call get_instructions (Contract MCP tool) until it gives you the coordinator's decision, follow it, then continue.",
+  ].join('\n');
+}
+
 export function blockMessage(blocks: ClaimRow[], owners: Map<string, string>): string {
   const lines = blocks.map((c) => {
     const name = c.symbolId.split('#')[1] ?? c.symbolId;
@@ -93,37 +104,47 @@ async function main(): Promise<number> {
   // stderr is the message Claude Code shows the model, so keep the SpacetimeDB SDK's logs out of it.
   console.log = console.info = console.debug = () => {};
   const input = JSON.parse(readFileSync(0, 'utf8')) as GuardInput;
-  const agentId = process.env.CONTRACT_AGENT_ID;
-  const token = process.env.CONTRACT_TOKEN;
-  const host = process.env.SPACETIME_HOST;
-  if (!agentId || !token || !host) return 0;
+  const agent = hookAgent();
+  if (!agent) return 0;
+  const { agentId, token, host } = agent;
   const repoDir = process.env.CONTRACT_REPO_DIR ?? input.cwd;
   const path = input.tool_input?.file_path;
   const rel = path ? repoFile(path, input.cwd, repoDir) : undefined;
-  if (!rel || !existsSync(resolve(repoDir, rel))) return 0; // new files have no claims
+  if (!rel) return 0;
 
-  const { symbolRanges, symbolsTouched } = await import('@contract/mapper');
-  const current = readFileSync(resolve(repoDir, rel), 'utf8');
-  const ranges: SymbolRange[] = symbolRanges(rel, current);
-  const touched = symbolsTouched(ranges, pendingLines(input, current));
-  if (!touched.length) return 0;
+  let touched: string[] = [];
+  if (existsSync(resolve(repoDir, rel))) { // new files have no claims
+    const { symbolRanges, symbolsTouched } = await import('@contract/mapper');
+    const current = readFileSync(resolve(repoDir, rel), 'utf8');
+    const ranges: SymbolRange[] = symbolRanges(rel, current);
+    touched = symbolsTouched(ranges, pendingLines(input, current));
+  }
 
   const { DbConnection } = await import('@contract/client');
   const conn = await new Promise<InstanceType<typeof DbConnection>>((ok, fail) => {
     const c: InstanceType<typeof DbConnection> = DbConnection.builder()
       .withUri(host)
-      .withDatabaseName(process.env.SPACETIME_DB_NAME ?? 'contract')
+      .withDatabaseName(agent.dbName)
       .withToken(token)
       .onConnect(() => {
         c.subscriptionBuilder()
           .onApplied(() => ok(c))
           .onError((ctx) => fail(new Error(`subscription failed: ${String(ctx.event ?? 'unknown error')}`)))
-          .subscribe([...touched.map((id) => `SELECT * FROM claim WHERE symbol_id = ${sql(id)}`), 'SELECT * FROM agent']);
+          .subscribe([
+            ...touched.map((id) => `SELECT * FROM claim WHERE symbol_id = ${sql(id)}`),
+            'SELECT * FROM agent',
+            `SELECT * FROM conflict WHERE agent_b = ${sql(agentId)}`,
+          ]);
       })
       .onConnectError((_ctx, err) => fail(err))
       .build();
   });
   try {
+    if (conn.db.agent.id.find(agentId)?.status === 'paused') {
+      const c = [...conn.db.conflict.iter()].find((x) => x.status === 'open' || x.status === 'resolving');
+      process.stderr.write(pausedMessage(c ? ` on conflict #${c.id} (${c.symbolId})` : '') + '\n');
+      return 2;
+    }
     const claims = [...conn.db.claim.iter()].map((c) => ({
       symbolId: c.symbolId,
       agentId: c.agentId,

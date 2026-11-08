@@ -19,6 +19,7 @@ export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' 
 export type * as rows from './bindings/types.ts';
 export { DbConnection } from './bindings/index.ts';
 export { estimateTokens } from './context.ts';
+export { identitiesFile, identityKey, readSavedToken, writeSavedToken } from './identity.ts';
 export { holdService, SERVICE_HEARTBEAT_MS, type ServiceLock } from './service.ts';
 export { resolveTarget, checkTools, subdirPrefix, cloneDirFor, DEMO_CHECKS, type Target, type Check } from './target.ts';
 

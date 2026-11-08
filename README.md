@@ -93,6 +93,9 @@ Checks Node, `.env`, the `claude` login and git, registers the agent, and prints
 command. Only one coordinator and one watching mapper run per database (a second one
 refuses to start). Rehearsal steps and network fallbacks: `docs/two-laptop-rehearsal.md`.
 
+To join from your own Claude Code, Cursor or Codex session instead of our worker:
+`npm run join -- --agent dana --client claude-code` (see `docs/join-contract.md`).
+
 ## Your own repo
 
 Contract works on any git repository, not only `demo-repo/` (issue #18). Pick it with
