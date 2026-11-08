@@ -27,7 +27,7 @@ import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { resolveTarget, runInstall, stageAll, subdirPrefix, worktreeDir, type DbConnection } from '@contract/client';
 import { conflictMarkers, merge, mergeFix, run, runChecks, warnIfNoCoordinator } from './merge.ts';
-import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, TSX_CLI, waitFor } from './lib.ts';
+import { adminConnect, fastForwardToBase, git, log, REPO, resetServerState, savedToken, TSX, TSX_CLI, waitFor } from './lib.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -72,6 +72,11 @@ async function start() {
     if (target.base.startsWith('origin/')) {
       try {
         git(['fetch', 'origin', target.base.slice('origin/'.length)], target.gitRoot);
+        // A merge that landed since the last session (Merge and check's --land) is on origin only:
+        // fast-forward the checkout so the code map shows it.
+        const ff = fastForwardToBase(target.gitRoot, target.base);
+        if (ff.status === 'updated') log('session', `updated ${target.label} to ${target.base}`);
+        else if (ff.status === 'skipped') log('session', `not updating ${target.label} to ${target.base}: ${ff.reason}`);
         if (git(['diff', '--name-only', target.base, '--', path, `:!${subdirPrefix(target)}package-lock.json`], target.gitRoot)) {
           log('session', `WARNING: local ${target.label} differs from ${target.base}; the code map will not match what the workers start from`);
         }
