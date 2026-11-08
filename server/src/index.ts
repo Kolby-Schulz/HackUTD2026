@@ -1797,6 +1797,14 @@ function requireId(value: string, what: string): void {
   }
 }
 
+// A parent may be a hand-written variant that exists only as a folder in git (no `variant` row), so
+// it is checked by shape, not by row: `<screen>/<id>` on the same screen, with a folder-safe id.
+const VARIANT_NODE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+function requireVariantRef(screen: string, ref: string): void {
+  const node = ref.startsWith(`${screen}/`) ? ref.slice(screen.length + 1) : '';
+  if (!VARIANT_NODE_ID.test(node)) throw new SenderError(`parent '${ref}' must be '${screen}/<id>' (lowercase letters, digits, dashes)`);
+}
+
 function requireBoard(ctx: Ctx, boardId: string) {
   const row = ctx.db.board.id.find(boardId);
   if (!row) throw new SenderError(`unknown board '${boardId}'`);
@@ -2193,7 +2201,7 @@ export const queue_variant_job = spacetimedb.reducer(
     requireId(screen, 'screen');
     requireId(model, 'model');
     if (brief.length > MAX_BRIEF_CHARS) throw new SenderError(`brief over ${MAX_BRIEF_CHARS} characters`);
-    if (parent !== undefined && !ctx.db.variant.id.find(parent)) throw new SenderError(`unknown parent variant '${parent}'`);
+    if (parent !== undefined) requireVariantRef(screen, parent);
     ctx.db.variantJob.insert({
       id: 0n,
       screen,
@@ -2280,7 +2288,7 @@ export const save_variant_mix = spacetimedb.reducer(
     } catch {
       throw new SenderError('slots_json is not valid JSON');
     }
-    if (parent !== undefined && !ctx.db.variant.id.find(parent)) throw new SenderError(`unknown parent variant '${parent}'`);
+    if (parent !== undefined) requireVariantRef(screen, parent);
     const old = ctx.db.variantMix.id.find(id);
     if (old && !old.author.equals(ctx.sender)) throw new SenderError(`mix '${id}' belongs to someone else`);
     if (!old && ctx.db.variant.id.find(id)) throw new SenderError(`variant '${id}' already exists`);
