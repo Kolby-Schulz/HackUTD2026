@@ -1,15 +1,22 @@
 // Contract client library (spec section 10). Owner: agents.
 //
-// This file freezes the client API so the worker, MCP server, hook, coordinator,
-// mapper and triage can all code against it now. Method bodies are TODO until the
-// server module is published and bindings are generated into ./bindings.
-// Once bindings exist, replace the hand-written row types below with the generated ones.
+// The API types below are frozen; every process (worker, MCP server, hook, coordinator,
+// mapper, triage) codes against them. connect() talks to the server through the
+// generated bindings in ./bindings (regenerate with `npm run generate -w @contract/server`).
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Purpose, Usage } from '@contract/llm';
+import { DbConnection } from './bindings/index.ts';
+import { buildContext, estimateTokens, rankExisting, summaryKey } from './context.ts';
 
 export type Intent = 'modify' | 'create' | 'depend';
 export type ChangeKind = 'signature' | 'behavior' | 'created' | 'removed';
 export type AgentStatus = 'idle' | 'working' | 'paused' | 'done';
 export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' | 'auto_resolve';
+
+/** Generated table row types (camelCase fields), for code that reads tables directly. */
+export type * as rows from './bindings/types.ts';
+export { DbConnection } from './bindings/index.ts';
 
 export interface AgentInfo {
   id: string; // 'agent-a', or the fixed ids 'coordinator', 'mapper', 'triage'
@@ -32,6 +39,13 @@ export interface ConnectOptions {
   token?: string;
   /** Skip register_agent/heartbeat, for short-lived processes like contract-hook. */
   noHeartbeat?: boolean;
+  /**
+   * Directory that symbol `file` paths are relative to (the agent's demo-repo checkout).
+   * Used to hash files for the summary cache and to estimate tokens saved. Default: cwd.
+   */
+  repoDir?: string;
+  /** Milliseconds to wait for the connection and first subscription. Default 10 s. */
+  timeoutMs?: number;
 }
 
 export interface PlanItem {
@@ -97,9 +111,286 @@ export interface ContractClient {
   disconnect(): Promise<void>;
 }
 
+/** Thrown by claim() when another agent holds an unexpired claim on the symbol. */
+export class ClaimedError extends Error {
+  constructor(
+    readonly symbolId: string,
+    readonly holder: string,
+  ) {
+    super(`${symbolId} is already claimed by ${holder}`);
+    this.name = 'ClaimedError';
+  }
+}
+
+export const HEARTBEAT_MS = 15_000;
+export const DEFAULT_CLAIM_TTL_SECS = 300;
+const U32_MAX = 4_294_967_295;
+
+/** SQL string literal (single quotes doubled). */
+const sql = (s: string) => `'${s.replace(/'/g, "''")}'`;
+/** Reducer u32 arguments: whole, non-negative, capped. */
+const u32 = (n: number) => Math.min(U32_MAX, Math.max(0, Math.round(n)));
+
+function toInstruction(row: {
+  id: bigint;
+  agentId: string;
+  conflictId: bigint | undefined;
+  text: string;
+  acknowledged: boolean;
+}): Instruction {
+  return {
+    id: row.id,
+    agentId: row.agentId,
+    ...(row.conflictId !== undefined ? { conflictId: row.conflictId } : {}),
+    text: row.text,
+    acknowledged: row.acknowledged,
+  };
+}
+
+/** Shared between the connection callbacks and the client: set once the socket closes. */
+interface ConnState {
+  closed: boolean;
+  reason?: string;
+}
+
+/** Opens the WebSocket, waits for the identity/token and the first subscription. */
+function openConnection(opts: ConnectOptions, state: ConnState): Promise<{ conn: DbConnection; token: string }> {
+  const agentId = opts.agent.id;
+  // This agent's rows (spec section 10), plus the shared tables the token savers read.
+  const queries = [
+    `SELECT * FROM agent WHERE id = ${sql(agentId)}`,
+    `SELECT * FROM instruction WHERE agent_id = ${sql(agentId)}`,
+    `SELECT * FROM conflict WHERE agent_a = ${sql(agentId)}`,
+    `SELECT * FROM conflict WHERE agent_b = ${sql(agentId)}`,
+    'SELECT * FROM decision',
+    'SELECT * FROM claim',
+    'SELECT * FROM run',
+    'SELECT * FROM symbol',
+    'SELECT * FROM symbol_edge',
+    'SELECT * FROM summary_cache',
+  ];
+
+  return new Promise((resolvePromise, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`connect: no response from ${opts.host} (${opts.dbName}) within ${opts.timeoutMs ?? 10_000} ms`)),
+      opts.timeoutMs ?? 10_000,
+    );
+    const fail = (e: unknown) => {
+      clearTimeout(timer);
+      reject(e instanceof Error ? e : new Error(String(e)));
+    };
+    const conn: DbConnection = DbConnection.builder()
+      .withUri(opts.host)
+      .withDatabaseName(opts.dbName)
+      .withToken(opts.token)
+      .onConnect((_ctx, _identity, token) => {
+        conn
+          .subscriptionBuilder()
+          .onApplied(() => {
+            clearTimeout(timer);
+            resolvePromise({ conn, token });
+          })
+          .onError((ctx) => fail(new Error(`connect: subscription failed: ${String(ctx.event ?? 'unknown error')}`)))
+          .subscribe(queries);
+      })
+      .onConnectError((_ctx, err) => fail(err))
+      .onDisconnect((_ctx, err) => {
+        if (state.closed) return; // disconnect() already recorded why
+        state.closed = true;
+        state.reason = err ? String(err) : 'connection lost';
+        console.warn(`[contract] ${opts.agent.id}: ${state.reason}`);
+      })
+      .build();
+  });
+}
+
 /** Calls register_agent, starts a 15 s heartbeat, subscribes to this agent's rows. */
-export async function connect(_opts: ConnectOptions): Promise<ContractClient> {
-  throw new Error('ContractClient.connect: not implemented yet (needs generated bindings)');
+export async function connect(opts: ConnectOptions): Promise<ContractClient> {
+  const state: ConnState = { closed: false };
+  const { conn, token } = await openConnection(opts, state);
+  const agentId = opts.agent.id;
+  /** Fail fast instead of hanging when the connection is gone. */
+  const live = () => {
+    if (state.closed) throw new Error(`ContractClient(${agentId}): connection closed (${state.reason ?? 'disconnected'})`);
+  };
+  const repoDir = opts.repoDir ?? process.cwd();
+  const r = conn.reducers;
+  const db = conn.db;
+
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  if (!opts.noHeartbeat) {
+    try {
+      await r.registerAgent({
+        id: agentId,
+        name: opts.agent.name,
+        ownerDev: opts.agent.ownerDev,
+        machine: opts.agent.machine,
+        model: opts.agent.model,
+        tokenBudget: BigInt(Math.max(0, Math.round(opts.agent.tokenBudget))),
+      });
+    } catch (e) {
+      conn.disconnect();
+      throw e;
+    }
+    heartbeat = setInterval(() => {
+      if (state.closed) return clearInterval(heartbeat);
+      r.heartbeat({ agentId }).catch((e: unknown) => console.warn(`[contract] heartbeat failed: ${String(e)}`));
+    }, HEARTBEAT_MS);
+    heartbeat.unref?.();
+  }
+
+  /** The open run (or, if none is open, the newest one) that token rows belong to. */
+  function currentRunId(): bigint {
+    let best: { id: bigint; open: boolean } | undefined;
+    for (const run of db.run.iter()) {
+      const open = run.endedAt === undefined;
+      if (!best || (open && !best.open) || (open === best.open && run.id > best.id)) best = { id: run.id, open };
+    }
+    return best?.id ?? 0n;
+  }
+
+  /** File contents relative to repoDir, or undefined when unreadable. */
+  function readRepoFile(file: string): string | undefined {
+    try {
+      return readFileSync(resolve(repoDir, file), 'utf8');
+    } catch {
+      return undefined;
+    }
+  }
+
+  function cachedSummary(file: string) {
+    const content = readRepoFile(file);
+    if (content === undefined) return undefined;
+    const row = db.summaryCache.key.find(summaryKey(file, content));
+    return row ? { row, content } : undefined;
+  }
+
+  const client: ContractClient = {
+    agentId,
+    token,
+
+    async publishPlan(taskId, summary, items) {
+      live();
+      await r.publishPlan({ agentId, taskId, summary, items: items.map((i) => ({ symbolId: i.symbolId, intent: i.intent })) });
+    },
+
+    async claim(symbolId, ttlSecs = DEFAULT_CLAIM_TTL_SECS) {
+      live();
+      await r.claimSymbol({ agentId, symbolId, ttlSecs: u32(ttlSecs) });
+      // claim_symbol never throws on contention (a throw would also roll back the
+      // conflict it records); the claim row tells us who holds it.
+      const holder = db.claim.symbolId.find(symbolId)?.agentId;
+      if (holder !== agentId) throw new ClaimedError(symbolId, holder ?? 'another agent');
+    },
+
+    async release(symbolId) {
+      live();
+      await r.releaseClaim({ agentId, symbolId });
+    },
+
+    async reportChange(symbolId, kind, o) {
+      live();
+      await r.reportChange({ agentId, symbolId, kind, newSignature: o.newSignature, description: o.description });
+    },
+
+    onInstruction(cb) {
+      const handler = (_ctx: unknown, row: Parameters<typeof toInstruction>[0]) => {
+        if (row.agentId === agentId) cb(toInstruction(row));
+      };
+      db.instruction.onInsert(handler);
+      return () => db.instruction.removeOnInsert(handler);
+    },
+
+    onStatusChange(cb) {
+      const handler = (_ctx: unknown, oldRow: { id: string; status: string }, newRow: { id: string; status: string }) => {
+        if (newRow.id === agentId && newRow.status !== oldRow.status) cb(newRow.status as AgentStatus);
+      };
+      db.agent.onUpdate(handler);
+      return () => db.agent.removeOnUpdate(handler);
+    },
+
+    async ack(instructionId) {
+      live();
+      await r.acknowledgeInstruction({ instructionId });
+    },
+
+    pendingInstructions() {
+      return [...db.instruction.iter()]
+        .filter((i) => i.agentId === agentId && !i.acknowledged)
+        .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+        .map(toInstruction);
+    },
+
+    async getContext(symbolIds, depth = 1) {
+      live();
+      const symbols = new Map([...db.symbol.iter()].map((s) => [s.id, s]));
+      const slice = buildContext(symbolIds, depth, symbols, [...db.symbolEdge.iter()], (file) => cachedSummary(file)?.row.summary);
+      // Savings estimate: the whole files these symbols live in vs. the slice returned.
+      const files = new Set(slice.map((c) => symbols.get(c.id)!.file));
+      const fileTokens = [...files].reduce((n, f) => n + estimateTokens(readRepoFile(f) ?? ''), 0);
+      const avoided = fileTokens - estimateTokens(JSON.stringify(slice));
+      if (slice.length && avoided > 0) {
+        await client
+          .logSaving('context_slice', avoided, `get_context ${symbolIds.join(', ')} (depth ${depth})`)
+          .catch(() => {});
+      }
+      return slice;
+    },
+
+    async findExisting(q) {
+      live();
+      return rankExisting(q, db.symbol.iter());
+    },
+
+    async getSummary(file) {
+      live();
+      const hit = cachedSummary(file);
+      if (!hit) return undefined;
+      await r.recordCacheHit({ key: hit.row.key });
+      const avoided = estimateTokens(hit.content) - hit.row.summaryTokens;
+      if (avoided > 0) await client.logSaving('cache_hit', avoided, `summary of ${file}`).catch(() => {});
+      return hit.row.summary;
+    },
+
+    async putSummary(file, summary, tokens) {
+      live();
+      const content = readRepoFile(file);
+      if (content === undefined) throw new Error(`putSummary: can't read ${file} under ${repoDir}`);
+      await r.cacheSummary({ key: summaryKey(file, content), summary, summaryTokens: u32(tokens) });
+    },
+
+    async logTokens(taskId, attempt, purpose, usage) {
+      live();
+      await r.logTokens({
+        runId: currentRunId(),
+        agentId,
+        taskId,
+        attempt: u32(attempt),
+        purpose,
+        promptTokens: u32(usage.prompt_tokens),
+        completionTokens: u32(usage.completion_tokens),
+      });
+    },
+
+    async markAttemptWasted(taskId, attempt) {
+      live();
+      await r.markAttemptWasted({ taskId, attempt: u32(attempt) });
+    },
+
+    async logSaving(kind, tokensAvoidedEst, note) {
+      live();
+      await r.logSaving({ runId: currentRunId(), agentId, kind, tokensAvoidedEst: u32(tokensAvoidedEst), note });
+    },
+
+    async disconnect() {
+      if (heartbeat) clearInterval(heartbeat);
+      if (state.closed) return;
+      state.closed = true;
+      state.reason = 'disconnect() called';
+      conn.disconnect();
+    },
+  };
+  return client;
 }
 
 /**
