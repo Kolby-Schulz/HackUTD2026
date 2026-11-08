@@ -88,7 +88,7 @@ export function App() {
         <div style={{ padding: '0 20px' }}>
           <div className="banner" role="status">
             Not connected to SpacetimeDB at <span className="mono">{SPACETIME_HOST}</span> (database <span className="mono">{SPACETIME_DB_NAME}</span>).
-            {live.error ? ` ${live.error}.` : ''} Start it with <span className="mono">spacetime start</span> and publish the module, or set VITE_SPACETIME_HOST.
+            {live.error ? ` ${live.error}.` : ''} Check SPACETIME_HOST and SPACETIME_DB_NAME in the root .env, or start a local server with <span className="mono">spacetime start</span>.
           </div>
         </div>
       )}

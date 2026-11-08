@@ -5,12 +5,15 @@ import { useSpacetimeDB, useTable } from 'spacetimedb/react';
 import { DbConnection, tables } from '@bindings/index.ts';
 import type { Tables } from './model.ts';
 
-const TOKEN_KEY = 'contract.dashboard.token';
+/** Server address from the root .env (see vite.config.ts). A local server defaults to this
+ *  page's host so a second laptop opening http://<demo-laptop>:5173 reaches the same port 3000. */
+declare const __SPACETIME_HOST__: string;
+declare const __SPACETIME_DB_NAME__: string;
+export const SPACETIME_HOST = __SPACETIME_HOST__ || `ws://${location.hostname || 'localhost'}:3000`;
+export const SPACETIME_DB_NAME = __SPACETIME_DB_NAME__;
 
-/** Server address. Defaults to this page's host so a second laptop opening
- *  http://<demo-laptop>:5173 connects to the same SpacetimeDB on port 3000. */
-export const SPACETIME_HOST = import.meta.env.VITE_SPACETIME_HOST || `ws://${location.hostname || 'localhost'}:3000`;
-export const SPACETIME_DB_NAME = import.meta.env.VITE_SPACETIME_DB_NAME || 'contract';
+// One saved identity per server: a token from the local server is rejected by maincloud (401).
+const TOKEN_KEY = `contract.dashboard.token:${SPACETIME_HOST}/${SPACETIME_DB_NAME}`;
 
 function savedToken(): string | undefined {
   try { return localStorage.getItem(TOKEN_KEY) ?? undefined; } catch { return undefined; }
