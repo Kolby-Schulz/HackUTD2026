@@ -11,6 +11,7 @@
     "dashboard"
   ],
   "scripts": {
+    "test": "vitest run",
     "mapper": "npm run start -w @contract/mapper --",
     "worker": "npm run start -w @contract/worker --",
     "coordinator": "npm run start -w @contract/coordinator --",

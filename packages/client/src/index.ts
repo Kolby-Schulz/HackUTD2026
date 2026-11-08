@@ -12,6 +12,7 @@ import { buildContext, estimateTokens, rankExisting, summaryKey } from './contex
 export type Intent = 'modify' | 'create' | 'depend';
 export type ChangeKind = 'signature' | 'behavior' | 'created' | 'removed';
 export type AgentStatus = 'idle' | 'working' | 'paused' | 'done';
+export type TaskStatus = 'todo' | 'in_progress' | 'paused' | 'done' | 'discarded';
 export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' | 'auto_resolve';
 
 /** Generated table row types (camelCase fields), for code that reads tables directly. */
@@ -96,6 +97,13 @@ export interface ContractClient {
   onStatusChange(cb: (status: AgentStatus) => void): () => void;
   ack(instructionId: bigint): Promise<void>;
   pendingInstructions(): Instruction[];
+  /** This agent's current status from its agent row (undefined if not registered). */
+  status(): AgentStatus | undefined;
+
+  // Tasks and claims (used by the worker script at the start/end of a run)
+  setTaskStatus(taskId: bigint, status: TaskStatus): Promise<void>;
+  /** Symbol ids this agent currently holds a claim on. */
+  myClaims(): string[];
 
   // Token savers
   getContext(symbolIds: string[], depth?: number): Promise<SymbolContext[]>;
@@ -321,6 +329,19 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
         .map(toInstruction);
     },
 
+    status() {
+      return db.agent.id.find(agentId)?.status as AgentStatus | undefined;
+    },
+
+    async setTaskStatus(taskId, status) {
+      live();
+      await r.setTaskStatus({ taskId, status });
+    },
+
+    myClaims() {
+      return [...db.claim.iter()].filter((c) => c.agentId === agentId).map((c) => c.symbolId).sort();
+    },
+
     async getContext(symbolIds, depth = 1) {
       live();
       const symbols = new Map([...db.symbol.iter()].map((s) => [s.id, s]));
@@ -415,6 +436,9 @@ export function noopClient(agentId: string, logTokens: ContractClient['logTokens
     onStatusChange: () => () => {},
     ack: nothing,
     pendingInstructions: () => [],
+    status: () => undefined,
+    setTaskStatus: nothing,
+    myClaims: () => [],
     getContext: async () => [],
     findExisting: async () => [],
     getSummary: async () => undefined,

@@ -9,3 +9,5 @@ dist/
 .worktrees/
 # SpacetimeDB build output
 server/target/
+# local token log (baseline numbers for the early_stop estimate)
+.contract/

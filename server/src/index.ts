@@ -808,6 +808,18 @@ export const report_change = spacetimedb.reducer(
 // Coordinator decisions
 // ---------------------------------------------------------------------------------
 
+/** Coordinator step 1 (spec section 12): take an open conflict so it isn't handled twice. */
+export const mark_conflict_resolving = spacetimedb.reducer(
+  { conflict_id: t.u64() },
+  (ctx, { conflict_id }) => {
+    requireCoordinator(ctx);
+    const c = ctx.db.conflict.id.find(conflict_id);
+    if (!c) throw new SenderError(`unknown conflict ${conflict_id}`);
+    if (c.status !== 'open') throw new SenderError(`conflict ${conflict_id} is ${c.status}, not open`);
+    ctx.db.conflict.id.update({ ...c, status: 'resolving' });
+  },
+);
+
 export const resolve_conflict = spacetimedb.reducer(
   {
     conflict_id: t.u64(),
