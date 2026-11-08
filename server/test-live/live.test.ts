@@ -207,7 +207,8 @@ describe('Rule 1 pushes end to end', () => {
     // Assert 2
     expect(pushed[1]).toBe('Do not round again in checkout.');
     await waitFor(() => b.conn.db.agent.id.find(id('agent-b'))!.status === 'working');
-    expect(a.conn.db.conflict.id.find(conflict.id)!.status).toBe('resolved');
+    // A's cache gets the coordinator's update a moment after B's; wait for it.
+    await waitFor(() => a.conn.db.conflict.id.find(conflict.id)?.status === 'resolved');
   });
 
   it('a worker cannot resolve conflicts', async () => {
@@ -259,7 +260,10 @@ describe('Rule 2 over the wire', () => {
 describe('transactions over the wire', () => {
   it('a rejected reducer leaves no partial rows', async () => {
     // Arrange
-    const plansBefore = rows(a.conn.db.plan.iter()).length;
+    // Count only A's own plans: other agents' plans from earlier tests may still be
+    // arriving in A's cache, but A's own rows are in place once its reducer returns.
+    const mine = () => rows(a.conn.db.plan.iter()).filter((p) => p.agentId === id('agent-a'));
+    const plansBefore = mine().length;
 
     // Act
     const act = a.conn.reducers.publishPlan({
@@ -274,8 +278,8 @@ describe('transactions over the wire', () => {
 
     // Assert
     await expect(act).rejects.toThrow(/unknown symbol/);
-    expect(rows(a.conn.db.plan.iter())).toHaveLength(plansBefore);
-    expect(rows(a.conn.db.plan.iter()).filter((p) => p.agentId === id('agent-a') && p.active)).toHaveLength(1);
+    expect(mine()).toHaveLength(plansBefore);
+    expect(mine().filter((p) => p.active)).toHaveLength(1);
   });
 
   it('two agents racing for one claim: exactly one wins, one contention conflict', async () => {

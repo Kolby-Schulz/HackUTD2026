@@ -1,5 +1,7 @@
 // Worker script (spec section 11). Owner: agents.
 // npm run worker -- --id agent-a --task 1 --mode with_contract|without_contract
+//   [--task-id <task row id>]  (default: --task; scripts/seed.ts creates new rows each run)
+//   CONTRACT_TOKEN in env reuses an identity, so the same agent id can run again at once.
 //
 // Runs one Claude Code session headless in its own git worktree. In with_contract
 // mode it joins Contract (MCP server + rules + edit hook), stops on pause and resumes
@@ -25,6 +27,7 @@ const { values } = parseArgs({
   options: {
     id: { type: 'string' },
     task: { type: 'string', default: '1' },
+    'task-id': { type: 'string' },
     mode: { type: 'string', default: 'with_contract' },
     owner: { type: 'string', default: process.env.USER ?? 'dev' },
     machine: { type: 'string', default: process.env.HOSTNAME ?? 'laptop' },
@@ -32,7 +35,7 @@ const { values } = parseArgs({
 });
 const agentId = values.id ?? die('--id is required');
 const mode = values.mode as 'with_contract' | 'without_contract';
-const taskId = BigInt(values.task!);
+const taskId = BigInt(values['task-id'] ?? values.task!);
 const task = TASKS[values.task!] ?? die(`unknown --task ${values.task}`);
 let attempt = 1;
 
@@ -56,6 +59,7 @@ const connectOpts = {
   host: process.env.SPACETIME_HOST!,
   dbName: process.env.SPACETIME_DB_NAME!,
   repoDir: cwd,
+  token: process.env.CONTRACT_TOKEN || undefined,
   agent: { id: agentId, name: agentId, ownerDev: values.owner!, machine: values.machine!, model: 'claude-code', tokenBudget: 200_000 },
 };
 let contract: ContractClient;
