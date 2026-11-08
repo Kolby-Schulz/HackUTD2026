@@ -38,7 +38,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **CM:** `demo-repo/`: `fees.ts` (rounds down), `invoice.ts`, `checkout.ts`, `models.ts`, unit tests, `integration.test.ts` (half-up, invoice == checkout), `scripts/check-dupes.ts`, own `package.json` with vitest
 - [ ] **CM:** mapper: ts-morph parse → symbols (id `file#name`, `file#Class.method`), signature + `signature_hash`, call edges; `upsert_symbols` per file; `--watch` with chokidar
 - [ ] **CM:** mapper exports `mapFile(path)` for `contract-hook` to reuse
-- [ ] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables
+- [x] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables (Live, Activity, Tokens, Scoreboard tabs; storyboard rows G/F; `npm test -w @contract/dashboard`)
 - [ ] **DD:** `scripts/seed.ts`: create the two tasks and a run
 
 ## Milestone 3: Rule 1 end to end
@@ -48,7 +48,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **CM:** coordinator decision logic: section 12 prompt, JSON schema, validation, retry once, claimed-first fallback (`agents/coordinator/src/decide.ts`). `npm run coordinator -- --demo` verified: owner agent-a, B told not to round again.
 - [ ] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens
 - [ ] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0
-- [ ] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors
+- [x] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors, planned creates as dashed ghosts
 
 ## Milestone 4: Rule 2 end to end
 
@@ -61,7 +61,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **BE:** `mark_attempt_wasted`, `log_saving`, `cache_summary`/`record_cache_hit`
 - [ ] **DD:** `scripts/run-demo.ts --mode … --seed 7`: run both workers, merge branches, run tests + check-dupes, `merge_fix` pass
 - [ ] **DD:** `scripts/reset.ts`: restore demo-repo, remove `.worktrees/`, clear run data
-- [ ] **DD:** Token meter, Savings ticker, Scoreboard panels
+- [x] **DD:** Token meter, Savings ticker, Scoreboard panels (duplicate helpers + tests passing show "not recorded" until run-demo stores them)
 - [ ] **Everyone:** 3 runs per mode, average, sanity-check numbers
 
 ## Milestone 6: Demo-ready
