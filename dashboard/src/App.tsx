@@ -12,7 +12,7 @@ import { TokensTab } from './TokensTab.tsx';
 import { ScoreboardTab } from './ScoreboardTab.tsx';
 import { CodeTab } from './CodeTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
-import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
+import { APP_NAME, Intro, SMark, shouldPlayIntro } from './Intro.tsx';
 
 type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard' | 'replay';
 const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard'], ['replay', 'Replay']];
@@ -67,7 +67,7 @@ export function App() {
       <AnimatePresence>{intro && <Intro key="intro" onDone={endIntro} />}</AnimatePresence>
       <header className="topnav">
         <div className="brand">
-          <button className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><LanesMark /></button>
+          <button className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><SMark /></button>
           {APP_NAME}
         </div>
         <span className="vsep" />
