@@ -24,6 +24,7 @@ import type { PointerInfo } from '../gestures/pipeline';
 import { trackSpace } from '../gestures/pan';
 import { resetTextHandle, startEditing } from '../gestures/text';
 import { Claims } from '../overlays/Claims';
+import { DesignLoading } from '../overlays/DesignLoading';
 import { Hover } from '../overlays/Hover';
 import type { DescribeTarget } from '../overlays/Hover';
 import { Marquee } from '../overlays/Marquee';
@@ -216,6 +217,7 @@ export function Board(props: {
         <div className="pg-overlays">
           <RemoteSelections />
           <Claims />
+          <DesignLoading />
           <SelectionBox />
           <Hover describe={props.describeTarget} />
           <Marquee />

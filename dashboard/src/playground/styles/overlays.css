@@ -23,3 +23,15 @@
 .pg-edge.h-e { right: -4px; }
 .pg-sbox.tiny .pg-edge { display: none; }
 .pg-sbox .pg-dims { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); background: var(--pg-sel); color: var(--pg-white); white-space: nowrap; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-variant-numeric: tabular-nums; pointer-events: none; }
+
+/* Frames an agent is still designing (DesignLoading): a skeleton with a shimmer, in the agent's colour. */
+.pg-loading { position: absolute; left: 0; top: 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 3%; pointer-events: none; border-radius: 4px; outline: 2px dashed var(--c, var(--pg-accent)); outline-offset: 2px; }
+.pg-loading-bar, .pg-loading-card { display: block; border-radius: 6px; background: linear-gradient(90deg, var(--pg-chip) 0%, var(--pg-hover-strong) 50%, var(--pg-chip) 100%); background-size: 200% 100%; animation: pg-shimmer 1.2s linear infinite; }
+.pg-loading-bar, .pg-loading-card { margin: 0 8%; } /* percentages here are of the frame (padding would be of the whole overlay layer) */
+.pg-loading-bar { height: 4%; min-height: 4px; }
+.pg-loading-bar:first-child { margin-top: 10%; }
+.pg-loading-bar.w60 { width: 60%; } .pg-loading-bar.w90 { width: 90%; } .pg-loading-bar.w40 { width: 40%; }
+.pg-loading-card { flex: 1; margin-top: 4%; margin-bottom: 10%; }
+.pg-loading-label { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); white-space: nowrap; font-size: 11px; font-weight: 600; color: var(--pg-white); background: var(--c, var(--pg-accent)); padding: 2px 8px; border-radius: 999px; }
+@keyframes pg-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .pg-loading-bar, .pg-loading-card { animation: none; } }

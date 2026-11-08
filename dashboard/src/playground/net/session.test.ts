@@ -78,6 +78,10 @@ class FakeClient implements BoardTransport {
   async postMessage() { this.live(); }
   async logTokens() { this.live(); }
   onMessages() { return () => {}; }
+  onClaims() { return () => {}; }
+  async claimDesign() { this.live(); }
+  async renewDesignClaim() { this.live(); }
+  async releaseDesignClaim() { this.live(); }
   async claimService(name: string, holder: string) {
     this.live();
     const row = this.server.services.get(name);
