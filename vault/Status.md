@@ -17,9 +17,10 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
     `.worktrees/wiring`), `feat/dashboard-playground` (fast-forwards to wiring after checks + visual pass).
   - Wave 0 done; Wave 1 done (all 39 WPs; features e4da972, 612 tests). Wave 2 started early (WP-52, 55, 56, 58, 61, 63,
     64 merged) before the owner asked to finish phases in order; no more Wave 2 until wiring + visual pass are done.
-  - Running: wiring agents W-chat, W-board, W-core (worktrees `.worktrees/w-*`, branches `wire/*`, file-disjoint).
-  - Next: review + merge wire/* into playground/wiring, visual pass of the demo checklist (needs a visible browser
-    pane), then fast-forward feat/dashboard-playground. Then remaining Wave 2/3 and WP-NET-0.
+  - Wiring DONE on playground/wiring (2dfbb64, 631 tests, build green; WIRING.md has 0 todo, 1 dropped with reason).
+  - Visual pass pending: needs the browser pane visible (hidden pane = no rAF = cursors, overlays, bench don't run).
+  - Next: visual pass of the demo checklist on port 5174 (wp-review serves the wiring worktree), then fast-forward
+    feat/dashboard-playground to playground/wiring. Then remaining Wave 2/3 and WP-NET-0.
 
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
 - #26: submission package (README, diagram, demo video, Devpost)
