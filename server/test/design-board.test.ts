@@ -285,6 +285,19 @@ describe('write_board_snapshot', () => {
     expect(all(t.db.boardOp.iter())).toHaveLength(0);
   });
 
+  it('a resend of an op compacted by a snapshot is skipped, not applied again', () => {
+    // Arrange: ann:1 and ann:2 are compacted away
+    asOperator(t, (ctx) => mod.write_board_snapshot(ctx, { board_id: BOARD, upto_seq: 1n, doc: '{}' }));
+
+    // Act: the outbox resends ann:1 (same body) alongside a new op
+    push(t, 'worker-a', [op('ann', 1), op('ann', 4)]);
+
+    // Assert: only ann:4 is new, and it takes the next seq
+    const log = all(t.db.boardOp.iter()).sort((a, b) => (a.seq < b.seq ? -1 : 1));
+    expect(log.map((o) => [o.op_id, o.seq])).toEqual([['ann:3', 2n], ['ann:4', 3n]]);
+    expect(t.db.boardActor.actor.find('ann')!.last_op_seq).toBe(4n);
+  });
+
   it('refuses upto_seq at or beyond next_seq', () => {
     expect(() => asOperator(t, (ctx) => mod.write_board_snapshot(ctx, { board_id: BOARD, upto_seq: 3n, doc: '{}' }))).toThrow(/next_seq/);
     expect(all(t.db.boardOp.iter())).toHaveLength(3);

@@ -1897,7 +1897,7 @@ export const push_ops = spacetimedb.reducer(
         throw new SenderError(`op_id '${op.op_id}' must look like <actor>:<number>`);
       }
       if (byteLength(op.body) > MAX_OP_BODY_BYTES) throw new SenderError(`op body over ${MAX_OP_BODY_BYTES} bytes`);
-      requireActor(ctx, board_id, actor);
+      const owner = requireActor(ctx, board_id, actor);
       const n = BigInt(num);
       if (n > (highest.get(actor) ?? 0n)) highest.set(actor, n);
       const old = ctx.db.boardOp.op_id.find(op.op_id);
@@ -1905,6 +1905,9 @@ export const push_ops = spacetimedb.reducer(
         if (old.body !== op.body) throw new SenderError(`op '${op.op_id}' already exists with a different body`);
         continue; // idempotent resend
       }
+      // Not in the log but at or below the actor's high-water mark: it was accepted earlier and a
+      // snapshot has since compacted it away. Skip it, so a resend never applies an op twice.
+      if (n <= owner.last_op_seq) continue;
       ctx.db.boardOp.insert({
         op_id: op.op_id,
         board_id,
