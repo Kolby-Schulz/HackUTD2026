@@ -28,6 +28,7 @@ beforeEach(() => {
   other = join(root, 'other');
   git(root, 'init', '-q', '--bare', '-b', 'main', origin);
   git(root, 'clone', '-q', origin, local);
+  git(local, 'config', 'core.autocrlf', 'false'); // Windows runners default to true and would check out \r\n
   git(local, 'checkout', '-q', '-b', 'main');
   writeFileSync(join(local, 'a.ts'), 'export const a = 1;\n');
   git(local, 'add', '-A');
