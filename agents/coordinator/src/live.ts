@@ -42,6 +42,53 @@ export function priorDecisions(c: rows.Conflict, t: Tables): string[] {
   return out.slice(-MAX_PRIOR);
 }
 
+/**
+ * A duplicate conflict on the same two functions and the same two agents as one already decided
+ * this run: the mirror image (both agents planned a formatter at once, so the server opens one
+ * conflict each way) or a repeat. Returns the earlier ruling mapped onto this conflict's sides,
+ * so the coordinator doesn't ask the model again and risk reversing itself. In the first
+ * two-laptop maincloud run, Nemotron gave conflict 1 to agent-b and its mirror, conflict 2, to
+ * agent-a, which left two formatters at merge and forced a merge fix.
+ */
+export function repeatDecision(c: rows.Conflict, t: Tables): { decision: Decision; earlier: bigint } | undefined {
+  if (c.kind !== 'duplicate') return undefined;
+  const conflicts = new Map((t.conflicts ?? []).map((x) => [x.id, x]));
+  const since = newest((t.runs ?? []).filter((r) => r.endedAt === undefined))?.startedAt.microsSinceUnixEpoch;
+  const sameAgents = (k: rows.Conflict) =>
+    (k.agentA === c.agentA && k.agentB === c.agentB) || (k.agentA === c.agentB && k.agentB === c.agentA);
+  // Same function, or each conflict names the other's function (mirror: A's vs B's formatter).
+  const sameFunctions = (k: rows.Conflict) =>
+    k.symbolId === c.symbolId || (c.details.includes(k.symbolId) && k.details.includes(c.symbolId));
+
+  const earlier = [...(t.decisions ?? [])]
+    .sort((x, y) => (x.id < y.id ? -1 : 1))
+    .map((d) => ({ d, k: conflicts.get(d.conflictId) }))
+    .filter(
+      (x): x is { d: rows.Decision; k: rows.Conflict } =>
+        !!x.k &&
+        x.k.id < c.id &&
+        x.k.kind === 'duplicate' &&
+        (since === undefined || x.k.createdAt.microsSinceUnixEpoch >= since) &&
+        sameAgents(x.k) &&
+        sameFunctions(x.k),
+    );
+  // The first ruling is the one the agents already acted on.
+  const first = earlier[0];
+  if (!first) return undefined;
+  const { d, k } = first;
+  const told = (agent: string) => (agent === k.agentA ? d.instructionsA : d.instructionsB);
+  return {
+    earlier: k.id,
+    decision: {
+      action: 'resolve',
+      owner_agent: d.ownerAgent,
+      instructions_a: told(c.agentA),
+      instructions_b: told(c.agentB),
+      reason: `Same ruling as conflict #${k.id} (same duplicate pair): ${d.reason}`,
+    },
+  };
+}
+
 const newest = <T extends { id: bigint }>(xs: T[]) => xs.reduce<T | undefined>((b, x) => (!b || x.id > b.id ? x : b), undefined);
 
 /** One agent's side: active plan summary, current task, plan items as `intent symbol_id`. */
@@ -115,8 +162,12 @@ export async function handleConflict(d: Deps, c: rows.Conflict): Promise<void> {
   let ctx = buildConflictContext(c, { plans: [], planItems: [], tasks: [], changes: [] });
   try {
     const symbol = (await d.getContext([c.symbolId], 1).catch(() => [])).find((s) => s.id === c.symbolId);
-    ctx = buildConflictContext(c, d.tables(), symbol);
-    const { decision, source } = await decideConflict(d.llm, ctx, (u) => d.logTokens(u).catch(() => {}));
+    const tables = d.tables();
+    ctx = buildConflictContext(c, tables, symbol);
+    const repeat = repeatDecision(c, tables);
+    const { decision, source } = repeat
+      ? { decision: repeat.decision, source: `prior_decision (#${repeat.earlier})` }
+      : await decideConflict(d.llm, ctx, (u) => d.logTokens(u).catch(() => {}));
     if (decision.action === 'dismiss') await d.reducers.dismissConflict({ conflictId, reason: decision.reason });
     else await resolveWith(d, conflictId, decision);
     log(`conflict ${conflictId} (${c.kind} ${c.symbolId}) ${decision.action}d by ${source}: owner ${decision.owner_agent}; ${decision.reason}`);
