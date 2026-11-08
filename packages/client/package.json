@@ -4,6 +4,17 @@
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
-  "scripts": { "typecheck": "tsc --noEmit" },
-  "dependencies": { "spacetimedb": "^2.14.1", "@contract/llm": "*" }
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts"
+  },
+  "dependencies": {
+    "@contract/llm": "*",
+    "@contract/server": "*",
+    "spacetimedb": "^2.14.1"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7"
+  }
 }
