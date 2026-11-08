@@ -79,7 +79,19 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - WP-16, WP-50: no seam (WP-50 write-back of measured text sizes is WP-60's job, Wave 2).
 - todo (WP-46): `ui/gestures/pipeline.ts` `down()` ignores `button === 2` so a right-click opens the context menu without
   starting a select/move gesture.
-- todo: WP-33 (pending report).
+- todo (WP-33): `actions/view.ts` adds `{ id: 'view.toggleDebug', title: 'Toggle debug HUD', group: 'View', contexts: ctx,
+  run: () => toggleDebug() }` (import `toggleDebug` from `../core/perf`); `core/devtools.ts` adds
+  `debug: (on = true) => setDebug(on)`.
+
+## Assignment for the wiring agents (file-disjoint)
+- W-chat: sections A, B (except the `useBoot` line), F. Files: `ui/chat/*`, `ui/comments/*`, `agents/scripted.ts`,
+  `styles/chat.css`, `styles/comments.css`.
+- W-board: sections C, D, E, the WP-28 and WP-46 entries, H "Shift-click on pointer-up", H "layers ancestor rings".
+  Files: `core/snap/move.ts`, `ui/gestures/*`, `ui/board/*`, `ui/layers/*`, `ui/overlays/*` (new pulse overlay allowed).
+- W-core: section G, B's `useBoot` line, H `Tx.sel`, align shortcuts, opacity keys, export entries, toasts, WP-33.
+  Files: `core/commands.ts`, `core/actors.ts`, `agents/runtime.ts`, `ui/useBoot.ts`, `core/toast.ts`, `core/devtools.ts`,
+  `actions/align.ts`, `actions/view.ts`, `actions/layers.ts`, `actions/share.ts`, `ui/shell/TopBar.tsx`,
+  `ui/inspector/*` (export section only).
 
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).
