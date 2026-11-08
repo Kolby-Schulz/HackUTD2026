@@ -13,6 +13,7 @@
     "test": "vitest run",
     "build": "spacetime build --module-path .",
     "publish": "spacetime publish --module-path . --server local contract",
+    "publish:cloud": "spacetime publish --module-path . --server maincloud contract-hackutd26",
     "generate": "spacetime generate --lang typescript --out-dir ../packages/client/src/bindings --module-path . --yes",
     "test:live": "vitest run --config vitest.live.config.ts"
   },

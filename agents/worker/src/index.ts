@@ -1,11 +1,13 @@
 // Worker script (spec section 11). Owner: agents.
 // npm run worker -- --id agent-a --task 1 --mode with_contract|without_contract
+//   [--task-id <task row id>]  (default: --task; scripts/seed.ts creates new rows each run)
+//   CONTRACT_TOKEN in env reuses an identity, so the same agent id can run again at once.
 //
 // Runs one Claude Code session headless in its own git worktree. In with_contract
 // mode it joins Contract (MCP server + rules + edit hook), stops on pause and resumes
 // with the coordinator's decision. In without_contract mode every coordination call
 // is a no-op but tokens are still logged, so the same script produces the baseline.
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -18,11 +20,14 @@ import { CONTRACT_RULES } from './rules.ts';
 import { TASKS } from './tasks.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+// npm -w runs us inside our own folder, so load the monorepo's .env explicitly.
+loadEnv({ path: resolve(REPO, '.env'), quiet: true });
 
 const { values } = parseArgs({
   options: {
     id: { type: 'string' },
     task: { type: 'string', default: '1' },
+    'task-id': { type: 'string' },
     mode: { type: 'string', default: 'with_contract' },
     owner: { type: 'string', default: process.env.USER ?? 'dev' },
     machine: { type: 'string', default: process.env.HOSTNAME ?? 'laptop' },
@@ -30,7 +35,7 @@ const { values } = parseArgs({
 });
 const agentId = values.id ?? die('--id is required');
 const mode = values.mode as 'with_contract' | 'without_contract';
-const taskId = BigInt(values.task!);
+const taskId = BigInt(values['task-id'] ?? values.task!);
 const task = TASKS[values.task!] ?? die(`unknown --task ${values.task}`);
 let attempt = 1;
 
@@ -54,6 +59,7 @@ const connectOpts = {
   host: process.env.SPACETIME_HOST!,
   dbName: process.env.SPACETIME_DB_NAME!,
   repoDir: cwd,
+  token: process.env.CONTRACT_TOKEN || undefined,
   agent: { id: agentId, name: agentId, ownerDev: values.owner!, machine: values.machine!, model: 'claude-code', tokenBudget: 200_000 },
 };
 let contract: ContractClient;
@@ -117,14 +123,17 @@ let prompt = task;
 for (;;) {
   try {
     const r = await llm.runWorker(prompt, {
+      ...contractOpts,
       cwd,
-      env,
+      // Load every tool schema up front: with lazy loading the model's first Contract calls
+      // guess the arguments and fail validation.
+      env: { ...env, ENABLE_TOOL_SEARCH: 'false' },
       signal: controller.signal,
       resumeSessionId: sessionId,
       onSessionId: (id) => (sessionId = id),
       onUsage,
-      allowedTools: ['Bash(npm test:*)', 'Bash(npx vitest:*)', ...(contractOpts.allowedTools ?? [])],
-      ...contractOpts,
+      // After the spread, so contractOpts.allowedTools can't drop the test commands.
+      allowedTools: ['Bash(npm test:*)', 'Bash(npm run:*)', 'Bash(npx vitest:*)', ...(contractOpts.allowedTools ?? [])],
     });
     console.log(`[${agentId}] done (${r.usage.prompt_tokens}+${r.usage.completion_tokens} tokens, $${r.usage.cost_usd.toFixed(4)})`);
     break;

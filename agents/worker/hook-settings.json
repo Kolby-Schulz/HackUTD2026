@@ -1,9 +1,37 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/summary-hook.ts\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit",
-        "hooks": [{ "type": "command", "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/hook.ts\"" }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/hook.ts\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/summary-hook.ts\"",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }

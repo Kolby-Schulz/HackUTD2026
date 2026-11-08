@@ -1,0 +1,309 @@
+import { cpSync, mkdtempSync, rmSync, unlinkSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { duplicateReason, parseSignature } from '@contract/server/rules';
+import { isMappable, mapFile, RepoMapper, signatureHash, type FileMap } from '../src/index.ts';
+
+const FIXTURE = fileURLToPath(new URL('./fixtures/repo', import.meta.url));
+
+const byFile = (maps: FileMap[]) => new Map(maps.map((m) => [m.file, m]));
+const allSymbols = (maps: FileMap[]) => maps.flatMap((m) => m.symbols);
+const sig = (maps: FileMap[], id: string) => allSymbols(maps).find((s) => s.id === id)?.signature;
+const edgeList = (maps: FileMap[]) => maps.flatMap((m) => m.edges.map((e) => `${e.callerId} -> ${e.calleeId}`)).sort();
+
+describe('symbols', () => {
+  const maps = new RepoMapper(FIXTURE).mapAll();
+
+  it('maps source files only: no tests, no .d.ts', () => {
+    expect(maps.map((m) => m.file)).toEqual([
+      'src/billing/fees.ts',
+      'src/billing/index.ts',
+      'src/billing/invoice.ts',
+      'src/checkout.ts',
+      'src/models.ts',
+      'src/util/format.ts',
+    ]);
+  });
+
+  it('records exported functions, classes, methods and consts with spec ids and kinds', () => {
+    expect(allSymbols(maps).map((s) => `${s.kind} ${s.id}`)).toEqual([
+      'function src/billing/fees.ts#calculateFee',
+      'function src/billing/fees.ts#feeLabel',
+      'class src/billing/invoice.ts#Document',
+      'class src/billing/invoice.ts#Invoice',
+      'method src/billing/invoice.ts#Invoice.title',
+      'method src/billing/invoice.ts#Invoice.total',
+      'method src/billing/invoice.ts#Invoice.render',
+      'method src/billing/invoice.ts#Invoice.empty',
+      'function src/billing/invoice.ts#buildInvoice',
+      'function src/checkout.ts#checkoutTotal',
+      'function src/checkout.ts#summary',
+      'const src/checkout.ts#handlers',
+      'const src/models.ts#FEE_RATE',
+      'const src/models.ts#DEFAULT_CURRENCY',
+      'const src/models.ts#LIMITS',
+      'const src/models.ts#TAX_RATE', // exported through an export list
+      'function src/util/format.ts#formatMoney',
+      'function src/util/format.ts#formatLines',
+      'function src/util/format.ts#loadRate',
+      'function src/util/format.ts#localHelper',
+      'function src/util/format.ts#default',
+    ]);
+  });
+
+  it('skips non-exported functions, let, interfaces, types, getters and #private members', () => {
+    const ids = allSymbols(maps).map((s) => s.id);
+    for (const missing of ['roundDown', 'counter', 'mutable', 'LineItem', 'Currency', 'Totals', 'count', 'hidden', 'secret']) {
+      expect(ids.some((id) => id.endsWith(`#${missing}`) || id.endsWith(`.${missing}`) || id.includes('#Invoice.#'))).toBe(false);
+    }
+  });
+
+  it('method rows use the bare method name (what Rule 2 compares)', () => {
+    const total = allSymbols(maps).find((s) => s.id === 'src/billing/invoice.ts#Invoice.total');
+    expect(total?.name).toBe('total');
+  });
+
+  it('behaviorNote is always empty from the mapper', () => {
+    expect(allSymbols(maps).every((s) => s.behaviorNote === '')).toBe(true);
+  });
+});
+
+describe('signatures', () => {
+  const maps = new RepoMapper(FIXTURE).mapAll();
+
+  it('are the declaration as written, body removed, comments and line breaks collapsed', () => {
+    expect(sig(maps, 'src/billing/fees.ts#calculateFee')).toBe('calculateFee(amount: number, rate: number = FEE_RATE): number');
+    expect(sig(maps, 'src/util/format.ts#formatMoney')).toBe('formatMoney(n: number): string');
+    expect(sig(maps, 'src/util/format.ts#formatLines')).toBe('formatLines(lines: number[]): string[]');
+    expect(sig(maps, 'src/checkout.ts#checkoutTotal')).toBe(
+      'checkoutTotal(items: { sku: string; price: number; qty: number }[]): number',
+    );
+  });
+
+  it('cover overloads, async, static, arrow properties, classes and consts', () => {
+    expect(sig(maps, 'src/billing/fees.ts#feeLabel')).toBe(
+      'feeLabel(amount: number): string; feeLabel(amount: number, currency: string): string',
+    );
+    expect(sig(maps, 'src/util/format.ts#loadRate')).toBe('async loadRate(): Promise<number>');
+    expect(sig(maps, 'src/billing/invoice.ts#Invoice.empty')).toBe('static empty(): Invoice');
+    expect(sig(maps, 'src/billing/invoice.ts#Invoice.render')).toBe('render(): string');
+    expect(sig(maps, 'src/billing/invoice.ts#Invoice')).toBe(
+      'class Invoice extends Document implements Totals; constructor(private readonly items: LineItem[])',
+    );
+    expect(sig(maps, 'src/billing/invoice.ts#Document')).toBe('abstract class Document');
+    expect(sig(maps, 'src/models.ts#FEE_RATE')).toBe('const FEE_RATE = 0.03');
+    expect(sig(maps, 'src/models.ts#DEFAULT_CURRENCY')).toBe("const DEFAULT_CURRENCY: Currency = 'USD'");
+    expect(sig(maps, 'src/models.ts#LIMITS')).toBe('const LIMITS');
+  });
+
+  it('leave out a return type that is not written (nothing is inferred)', () => {
+    expect(sig(maps, 'src/checkout.ts#summary')).toBe('summary(amounts: number[])');
+  });
+
+  it('parse with the server Rule 2 parser, so type matching works on mapped symbols', () => {
+    expect(parseSignature(sig(maps, 'src/billing/fees.ts#calculateFee')!)).toEqual({
+      params: ['number', 'number'],
+      returns: 'number',
+    });
+    expect(parseSignature(sig(maps, 'src/util/format.ts#loadRate')!)).toEqual({ params: [], returns: 'Promise<number>' });
+    expect(parseSignature(sig(maps, 'src/billing/invoice.ts#Invoice.total')!)).toEqual({ params: [], returns: 'number' });
+    // Classes and consts must not be mistaken for functions.
+    expect(parseSignature(sig(maps, 'src/billing/invoice.ts#Invoice')!)).toBeUndefined();
+    expect(parseSignature(sig(maps, 'src/models.ts#FEE_RATE')!)).toBeUndefined();
+    // The spec's duplicate example, with a mapped existing helper.
+    expect(duplicateReason({ name: 'toDisplayMoney', signature: 'toDisplayMoney(x: number): string' }, {
+      name: 'formatMoney',
+      signature: sig(maps, 'src/util/format.ts#formatMoney'),
+    })).toMatch(/shared name 'money'/);
+  });
+});
+
+describe('signatureHash', () => {
+  const base = 'calculateFee(amount: number, rate: number): number';
+
+  it('ignores formatting: line breaks, spacing, trailing commas, comments', () => {
+    for (const same of [
+      'calculateFee(\n  amount: number,\n  rate: number,\n): number',
+      'calculateFee(amount:number,rate:number):number',
+      'calculateFee(amount: number /* cents */, rate: number): number',
+      'calculateFee(amount: number, // pre-tax\n rate: number): number',
+    ]) {
+      expect(signatureHash(same)).toBe(signatureHash(base));
+    }
+    expect(signatureHash('f(a: { x: number; }): void')).toBe(signatureHash('f(a: { x: number }): void'));
+  });
+
+  it('changes when the interface changes', () => {
+    for (const different of [
+      'calculateFee(amount: number, rate: string): number',
+      'calculateFee(amount: number): number',
+      'calculateFee(amount: number, rate: number): string',
+      'calculateFee(amount: number, rate?: number): number',
+      'async calculateFee(amount: number, rate: number): number',
+    ]) {
+      expect(signatureHash(different)).not.toBe(signatureHash(base));
+    }
+  });
+
+  it('does not treat // inside a string literal as a comment', () => {
+    expect(signatureHash("f(url = 'http://a'): void")).not.toBe(signatureHash("f(url = 'http://b'): void"));
+  });
+
+  it('is 16 hex chars', () => {
+    expect(signatureHash(base)).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+describe('edges', () => {
+  const maps = new RepoMapper(FIXTURE).mapAll();
+
+  it('resolve calls, new, methods, callbacks and const reads through imports, aliases, barrels and namespaces', () => {
+    expect(edgeList(maps)).toEqual(
+      [
+        'src/billing/fees.ts#calculateFee -> src/models.ts#FEE_RATE', // default value
+        'src/billing/fees.ts#feeLabel -> src/billing/fees.ts#calculateFee', // same file
+        'src/billing/invoice.ts#Invoice -> src/billing/fees.ts#calculateFee', // in the constructor
+        'src/billing/invoice.ts#Invoice -> src/billing/invoice.ts#Document', // extends
+        'src/billing/invoice.ts#Invoice.render -> src/billing/invoice.ts#Invoice.total', // this.total()
+        'src/billing/invoice.ts#Invoice.render -> src/util/format.ts#formatMoney',
+        'src/billing/invoice.ts#Invoice.empty -> src/billing/invoice.ts#Invoice', // new Invoice
+        'src/billing/invoice.ts#buildInvoice -> src/billing/invoice.ts#Invoice',
+        'src/checkout.ts#checkoutTotal -> src/billing/fees.ts#calculateFee', // billing.calculateFee via barrel
+        'src/checkout.ts#checkoutTotal -> src/billing/invoice.ts#Invoice.total', // inv.total()
+        'src/checkout.ts#checkoutTotal -> src/billing/invoice.ts#buildInvoice', // aliased import `make`
+        'src/checkout.ts#checkoutTotal -> src/models.ts#LIMITS',
+        'src/checkout.ts#handlers -> src/checkout.ts#checkoutTotal', // function as a value
+        'src/checkout.ts#summary -> src/util/format.ts#formatLines', // call + shorthand, deduped
+        'src/util/format.ts#formatLines -> src/util/format.ts#formatMoney', // lines.map(formatMoney)
+      ].sort(),
+    );
+  });
+
+  it('skip type-only references, library calls, non-mapped helpers and self references', () => {
+    const edges = edgeList(maps);
+    expect(edges.some((e) => e.startsWith('src/checkout.ts#checkoutTotal -> src/billing/invoice.ts#Invoice '))).toBe(false);
+    expect(edges.some((e) => e === 'src/checkout.ts#checkoutTotal -> src/billing/invoice.ts#Invoice')).toBe(false);
+    expect(edges.some((e) => e.includes('roundDown') || e.includes('Math'))).toBe(false);
+    expect(edges.some((e) => e.split(' -> ')[0] === e.split(' -> ')[1])).toBe(false);
+  });
+
+  it('each file carries only its own outgoing edges', () => {
+    for (const m of maps) {
+      for (const e of m.edges) expect(e.callerId.startsWith(`${m.file}#`)).toBe(true);
+    }
+  });
+});
+
+describe('mapFile (for contract-hook)', () => {
+  let work: string;
+  beforeEach(() => {
+    work = mkdtempSync(join(tmpdir(), 'mapper-hook-'));
+    cpSync(FIXTURE, work, { recursive: true });
+  });
+  afterEach(() => rmSync(work, { recursive: true, force: true }));
+
+  it('gives a worktree copy the same ids and hashes as the main checkout', () => {
+    const main = byFile(new RepoMapper(FIXTURE).mapAll()).get('src/billing/fees.ts')!;
+    const fromWorktree = mapFile(join(work, 'src/billing/fees.ts'), { repoDir: work, edges: false });
+    expect(fromWorktree.file).toBe('src/billing/fees.ts');
+    expect(fromWorktree.symbols).toEqual(main.symbols);
+    expect(fromWorktree.edges).toEqual([]);
+    expect(mapFile('src/billing/fees.ts', { repoDir: work }).edges).toEqual(main.edges);
+  });
+
+  it('shows a signature change as a new hash on the same id', () => {
+    const path = join(work, 'src/billing/fees.ts');
+    const before = mapFile(path, { repoDir: work, edges: false }).symbols[0];
+    writeFileSync(path, readFileSync(path, 'utf8').replace('rate: number = FEE_RATE,', 'rate: number = FEE_RATE, round = true,'));
+    const after = mapFile(path, { repoDir: work, edges: false }).symbols[0];
+    expect(after.id).toBe(before.id);
+    expect(after.signatureHash).not.toBe(before.signatureHash);
+  });
+
+  it('a body-only change (the rounding fix) keeps the hash: that is a behavior change', () => {
+    const path = join(work, 'src/billing/fees.ts');
+    const before = mapFile(path, { repoDir: work, edges: false }).symbols[0];
+    writeFileSync(path, readFileSync(path, 'utf8').replace('Math.floor', 'Math.round'));
+    expect(mapFile(path, { repoDir: work, edges: false }).symbols[0]).toEqual(before);
+  });
+
+  it('returns no symbols for test files and missing files, and throws outside the repo', () => {
+    expect(mapFile(join(work, 'src/checkout.test.ts'), { repoDir: work, edges: false }).symbols).toEqual([]);
+    expect(mapFile(join(work, 'src/nope.ts'), { repoDir: work, edges: false }).symbols).toEqual([]);
+    expect(() => mapFile('/etc/hosts.ts', { repoDir: work, edges: false })).toThrow(/outside/);
+  });
+});
+
+describe('isMappable', () => {
+  it.each([
+    ['src/a.ts', true],
+    ['src/a.tsx', true],
+    ['src/a.test.ts', false],
+    ['src/a.spec.ts', false],
+    ['src/__tests__/a.ts', false],
+    ['tests/fixtures.ts', false],
+    ['test/helpers.ts', false],
+    ['scripts/check-dupes.ts', false],
+    ['vitest.config.ts', false],
+    ['vitest.integration.config.ts', false],
+    ['src/config.ts', true],
+    ['src/a.d.ts', false],
+    ['node_modules/x/a.ts', false],
+    ['.contract/x.ts', false],
+    ['src/a.js', false],
+    ['README.md', false],
+  ])('%s -> %s', (path, want) => expect(isMappable(path)).toBe(want));
+});
+
+describe('watch primitives: refresh + dependents', () => {
+  let work: string;
+  let mapper: RepoMapper;
+  beforeEach(() => {
+    work = mkdtempSync(join(tmpdir(), 'mapper-watch-'));
+    cpSync(FIXTURE, work, { recursive: true });
+    mapper = new RepoMapper(work);
+  });
+  afterEach(() => rmSync(work, { recursive: true, force: true }));
+
+  it('dependents include direct importers and importers through a barrel', () => {
+    expect(mapper.dependents('src/billing/fees.ts')).toEqual(['src/billing/index.ts', 'src/billing/invoice.ts', 'src/checkout.ts']);
+    expect(mapper.dependents('src/checkout.ts')).toEqual([]);
+  });
+
+  it('a rename is picked up after refresh, and remapping dependents re-points their edges', () => {
+    const fees = join(work, 'src/billing/fees.ts');
+    const inv = join(work, 'src/billing/invoice.ts');
+    writeFileSync(fees, readFileSync(fees, 'utf8').replaceAll('calculateFee', 'computeFee'));
+    writeFileSync(inv, readFileSync(inv, 'utf8').replaceAll('calculateFee', 'computeFee'));
+    mapper.refresh(fees);
+    mapper.refresh(inv);
+    expect(mapper.mapFile(fees).symbols.map((s) => s.name)).toEqual(['computeFee', 'feeLabel']);
+    const invEdges = mapper.mapFile(inv).edges.map((e) => e.calleeId);
+    expect(invEdges).toContain('src/billing/fees.ts#computeFee');
+    expect(invEdges).not.toContain('src/billing/fees.ts#calculateFee');
+  });
+
+  it('a new file is added and a deleted file maps to nothing (clears it on the server)', () => {
+    const extra = join(work, 'src/util/dates.ts');
+    writeFileSync(extra, 'export function formatDate(d: Date): string {\n  return d.toISOString();\n}\n');
+    expect(mapper.refresh(extra)).toBe(true);
+    expect(mapper.files()).toContain('src/util/dates.ts');
+    expect(mapper.mapFile(extra).symbols.map((s) => s.signature)).toEqual(['formatDate(d: Date): string']);
+
+    const deps = mapper.dependents('src/util/format.ts');
+    expect(deps).toEqual(['src/billing/invoice.ts', 'src/checkout.ts']);
+    unlinkSync(join(work, 'src/util/format.ts'));
+    mapper.refresh('src/util/format.ts');
+    expect(mapper.files()).not.toContain('src/util/format.ts');
+    expect(mapper.mapFile('src/util/format.ts')).toEqual({ file: 'src/util/format.ts', symbols: [], edges: [] });
+    // Importers lose their edges into the deleted file once remapped.
+    expect(mapper.mapFile('src/billing/invoice.ts').edges.some((e) => e.calleeId.startsWith('src/util/format.ts#'))).toBe(false);
+  });
+
+  it('refresh ignores files that are not mapped', () => {
+    expect(mapper.refresh('src/checkout.test.ts')).toBe(false);
+    expect(mapper.refresh('README.md')).toBe(false);
+  });
+});

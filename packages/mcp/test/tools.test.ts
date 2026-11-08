@@ -1,10 +1,11 @@
-// The seven Contract MCP tools, driven through a real MCP client over an in-memory
+// The Contract MCP tools, driven through a real MCP client over an in-memory
 // transport, against a fake ContractClient.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { ClaimedError, noopClient, type ContractClient, type Instruction } from '@contract/client';
 import { createServer, TOOLS } from '../src/index.ts';
+import { CONTRACT_RULES } from '../../../agents/worker/src/rules.ts';
 
 type Call = [string, ...unknown[]];
 
@@ -34,6 +35,11 @@ function fakeClient() {
       if (i) i.acknowledged = true;
     },
     logSaving: async (...a) => void calls.push(['logSaving', ...a]),
+    getSummary: async (file) => (file === 'src/a.ts' ? 'f: does nothing.' : undefined),
+    putSummary: async (...a) => {
+      calls.push(['putSummary', ...a]);
+      if (a[0] === 'missing.ts') throw new Error("putSummary: can't read missing.ts");
+    },
   };
   return { c, calls, pending };
 }
@@ -57,7 +63,7 @@ describe('contract mcp tools', () => {
     t = await setup();
   });
 
-  it('lists exactly the seven spec tools', async () => {
+  it('lists exactly the spec tools', async () => {
     // Act
     const { tools } = await t.client.listTools();
 
@@ -136,5 +142,33 @@ describe('contract mcp tools', () => {
     const savings = t.calls.filter((c) => c[0] === 'logSaving');
     expect(savings).toHaveLength(1);
     expect(savings[0].slice(0, 2)).toEqual(['logSaving', 'reuse']);
+  });
+
+  it('get_summary returns a cached summary, or tells the model to read and put_summary', async () => {
+    // Act
+    const hit = await t.call('get_summary', { file: 'src/a.ts' });
+    const miss = await t.call('get_summary', { file: 'src/b.ts' });
+
+    // Assert
+    expect(JSON.parse(hit.text)).toEqual({ file: 'src/a.ts', summary: 'f: does nothing.' });
+    expect(miss.isError).toBe(false);
+    expect(miss.text).toMatch(/No cached summary for src\/b.ts.*put_summary/);
+  });
+
+  it('put_summary passes the file, summary and a token estimate; bad paths are tool errors', async () => {
+    // Act
+    const r = await t.call('put_summary', { file: 'src/a.ts', summary: 'f: does nothing at all.' });
+    const bad = await t.call('put_summary', { file: 'missing.ts', summary: 'x' });
+
+    // Assert
+    expect(r.text).toBe('cached summary of src/a.ts');
+    const [, file, summary, tokens] = t.calls[0];
+    expect([file, summary]).toEqual(['src/a.ts', 'f: does nothing at all.']);
+    expect(tokens).toBeGreaterThan(0);
+    expect(bad.isError).toBe(true);
+  });
+
+  it('the worker rules mention every tool', () => {
+    for (const name of TOOLS) expect(CONTRACT_RULES).toContain(name);
   });
 });

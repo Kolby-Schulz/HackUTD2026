@@ -35,10 +35,10 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **AG:** `packages/mcp`: MCP server exposing `declare_plan`, `claim_symbol`, `release_claim`, `report_change`, `get_context`, `find_existing`, `get_instructions`; connects with `CONTRACT_AGENT_ID` + `CONTRACT_TOKEN` (+ `CONTRACT_TASK_ID`, `CONTRACT_REPO_DIR`; `get_instructions` acks what it returns; 8 tests + live smoke)
 - [x] **AG:** worker script skeleton: worktree + branch, mode switch, MCP config, rules prompt, hook settings, token logging, pause → abort → wait for instruction → resume loop, commit
 - [x] **AG:** worker: `set_task_status('in_progress')` at start, release claims + `'done'` at the end; `early_stop` = baseline average coding step minus tokens already generated (local `.contract/tokens.jsonl`; 4000 default without a baseline); on pause waits for unpause and resumes with the decision, not the "pause" notice; baseline mode also sends tokens to `token_usage` when a server is up
-- [ ] **CM:** `demo-repo/`: `fees.ts` (rounds down), `invoice.ts`, `checkout.ts`, `models.ts`, unit tests, `integration.test.ts` (half-up, invoice == checkout), `scripts/check-dupes.ts`, own `package.json` with vitest
-- [ ] **CM:** mapper: ts-morph parse → symbols (id `file#name`, `file#Class.method`), signature + `signature_hash`, call edges; `upsert_symbols` per file; `--watch` with chokidar
-- [ ] **CM:** mapper exports `mapFile(path)` for `contract-hook` to reuse
-- [ ] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables
+- [x] **CM:** `demo-repo/`: `fees.ts` (rounds down), `invoice.ts`, `checkout.ts`, `models.ts`, unit tests, `integration.test.ts` (half-up, invoice == checkout), `scripts/check-dupes.ts`, own `package.json` with vitest
+- [x] **CM:** mapper: ts-morph parse → symbols (id `file#name`, `file#Class.method`), signature + `signature_hash`, call edges; `upsert_symbols` per file; `--watch` with chokidar. **Done** (`mapper/src`; 42 unit + 9 live tests). Signatures are the declaration as written (no inference; un-annotated returns left out, so give demo-repo functions return types for Rule 2). Edges = every value reference to a mapped symbol (calls, `new`, methods, callbacks, const reads) through imports/barrels/namespaces; type-only refs aren't edges. Only files whose interface or edges changed are sent (restart = no writes); `behavior_note`, and the signature text while the hash is unchanged, are kept from the server. Watch re-maps importers too. Run one mapper, on main `demo-repo/` only (it refuses `.worktrees/`).
+- [x] **CM:** mapper exports `mapFile(path)` for `contract-hook` to reuse. **Done:** `import { mapFile } from '@contract/mapper'`; `mapFile(absPath, { repoDir: <worktree>/demo-repo, edges: false })` parses one file in ~5 ms and gives the same ids/hashes as the main checkout. **Hook note (AG):** `report_change('signature')` updates the row's `signature` but not `signature_hash`, so comparing hashes alone re-reports on every later edit; also compare `signatureHash(row.signature)` (exported) or remember what was already reported.
+- [x] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables (Live, Activity, Tokens, Scoreboard tabs; storyboard rows G/F; `npm test -w @contract/dashboard`)
 - [ ] **DD:** `scripts/seed.ts`: create the two tasks and a run
 
 ## Milestone 3: Rule 1 end to end
@@ -48,12 +48,12 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **CM:** coordinator decision logic: section 12 prompt, JSON schema, validation, retry once, claimed-first fallback (`agents/coordinator/src/decide.ts`). `npm run coordinator -- --demo` verified: owner agent-a, B told not to round again.
 - [ ] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens
 - [ ] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0
-- [ ] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors
+- [x] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors, planned creates as dashed ghosts
 
 ## Milestone 4: Rule 2 end to end
 
 - [x] **BE:** Rule 2 in `publish_plan` (normalized names, same types + shared token), reuse instruction; Rule 3 in `claim_symbol`/`publish_plan` (Rule 2 also re-runs on `report_change('created')` once the signature is known)
-- [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings. **Client part done** (`context_slice` and `cache_hit` savings logged); **MCP tools done;** `find_existing` logs one `reuse` saving per matched symbol (score ≥ 0.8; estimate `CONTRACT_REUSE_EST_TOKENS`, default 1500, until a baseline measures it).
+- [ ] **AG:** `findExisting` + `getContext` in the client (and MCP tools), log `reuse` / `context_slice` savings. **Client part done** (`context_slice` and `cache_hit` savings logged); **MCP tools done;** `find_existing` logs one `reuse` saving per matched symbol (score ≥ 0.8; estimate `CONTRACT_REUSE_EST_TOKENS`, default 1500, until a baseline measures it). `get_summary` / `put_summary` MCP tools added so workers can read and fill `summary_cache` (`cache_hit` is now reachable from real runs); rules rewritten as an ordered workflow with the symbol id format. A summary hook (`agents/worker/src/summary-hook.ts`) caches file outlines on read, serves them to later agents and counts a `cache_hit` only when the file isn't read anyway. See `docs/spec-additions-summary-tools.md`.
 - [ ] **CM:** check the duplicate-formatter scenario resolves to "reuse A's"
 
 ## Milestone 5: Without/with runs
@@ -61,7 +61,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **BE:** `mark_attempt_wasted`, `log_saving`, `cache_summary`/`record_cache_hit`
 - [ ] **DD:** `scripts/run-demo.ts --mode … --seed 7`: run both workers, merge branches, run tests + check-dupes, `merge_fix` pass
 - [ ] **DD:** `scripts/reset.ts`: restore demo-repo, remove `.worktrees/`, clear run data
-- [ ] **DD:** Token meter, Savings ticker, Scoreboard panels
+- [x] **DD:** Token meter, Savings ticker, Scoreboard panels (duplicate helpers + tests passing show "not recorded" until run-demo stores them)
 - [ ] **Everyone:** 3 runs per mode, average, sanity-check numbers
 
 ## Milestone 6: Demo-ready
