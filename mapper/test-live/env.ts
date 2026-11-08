@@ -1,4 +1,5 @@
 // Where the live tests connect. Defaults to SPACETIME_HOST (ws://localhost:3000 in .env.example).
+// WebSocket URL; LIVE_HTTP below is the same host over http(s).
 export const LIVE_WS = process.env.SPACETIME_HOST ?? 'ws://localhost:3000';
 export const LIVE_HTTP = LIVE_WS.replace(/^ws/, 'http');
 // A throwaway database so tests never touch the demo's `contract` data.
