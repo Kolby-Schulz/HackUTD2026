@@ -1,0 +1,12 @@
+/* Inline text editor (ui/text/TextEditor.tsx): a transparent textarea over the layer, typography inherited. */
+.pg-text-editor {
+  position: absolute; inset: 0; width: 100%; min-height: 100%;
+  border: 0; outline: 0; resize: none; overflow: hidden;
+  padding: 0; margin: 0; background: transparent;
+  font: inherit; color: inherit; line-height: inherit; letter-spacing: inherit; text-align: inherit;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  caret-color: var(--pg-accent);
+  cursor: text; user-select: text; -webkit-user-select: text;
+}
+.pg-text-editor::selection { background: var(--pg-accent-soft); color: inherit; }
+.pg-text-editor::placeholder { color: var(--pg-muted); }
