@@ -13,7 +13,7 @@ and diagrams). The task list is `docs/TASKS.md`. Read your part's sections befor
 | `packages/client/`, `packages/mcp/`, `agents/worker/` | agents | 10, 11 |
 | `packages/llm/` | shared (interface frozen; agents owner maintains) | 4, 12 |
 | `mapper/`, `agents/coordinator/`, `demo-repo/`, `agents/triage/` (stretch) | coordinator + mapper | 9, 12, 12b, 14 |
-| `dashboard/`, `scripts/` | dashboard + demo | 13, 15, 17 |
+| `dashboard/`, `scripts/`, `agents/variants/` | dashboard + demo | 13, 15, 17 |
 
 ## Rules (spec section 18)
 

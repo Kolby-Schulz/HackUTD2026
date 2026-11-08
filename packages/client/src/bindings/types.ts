@@ -24,6 +24,98 @@ export const Agent = __t.object("Agent", {
 });
 export type Agent = __Infer<typeof Agent>;
 
+export const Board = __t.object("Board", {
+  id: __t.string(),
+  name: __t.string(),
+  createdBy: __t.identity(),
+  createdAt: __t.timestamp(),
+  nextSeq: __t.u64(),
+  snapshotSeq: __t.u64(),
+});
+export type Board = __Infer<typeof Board>;
+
+export const BoardActor = __t.object("BoardActor", {
+  actor: __t.string(),
+  boardId: __t.string(),
+  identity: __t.identity(),
+  kind: __t.string(),
+  name: __t.string(),
+  color: __t.string(),
+  agentId: __t.option(__t.string()),
+  joinedAt: __t.timestamp(),
+  lastSeen: __t.timestamp(),
+  lastOpSeq: __t.u64(),
+});
+export type BoardActor = __Infer<typeof BoardActor>;
+
+export const BoardCursor = __t.object("BoardCursor", {
+  boardId: __t.string(),
+  actor: __t.string(),
+  x: __t.f64(),
+  y: __t.f64(),
+  tx: __t.f64(),
+  ty: __t.f64(),
+  moveMs: __t.u32(),
+  down: __t.bool(),
+});
+export type BoardCursor = __Infer<typeof BoardCursor>;
+
+export const BoardMessage = __t.object("BoardMessage", {
+  id: __t.string(),
+  boardId: __t.string(),
+  threadId: __t.string(),
+  kind: __t.string(),
+  author: __t.string(),
+  toActor: __t.option(__t.string()),
+  body: __t.string(),
+  anchor: __t.option(__t.string()),
+  resolved: __t.bool(),
+  createdAt: __t.timestamp(),
+});
+export type BoardMessage = __Infer<typeof BoardMessage>;
+
+export const BoardOp = __t.object("BoardOp", {
+  opId: __t.string(),
+  boardId: __t.string(),
+  seq: __t.u64(),
+  actor: __t.string(),
+  tx: __t.string(),
+  body: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type BoardOp = __Infer<typeof BoardOp>;
+
+export const BoardOpInput = __t.object("BoardOpInput", {
+  opId: __t.string(),
+  tx: __t.string(),
+  body: __t.string(),
+});
+export type BoardOpInput = __Infer<typeof BoardOpInput>;
+
+export const BoardPresence = __t.object("BoardPresence", {
+  presenceId: __t.string(),
+  connection: __t.connectionId(),
+  boardId: __t.string(),
+  actor: __t.string(),
+  selection: __t.string(),
+  status: __t.string(),
+  tool: __t.string(),
+  detail: __t.string(),
+  typing: __t.string(),
+  viewport: __t.string(),
+  updatedAt: __t.timestamp(),
+});
+export type BoardPresence = __Infer<typeof BoardPresence>;
+
+export const BoardSnapshot = __t.object("BoardSnapshot", {
+  boardId: __t.string(),
+  uptoSeq: __t.u64(),
+  doc: __t.string(),
+  writtenBy: __t.identity(),
+  writtenAt: __t.timestamp(),
+});
+export type BoardSnapshot = __Infer<typeof BoardSnapshot>;
+
 export const Change = __t.object("Change", {
   id: __t.u64(),
   agentId: __t.string(),
@@ -67,6 +159,19 @@ export const Decision = __t.object("Decision", {
   createdAt: __t.timestamp(),
 });
 export type Decision = __Infer<typeof Decision>;
+
+export const DesignClaim = __t.object("DesignClaim", {
+  target: __t.string(),
+  kind: __t.string(),
+  scope: __t.string(),
+  holder: __t.string(),
+  holderIdentity: __t.identity(),
+  agentId: __t.option(__t.string()),
+  intent: __t.string(),
+  expiresAt: __t.timestamp(),
+  contention: __t.u32(),
+});
+export type DesignClaim = __Infer<typeof DesignClaim>;
 
 export const EdgeInput = __t.object("EdgeInput", {
   callerId: __t.string(),
@@ -287,4 +392,64 @@ export const TokenUsage = __t.object("TokenUsage", {
   costUsd: __t.f64(),
 });
 export type TokenUsage = __Infer<typeof TokenUsage>;
+
+export const Variant = __t.object("Variant", {
+  id: __t.string(),
+  screen: __t.string(),
+  parent: __t.option(__t.string()),
+  boardId: __t.option(__t.string()),
+  frameId: __t.option(__t.string()),
+  kind: __t.string(),
+  author: __t.string(),
+  model: __t.string(),
+  status: __t.string(),
+  tokens: __t.u64(),
+  costUsd: __t.f64(),
+  durationMs: __t.u64(),
+  commit: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type Variant = __Infer<typeof Variant>;
+
+export const VariantJob = __t.object("VariantJob", {
+  id: __t.u64(),
+  screen: __t.string(),
+  brief: __t.string(),
+  model: __t.string(),
+  parent: __t.option(__t.string()),
+  status: __t.string(),
+  agentId: __t.option(__t.string()),
+  variantId: __t.option(__t.string()),
+  error: __t.option(__t.string()),
+  createdAt: __t.timestamp(),
+});
+export type VariantJob = __Infer<typeof VariantJob>;
+
+export const VariantMix = __t.object("VariantMix", {
+  id: __t.string(),
+  screen: __t.string(),
+  title: __t.string(),
+  note: __t.string(),
+  slots: __t.string(),
+  author: __t.identity(),
+  createdAt: __t.timestamp(),
+});
+export type VariantMix = __Infer<typeof VariantMix>;
+
+export const VariantPick = __t.object("VariantPick", {
+  screen: __t.string(),
+  nodeId: __t.string(),
+  by: __t.identity(),
+  at: __t.timestamp(),
+});
+export type VariantPick = __Infer<typeof VariantPick>;
+
+export const VariantVote = __t.object("VariantVote", {
+  id: __t.string(),
+  screen: __t.string(),
+  nodeId: __t.string(),
+  voter: __t.identity(),
+  at: __t.timestamp(),
+});
+export type VariantVote = __Infer<typeof VariantVote>;
 

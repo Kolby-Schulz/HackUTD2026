@@ -44,7 +44,7 @@ const SYMBOL_KINDS = ['function', 'class', 'method', 'const'] as const;
 const INTENTS = ['modify', 'create', 'depend'] as const;
 const CHANGE_KINDS = ['signature', 'behavior', 'created', 'removed'] as const;
 const RUN_MODES = ['with_contract', 'without_contract'] as const;
-const PURPOSES = ['plan', 'code', 'context', 'test_fix', 'merge_fix', 'coordination'] as const;
+const PURPOSES = ['plan', 'code', 'context', 'test_fix', 'merge_fix', 'coordination', 'design'] as const;
 const SAVING_KINDS = ['early_stop', 'reuse', 'context_slice', 'cache_hit'] as const;
 
 // Allowed task status changes (set_task_status rejects anything else).
@@ -389,6 +389,198 @@ const expireClaimsSchedule = table(
   },
 );
 
+// ---------------------------------------------------------------------------------
+// Design board and variants (PR S, vault/Scopes/integration-plan.md). Additive tables.
+// ---------------------------------------------------------------------------------
+
+// A lease on a board shape/frame or a variant folder. `holder` is the actor id; `holder_identity`
+// (extra, not in the plan) is who may renew/release it and whose disconnect frees it.
+const designClaim = table(
+  { name: 'design_claim', public: true },
+  {
+    target: t.string().primaryKey(),
+    kind: t.string(), // 'board' | 'variant'
+    scope: t.string(), // board id or screen
+    holder: t.string(),
+    holder_identity: t.identity(),
+    agent_id: t.option(t.string()),
+    intent: t.string(), // 'replace' | 'extend'
+    expires_at: t.timestamp(),
+    contention: t.u32(),
+  },
+);
+
+const board = table(
+  { name: 'board', public: true },
+  {
+    id: t.string().primaryKey(),
+    name: t.string(),
+    created_by: t.identity(),
+    created_at: t.timestamp(),
+    next_seq: t.u64(),
+    snapshot_seq: t.u64(),
+  },
+);
+
+const boardActor = table(
+  { name: 'board_actor', public: true },
+  {
+    actor: t.string().primaryKey(),
+    board_id: t.string().index('btree'),
+    identity: t.identity(),
+    kind: t.string(), // 'human' | 'agent' | 'system'
+    name: t.string(),
+    color: t.string(),
+    agent_id: t.option(t.string()),
+    joined_at: t.timestamp(),
+    last_seen: t.timestamp(),
+    last_op_seq: t.u64(), // highest n of this actor's accepted "<actor>:<n>" op ids
+  },
+);
+
+const boardOp = table(
+  { name: 'board_op', public: true },
+  {
+    op_id: t.string().primaryKey(), // "<actor>:<n>"
+    board_id: t.string().index('btree'),
+    seq: t.u64().index('btree'), // server order
+    actor: t.string(),
+    tx: t.string(),
+    body: t.string(), // JSON
+    created_at: t.timestamp(),
+  },
+);
+
+// One row per (connection, actor): a Node process can host several agent actors on one connection.
+const boardPresence = table(
+  { name: 'board_presence', public: true },
+  {
+    presence_id: t.string().primaryKey(), // "<connection hex>:<actor>"
+    connection: t.connectionId().index('btree'),
+    board_id: t.string().index('btree'),
+    actor: t.string(),
+    selection: t.string(), // JSON
+    status: t.string(),
+    tool: t.string(),
+    detail: t.string(),
+    typing: t.string(),
+    viewport: t.string(), // JSON
+    updated_at: t.timestamp(),
+  },
+);
+
+// Event table: rows live only for the transaction that inserted them, then go to subscribers.
+const boardCursor = table(
+  { name: 'board_cursor', public: true, event: true },
+  {
+    board_id: t.string(),
+    actor: t.string(),
+    x: t.f64(),
+    y: t.f64(),
+    tx: t.f64(),
+    ty: t.f64(),
+    move_ms: t.u32(),
+    down: t.bool(),
+  },
+);
+
+const boardSnapshot = table(
+  { name: 'board_snapshot', public: true },
+  {
+    board_id: t.string().primaryKey(),
+    upto_seq: t.u64(),
+    doc: t.string(), // JSON
+    written_by: t.identity(),
+    written_at: t.timestamp(),
+  },
+);
+
+const boardMessage = table(
+  { name: 'board_message', public: true },
+  {
+    id: t.string().primaryKey(),
+    board_id: t.string().index('btree'),
+    thread_id: t.string().index('btree'),
+    kind: t.string(), // 'chat' | 'comment'
+    author: t.string(), // actor id
+    to_actor: t.option(t.string()),
+    body: t.string(),
+    anchor: t.option(t.string()), // JSON
+    resolved: t.bool(),
+    created_at: t.timestamp(),
+  },
+);
+
+const variant = table(
+  { name: 'variant', public: true },
+  {
+    id: t.string().primaryKey(), // "<screen>/<variant>"
+    screen: t.string().index('btree'),
+    parent: t.option(t.string()),
+    board_id: t.option(t.string()),
+    frame_id: t.option(t.string()),
+    kind: t.string(), // 'root' | 'child' | 'mix' | 'frame'
+    author: t.string(), // agent id
+    model: t.string(),
+    status: t.string(), // 'generating' | 'ready' | 'failed'
+    tokens: t.u64(),
+    cost_usd: t.f64(),
+    duration_ms: t.u64(),
+    commit: t.string(),
+    created_at: t.timestamp(),
+  },
+);
+
+const variantJob = table(
+  { name: 'variant_job', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    screen: t.string(),
+    brief: t.string(),
+    model: t.string(),
+    parent: t.option(t.string()),
+    status: t.string(), // 'queued' | 'running' | 'done' | 'failed'
+    agent_id: t.option(t.string()),
+    variant_id: t.option(t.string()),
+    error: t.option(t.string()),
+    created_at: t.timestamp(),
+  },
+);
+
+const variantMix = table(
+  { name: 'variant_mix', public: true },
+  {
+    id: t.string().primaryKey(),
+    screen: t.string().index('btree'),
+    title: t.string(),
+    note: t.string(),
+    slots: t.string(), // JSON: slot -> node
+    author: t.identity(),
+    created_at: t.timestamp(),
+  },
+);
+
+const variantPick = table(
+  { name: 'variant_pick', public: true },
+  {
+    screen: t.string().primaryKey(),
+    node_id: t.string(),
+    by: t.identity(),
+    at: t.timestamp(),
+  },
+);
+
+const variantVote = table(
+  { name: 'variant_vote', public: true },
+  {
+    id: t.string().primaryKey(), // "<screen>:<voter hex>"
+    screen: t.string().index('btree'),
+    node_id: t.string(),
+    voter: t.identity(),
+    at: t.timestamp(),
+  },
+);
+
 const spacetimedb = schema({
   agent,
   task,
@@ -414,6 +606,19 @@ const spacetimedb = schema({
   machineProcess,
   machineChat,
   machinePairRequest,
+  designClaim,
+  board,
+  boardActor,
+  boardOp,
+  boardPresence,
+  boardCursor,
+  boardSnapshot,
+  boardMessage,
+  variant,
+  variantJob,
+  variantMix,
+  variantPick,
+  variantVote,
 });
 export default spacetimedb;
 
@@ -485,10 +690,15 @@ function requireCoordinator(ctx: Ctx): void {
  * machine (same saved token as `npm run control`), so run bookkeeping needs no extra setup,
  * while a connection that only knows the public database name can't reset or open runs.
  */
+function isOperator(ctx: Ctx): boolean {
+  for (const a of ctx.db.agent.iter()) if (a.identity.equals(ctx.sender)) return true;
+  for (const m of ctx.db.machine.iter()) if (m.identity.equals(ctx.sender)) return true;
+  for (const a of ctx.db.machineAccess.iter()) if (a.identity.equals(ctx.sender)) return true;
+  return false;
+}
+
 function requireOperator(ctx: Ctx): void {
-  for (const a of ctx.db.agent.iter()) if (a.identity.equals(ctx.sender)) return;
-  for (const m of ctx.db.machine.iter()) if (m.identity.equals(ctx.sender)) return;
-  for (const a of ctx.db.machineAccess.iter()) if (a.identity.equals(ctx.sender)) return;
+  if (isOperator(ctx)) return;
   throw new SenderError('only an operator can do this: a registered agent, a laptop running npm run control, or a dashboard paired with one');
 }
 
@@ -1315,7 +1525,7 @@ export const mark_attempt_wasted = spacetimedb.reducer(
   (ctx, { task_id, attempt }) => {
     requireOperator(ctx);
     for (const row of [...ctx.db.tokenUsage.iter()]) {
-      if (row.task_id === task_id && row.attempt === attempt && !row.wasted) {
+      if (row.task_id === task_id && row.attempt === attempt && !row.wasted && row.purpose !== 'design') {
         ctx.db.tokenUsage.id.update({ ...row, wasted: true });
       }
     }
@@ -1360,6 +1570,9 @@ export const expire_claims = spacetimedb.reducer(
     const now = micros(ctx.timestamp);
     for (const c of [...ctx.db.claim.iter()]) {
       if (micros(c.expires_at) <= now) ctx.db.claim.symbol_id.delete(c.symbol_id);
+    }
+    for (const c of [...ctx.db.designClaim.iter()]) {
+      if (micros(c.expires_at) <= now) ctx.db.designClaim.target.delete(c.target);
     }
     const cutoff = now - BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n;
     for (const a of [...ctx.db.agent.iter()]) {
@@ -1548,3 +1761,594 @@ export const resolve_machine_pairing = spacetimedb.reducer(
     ctx.db.machineAccess.insert({ id: 0n, machine_id: r.machine_id, identity: r.identity, label: label.slice(0, 80), added_at: ctx.timestamp });
   },
 );
+
+// ---------------------------------------------------------------------------------
+// Design board (PR S). Ops carry a server-stamped `seq`; clients fold them in seq order.
+// ---------------------------------------------------------------------------------
+
+const BoardOpInput = t.object('BoardOpInput', {
+  op_id: t.string(),
+  tx: t.string(),
+  body: t.string(),
+});
+
+const ACTOR_KINDS = ['human', 'agent', 'system'] as const;
+const DESIGN_CLAIM_KINDS = ['board', 'variant'] as const;
+const DESIGN_INTENTS = ['replace', 'extend'] as const;
+const MESSAGE_KINDS = ['chat', 'comment'] as const;
+const MAX_OPS_PER_PUSH = 100;
+const MAX_OP_BODY_BYTES = 8_192;
+const MAX_SNAPSHOT_BYTES = 1_000_000;
+const MAX_MESSAGE_CHARS = 4_000;
+const MAX_FIELD_BYTES = 8_192; // presence JSON fields
+const MAX_ID_CHARS = 128;
+const MIN_DESIGN_TTL_SECS = 5;
+const MAX_DESIGN_TTL_SECS = 600;
+const U64_MAX = 18_446_744_073_709_551_615n;
+
+function byteLength(s: string): number {
+  return new TextEncoder().encode(s).length;
+}
+
+/** A non-empty id/name string of at most MAX_ID_CHARS characters. */
+function requireId(value: string, what: string): void {
+  if (value.length === 0 || value.length > MAX_ID_CHARS) {
+    throw new SenderError(`${what} must be 1 to ${MAX_ID_CHARS} characters`);
+  }
+}
+
+function requireBoard(ctx: Ctx, boardId: string) {
+  const row = ctx.db.board.id.find(boardId);
+  if (!row) throw new SenderError(`unknown board '${boardId}'`);
+  return row;
+}
+
+/** The board_actor row for `actor`, which must be on `boardId` and bound to the caller's identity. */
+function requireActor(ctx: Ctx, boardId: string, actor: string) {
+  const row = ctx.db.boardActor.actor.find(actor);
+  if (!row || row.board_id !== boardId) throw new SenderError(`unknown actor '${actor}' on board '${boardId}'`);
+  if (!row.identity.equals(ctx.sender)) throw new SenderError(`actor '${actor}' belongs to a different identity`);
+  return row;
+}
+
+/** True when the caller may write board snapshots: an operator, or owner of a `system` actor on the board. */
+function mayWriteSnapshot(ctx: Ctx, boardId: string): boolean {
+  if (isOperator(ctx)) return true;
+  for (const a of ctx.db.boardActor.board_id.filter(boardId)) {
+    if (a.kind === 'system' && a.identity.equals(ctx.sender)) return true;
+  }
+  return false;
+}
+
+export const create_board = spacetimedb.reducer({ id: t.string(), name: t.string() }, (ctx, { id, name }) => {
+  requireId(id, 'board id');
+  requireId(name, 'board name');
+  if (ctx.db.board.id.find(id)) throw new SenderError(`board '${id}' already exists`);
+  ctx.db.board.insert({
+    id,
+    name,
+    created_by: ctx.sender,
+    created_at: ctx.timestamp,
+    next_seq: 0n,
+    snapshot_seq: 0n,
+  });
+});
+
+export const join_board = spacetimedb.reducer(
+  {
+    board_id: t.string(),
+    actor: t.string(),
+    kind: t.string(),
+    name: t.string(),
+    color: t.string(),
+    agent_id: t.option(t.string()),
+  },
+  (ctx, { board_id, actor, kind, name, color, agent_id }) => {
+    requireBoard(ctx, board_id);
+    requireId(actor, 'actor id');
+    oneOf(kind, ACTOR_KINDS, 'actor kind');
+    requireId(name, 'actor name');
+    if (color.length > 32) throw new SenderError('color is too long');
+    if (agent_id !== undefined) requireAgent(ctx, agent_id);
+    const old = ctx.db.boardActor.actor.find(actor);
+    if (old && !old.identity.equals(ctx.sender)) throw new SenderError(`actor '${actor}' belongs to a different identity`);
+    if (old && old.board_id !== board_id) throw new SenderError(`actor '${actor}' belongs to another board`);
+    if (old) ctx.db.boardActor.actor.update({ ...old, kind, name, color, agent_id, last_seen: ctx.timestamp });
+    else {
+      ctx.db.boardActor.insert({
+        actor,
+        board_id,
+        identity: ctx.sender,
+        kind,
+        name,
+        color,
+        agent_id,
+        joined_at: ctx.timestamp,
+        last_seen: ctx.timestamp,
+        last_op_seq: 0n,
+      });
+    }
+  },
+);
+
+// Drops this connection's presence for `actor` and frees the actor's board claims. The actor row stays
+// (the op log still names it).
+export const leave_board = spacetimedb.reducer({ board_id: t.string(), actor: t.string() }, (ctx, { board_id, actor }) => {
+  requireActor(ctx, board_id, actor);
+  if (ctx.connectionId) ctx.db.boardPresence.presence_id.delete(`${ctx.connectionId.toHexString()}:${actor}`);
+  for (const c of [...ctx.db.designClaim.iter()]) {
+    if (c.kind === 'board' && c.scope === board_id && c.holder === actor) ctx.db.designClaim.target.delete(c.target);
+  }
+});
+
+export const push_ops = spacetimedb.reducer(
+  { board_id: t.string(), ops: t.array(BoardOpInput) },
+  (ctx, { board_id, ops }) => {
+    const b = requireBoard(ctx, board_id);
+    if (ops.length > MAX_OPS_PER_PUSH) throw new SenderError(`too many ops (max ${MAX_OPS_PER_PUSH})`);
+    let nextSeq = b.next_seq;
+    const highest = new Map<string, bigint>(); // actor -> highest op number accepted in this call
+    for (const op of ops) {
+      if (op.op_id.length === 0) throw new SenderError('op_id must not be empty');
+      const cut = op.op_id.lastIndexOf(':');
+      const actor = op.op_id.slice(0, cut);
+      const num = op.op_id.slice(cut + 1);
+      if (cut <= 0 || !/^\d{1,20}$/.test(num) || BigInt(num) > U64_MAX) {
+        throw new SenderError(`op_id '${op.op_id}' must look like <actor>:<number>`);
+      }
+      if (byteLength(op.body) > MAX_OP_BODY_BYTES) throw new SenderError(`op body over ${MAX_OP_BODY_BYTES} bytes`);
+      requireActor(ctx, board_id, actor);
+      const n = BigInt(num);
+      if (n > (highest.get(actor) ?? 0n)) highest.set(actor, n);
+      const old = ctx.db.boardOp.op_id.find(op.op_id);
+      if (old) {
+        if (old.body !== op.body) throw new SenderError(`op '${op.op_id}' already exists with a different body`);
+        continue; // idempotent resend
+      }
+      ctx.db.boardOp.insert({
+        op_id: op.op_id,
+        board_id,
+        seq: nextSeq,
+        actor,
+        tx: op.tx,
+        body: op.body,
+        created_at: ctx.timestamp,
+      });
+      nextSeq += 1n;
+    }
+    if (nextSeq !== b.next_seq) ctx.db.board.id.update({ ...b, next_seq: nextSeq });
+    for (const [actor, n] of highest) {
+      const a = ctx.db.boardActor.actor.find(actor)!;
+      ctx.db.boardActor.actor.update({
+        ...a,
+        last_op_seq: n > a.last_op_seq ? n : a.last_op_seq,
+        last_seen: ctx.timestamp,
+      });
+    }
+  },
+);
+
+export const move_cursor = spacetimedb.reducer(
+  {
+    board_id: t.string(),
+    actor: t.string(),
+    x: t.f64(),
+    y: t.f64(),
+    tx: t.f64(),
+    ty: t.f64(),
+    move_ms: t.u32(),
+    down: t.bool(),
+  },
+  (ctx, { board_id, actor, x, y, tx, ty, move_ms, down }) => {
+    requireActor(ctx, board_id, actor);
+    ctx.db.boardCursor.insert({ board_id, actor, x, y, tx, ty, move_ms, down });
+  },
+);
+
+export const set_board_presence = spacetimedb.reducer(
+  {
+    board_id: t.string(),
+    actor: t.string(),
+    selection: t.string(),
+    status: t.string(),
+    tool: t.string(),
+    detail: t.string(),
+    typing: t.string(),
+    viewport: t.string(),
+  },
+  (ctx, { board_id, actor, selection, status, tool, detail, typing, viewport }) => {
+    requireActor(ctx, board_id, actor);
+    if (!ctx.connectionId) throw new SenderError('presence needs a connection');
+    for (const field of [selection, status, tool, detail, typing, viewport]) {
+      if (byteLength(field) > MAX_FIELD_BYTES) throw new SenderError(`presence field over ${MAX_FIELD_BYTES} bytes`);
+    }
+    const row = {
+      presence_id: `${ctx.connectionId.toHexString()}:${actor}`,
+      connection: ctx.connectionId,
+      board_id,
+      actor,
+      selection,
+      status,
+      tool,
+      detail,
+      typing,
+      viewport,
+      updated_at: ctx.timestamp,
+    };
+    if (ctx.db.boardPresence.presence_id.find(row.presence_id)) ctx.db.boardPresence.presence_id.update(row);
+    else ctx.db.boardPresence.insert(row);
+  },
+);
+
+export const write_board_snapshot = spacetimedb.reducer(
+  { board_id: t.string(), upto_seq: t.u64(), doc: t.string() },
+  (ctx, { board_id, upto_seq, doc }) => {
+    const b = requireBoard(ctx, board_id);
+    if (!mayWriteSnapshot(ctx, board_id)) {
+      throw new SenderError('only an operator or a system actor of this board can write a snapshot');
+    }
+    if (upto_seq >= b.next_seq) throw new SenderError(`upto_seq ${upto_seq} is not below next_seq ${b.next_seq}`);
+    if (byteLength(doc) > MAX_SNAPSHOT_BYTES) throw new SenderError(`snapshot over ${MAX_SNAPSHOT_BYTES} bytes`);
+    const snap = { board_id, upto_seq, doc, written_by: ctx.sender, written_at: ctx.timestamp };
+    if (ctx.db.boardSnapshot.board_id.find(board_id)) ctx.db.boardSnapshot.board_id.update(snap);
+    else ctx.db.boardSnapshot.insert(snap);
+    ctx.db.board.id.update({ ...b, snapshot_seq: upto_seq });
+    for (const op of [...ctx.db.boardOp.board_id.filter(board_id)]) {
+      if (op.seq <= upto_seq) ctx.db.boardOp.op_id.delete(op.op_id);
+    }
+  },
+);
+
+export const reset_board = spacetimedb.reducer({ board_id: t.string() }, (ctx, { board_id }) => {
+  requireOperator(ctx);
+  const b = requireBoard(ctx, board_id);
+  for (const op of [...ctx.db.boardOp.board_id.filter(board_id)]) ctx.db.boardOp.op_id.delete(op.op_id);
+  for (const p of [...ctx.db.boardPresence.board_id.filter(board_id)]) ctx.db.boardPresence.presence_id.delete(p.presence_id);
+  for (const a of [...ctx.db.boardActor.board_id.filter(board_id)]) ctx.db.boardActor.actor.delete(a.actor);
+  for (const m of [...ctx.db.boardMessage.board_id.filter(board_id)]) ctx.db.boardMessage.id.delete(m.id);
+  for (const c of [...ctx.db.designClaim.iter()]) {
+    if (c.kind === 'board' && c.scope === board_id) ctx.db.designClaim.target.delete(c.target);
+  }
+  ctx.db.boardSnapshot.board_id.delete(board_id);
+  ctx.db.board.id.update({ ...b, next_seq: 0n, snapshot_seq: 0n });
+});
+
+export const post_board_message = spacetimedb.reducer(
+  {
+    id: t.string(),
+    board_id: t.string(),
+    thread_id: t.string(),
+    kind: t.string(),
+    author: t.string(),
+    to_actor: t.option(t.string()),
+    body: t.string(),
+    anchor: t.option(t.string()),
+  },
+  (ctx, { id, board_id, thread_id, kind, author, to_actor, body, anchor }) => {
+    requireBoard(ctx, board_id);
+    requireActor(ctx, board_id, author);
+    requireId(id, 'message id');
+    requireId(thread_id, 'thread id');
+    oneOf(kind, MESSAGE_KINDS, 'message kind');
+    if (body.length === 0 || body.length > MAX_MESSAGE_CHARS) {
+      throw new SenderError(`message body must be 1 to ${MAX_MESSAGE_CHARS} characters`);
+    }
+    if (anchor !== undefined && byteLength(anchor) > MAX_FIELD_BYTES) throw new SenderError('anchor is too large');
+    if (ctx.db.boardMessage.id.find(id)) throw new SenderError(`message '${id}' already exists`);
+    ctx.db.boardMessage.insert({
+      id,
+      board_id,
+      thread_id,
+      kind,
+      author,
+      to_actor,
+      body,
+      anchor,
+      resolved: false,
+      created_at: ctx.timestamp,
+    });
+  },
+);
+
+export const resolve_board_thread = spacetimedb.reducer(
+  { board_id: t.string(), thread_id: t.string() },
+  (ctx, { board_id, thread_id }) => {
+    requireBoard(ctx, board_id);
+    const owns = [...ctx.db.boardActor.board_id.filter(board_id)].some((a) => a.identity.equals(ctx.sender));
+    if (!owns) throw new SenderError('join the board before resolving a thread');
+    for (const m of [...ctx.db.boardMessage.thread_id.filter(thread_id)]) {
+      if (m.board_id === board_id && !m.resolved) ctx.db.boardMessage.id.update({ ...m, resolved: true });
+    }
+  },
+);
+
+// When a connection closes: drop its presence rows. Then, if the caller's identity has no presence
+// left on any other connection, free its design claims. "Other connections" is decided by the
+// remaining board_presence rows whose actor is bound (board_actor.identity) to this identity; a
+// second open tab that has set presence keeps the claims alive. The 5 to 600 s claim TTL covers
+// the rest (an identity that never set presence).
+export const onDisconnect = spacetimedb.clientDisconnected((ctx) => {
+  if (!ctx.connectionId) return;
+  for (const p of [...ctx.db.boardPresence.connection.filter(ctx.connectionId)]) {
+    ctx.db.boardPresence.presence_id.delete(p.presence_id);
+  }
+  for (const p of ctx.db.boardPresence.iter()) {
+    const a = ctx.db.boardActor.actor.find(p.actor);
+    if (a && a.identity.equals(ctx.sender)) return; // still present through another connection
+  }
+  for (const c of [...ctx.db.designClaim.iter()]) {
+    if (c.holder_identity.equals(ctx.sender)) ctx.db.designClaim.target.delete(c.target);
+  }
+});
+
+// ---------------------------------------------------------------------------------
+// Design claims: leases on a board shape/frame or a variant folder
+// ---------------------------------------------------------------------------------
+
+// Contention does NOT throw (unlike the plan text): a throw rolls back the conflict row and the
+// contention count, which are the whole point. Like claim_symbol, it records the conflict and
+// returns; the caller reads design_claim to see who holds the target.
+export const claim_design = spacetimedb.reducer(
+  {
+    target: t.string(),
+    kind: t.string(),
+    scope: t.string(),
+    intent: t.string(),
+    ttl_secs: t.u32(),
+    actor: t.string(),
+    agent_id: t.option(t.string()),
+  },
+  (ctx, { target, kind, scope, intent, ttl_secs, actor, agent_id }) => {
+    requireId(target, 'target');
+    requireId(scope, 'scope');
+    requireId(actor, 'actor');
+    oneOf(kind, DESIGN_CLAIM_KINDS, 'claim kind');
+    oneOf(intent, DESIGN_INTENTS, 'claim intent');
+    if (ttl_secs < MIN_DESIGN_TTL_SECS || ttl_secs > MAX_DESIGN_TTL_SECS) {
+      throw new SenderError(`ttl_secs must be ${MIN_DESIGN_TTL_SECS} to ${MAX_DESIGN_TTL_SECS}`);
+    }
+    if (kind === 'board') requireActor(ctx, scope, actor);
+    if (agent_id !== undefined) requireAgent(ctx, agent_id);
+
+    const old = ctx.db.designClaim.target.find(target);
+    const live = old !== null && micros(old.expires_at) > micros(ctx.timestamp);
+    if (old && live && (old.holder !== actor || !old.holder_identity.equals(ctx.sender))) {
+      ctx.db.designClaim.target.update({ ...old, contention: old.contention + 1 });
+      if (old.agent_id !== undefined && agent_id !== undefined) {
+        openConflict(ctx, 'claim_contention', target, old.agent_id, agent_id, `${agent_id} wants ${target}, held by ${old.agent_id}`);
+      }
+      return;
+    }
+    const row = {
+      target,
+      kind,
+      scope,
+      holder: actor,
+      holder_identity: ctx.sender,
+      agent_id,
+      intent,
+      expires_at: addSecs(ctx.timestamp, ttl_secs),
+      contention: old && live ? old.contention : 0,
+    };
+    if (old) ctx.db.designClaim.target.update(row);
+    else ctx.db.designClaim.insert(row);
+  },
+);
+
+function requireDesignHolder(ctx: Ctx, target: string) {
+  const c = ctx.db.designClaim.target.find(target);
+  if (!c || !c.holder_identity.equals(ctx.sender)) throw new SenderError(`you don't hold a claim on ${target}`);
+  return c;
+}
+
+export const renew_design_claim = spacetimedb.reducer(
+  { target: t.string(), ttl_secs: t.u32() },
+  (ctx, { target, ttl_secs }) => {
+    if (ttl_secs < MIN_DESIGN_TTL_SECS || ttl_secs > MAX_DESIGN_TTL_SECS) {
+      throw new SenderError(`ttl_secs must be ${MIN_DESIGN_TTL_SECS} to ${MAX_DESIGN_TTL_SECS}`);
+    }
+    const c = requireDesignHolder(ctx, target);
+    if (micros(c.expires_at) <= micros(ctx.timestamp)) throw new SenderError(`claim on ${target} has expired`);
+    ctx.db.designClaim.target.update({ ...c, expires_at: addSecs(ctx.timestamp, ttl_secs) });
+  },
+);
+
+export const release_design_claim = spacetimedb.reducer({ target: t.string() }, (ctx, { target }) => {
+  requireDesignHolder(ctx, target);
+  ctx.db.designClaim.target.delete(target);
+});
+
+// ---------------------------------------------------------------------------------
+// Design variants (generated by Node agents; the code itself stays in git)
+// ---------------------------------------------------------------------------------
+
+const MAX_BRIEF_CHARS = 8_000;
+
+/** The job, which must be running and owned by `agentId`, an agent linked to the caller. */
+function requireOwnJob(ctx: Ctx, jobId: bigint, agentId: string) {
+  requireAgent(ctx, agentId);
+  const job = ctx.db.variantJob.id.find(jobId);
+  if (!job) throw new SenderError(`unknown job ${jobId}`);
+  if (job.agent_id !== agentId) throw new SenderError(`job ${jobId} belongs to another agent`);
+  if (job.status !== 'running') throw new SenderError(`job ${jobId} is ${job.status}, not running`);
+  if (job.variant_id === undefined) throw new SenderError(`job ${jobId} has no variant`);
+  const v = ctx.db.variant.id.find(job.variant_id);
+  if (!v) throw new SenderError(`variant '${job.variant_id}' is missing`);
+  return { job, variant: v };
+}
+
+/** A variant id looks like "<screen>/<name>". */
+function requireVariantId(id: string, screen: string): void {
+  if (!id.startsWith(`${screen}/`) || id.length === screen.length + 1 || id.length > MAX_ID_CHARS) {
+    throw new SenderError(`variant id must look like ${screen}/<name>`);
+  }
+}
+
+export const queue_variant_job = spacetimedb.reducer(
+  { screen: t.string(), parent: t.option(t.string()), brief: t.string(), model: t.string() },
+  (ctx, { screen, parent, brief, model }) => {
+    requireId(screen, 'screen');
+    requireId(model, 'model');
+    if (brief.length > MAX_BRIEF_CHARS) throw new SenderError(`brief over ${MAX_BRIEF_CHARS} characters`);
+    if (parent !== undefined && !ctx.db.variant.id.find(parent)) throw new SenderError(`unknown parent variant '${parent}'`);
+    ctx.db.variantJob.insert({
+      id: 0n,
+      screen,
+      brief,
+      model,
+      parent,
+      status: 'queued',
+      agent_id: undefined,
+      variant_id: undefined,
+      error: undefined,
+      created_at: ctx.timestamp,
+    });
+  },
+);
+
+// Claims a queued job and publishes its variant as `generating`, so pages show it while it is written.
+export const start_variant_job = spacetimedb.reducer(
+  { job_id: t.u64(), agent_id: t.string(), variant_id: t.string() },
+  (ctx, { job_id, agent_id, variant_id }) => {
+    requireAgent(ctx, agent_id);
+    const job = ctx.db.variantJob.id.find(job_id);
+    if (!job) throw new SenderError(`unknown job ${job_id}`);
+    if (job.status !== 'queued') throw new SenderError(`job ${job_id} is ${job.status}, not queued`);
+    requireVariantId(variant_id, job.screen);
+    if (ctx.db.variant.id.find(variant_id)) throw new SenderError(`variant '${variant_id}' already exists`);
+    ctx.db.variantJob.id.update({ ...job, status: 'running', agent_id, variant_id });
+    ctx.db.variant.insert({
+      id: variant_id,
+      screen: job.screen,
+      parent: job.parent,
+      board_id: undefined,
+      frame_id: undefined,
+      kind: job.parent !== undefined ? 'child' : 'root',
+      author: agent_id,
+      model: job.model,
+      status: 'generating',
+      tokens: 0n,
+      cost_usd: 0,
+      duration_ms: 0n,
+      commit: '',
+      created_at: ctx.timestamp,
+    });
+  },
+);
+
+export const finish_variant_job = spacetimedb.reducer(
+  {
+    job_id: t.u64(),
+    agent_id: t.string(),
+    commit: t.string(),
+    tokens: t.u64(),
+    cost_usd: t.f64(),
+    duration_ms: t.u64(),
+  },
+  (ctx, { job_id, agent_id, commit, tokens, cost_usd, duration_ms }) => {
+    const { job, variant: v } = requireOwnJob(ctx, job_id, agent_id);
+    if (!(cost_usd >= 0)) throw new SenderError('cost_usd must be a non-negative number');
+    ctx.db.variant.id.update({ ...v, status: 'ready', commit, tokens, cost_usd, duration_ms });
+    ctx.db.variantJob.id.update({ ...job, status: 'done' });
+  },
+);
+
+export const fail_variant_job = spacetimedb.reducer(
+  { job_id: t.u64(), agent_id: t.string(), error: t.string() },
+  (ctx, { job_id, agent_id, error }) => {
+    const { job, variant: v } = requireOwnJob(ctx, job_id, agent_id);
+    ctx.db.variant.id.update({ ...v, status: 'failed' });
+    ctx.db.variantJob.id.update({ ...job, status: 'failed', error: error.slice(0, MAX_DIFF_CHARS) });
+  },
+);
+
+// A mix is both a variant_mix row (the slot map) and a `mix` variant row (so it has lineage and can be picked).
+// Its id is the variant id too, "<screen>/<name>".
+export const save_variant_mix = spacetimedb.reducer(
+  { id: t.string(), screen: t.string(), parent: t.option(t.string()), title: t.string(), note: t.string(), slots_json: t.string() },
+  (ctx, { id, screen, parent, title, note, slots_json }) => {
+    if (title.length > 200) throw new SenderError('title is over 200 characters');
+    if (note.length > 2_000) throw new SenderError('note is over 2000 characters');
+    requireId(screen, 'screen');
+    requireVariantId(id, screen);
+    if (byteLength(slots_json) > MAX_FIELD_BYTES) throw new SenderError('slots_json is too large');
+    try {
+      JSON.parse(slots_json);
+    } catch {
+      throw new SenderError('slots_json is not valid JSON');
+    }
+    if (parent !== undefined && !ctx.db.variant.id.find(parent)) throw new SenderError(`unknown parent variant '${parent}'`);
+    const old = ctx.db.variantMix.id.find(id);
+    if (old && !old.author.equals(ctx.sender)) throw new SenderError(`mix '${id}' belongs to someone else`);
+    if (!old && ctx.db.variant.id.find(id)) throw new SenderError(`variant '${id}' already exists`);
+    const vrow = {
+      id,
+      screen,
+      parent,
+      board_id: undefined,
+      frame_id: undefined,
+      kind: 'mix',
+      author: ctx.sender.toHexString(),
+      model: '',
+      status: 'ready',
+      tokens: 0n,
+      cost_usd: 0,
+      duration_ms: 0n,
+      commit: '',
+      created_at: ctx.timestamp,
+    };
+    if (old) {
+      ctx.db.variantMix.id.update({ ...old, screen, title, note, slots: slots_json });
+      ctx.db.variant.id.update(vrow);
+    } else {
+      ctx.db.variantMix.insert({ id, screen, title, note, slots: slots_json, author: ctx.sender, created_at: ctx.timestamp });
+      ctx.db.variant.insert(vrow);
+    }
+  },
+);
+
+export const delete_variant_mix = spacetimedb.reducer({ id: t.string() }, (ctx, { id }) => {
+  const mix = ctx.db.variantMix.id.find(id);
+  if (!mix) throw new SenderError(`unknown mix '${id}'`);
+  if (!mix.author.equals(ctx.sender)) requireOperator(ctx);
+  for (const v of ctx.db.variant.screen.filter(mix.screen)) {
+    if (v.parent === id) throw new SenderError(`mix '${id}' is the parent of '${v.id}'`);
+  }
+  ctx.db.variantMix.id.delete(id);
+  ctx.db.variant.id.delete(id);
+});
+
+// An empty node_id clears the pick / the caller's vote.
+export const pick_variant = spacetimedb.reducer({ screen: t.string(), node_id: t.string() }, (ctx, { screen, node_id }) => {
+  requireId(screen, 'screen');
+  if (node_id === '') {
+    ctx.db.variantPick.screen.delete(screen);
+    return;
+  }
+  requireId(node_id, 'node id');
+  const row = { screen, node_id, by: ctx.sender, at: ctx.timestamp };
+  if (ctx.db.variantPick.screen.find(screen)) ctx.db.variantPick.screen.update(row);
+  else ctx.db.variantPick.insert(row);
+});
+
+export const vote_variant = spacetimedb.reducer({ screen: t.string(), node_id: t.string() }, (ctx, { screen, node_id }) => {
+  requireId(screen, 'screen');
+  const id = `${screen}:${ctx.sender.toHexString()}`;
+  if (node_id === '') {
+    ctx.db.variantVote.id.delete(id);
+    return;
+  }
+  requireId(node_id, 'node id');
+  const row = { id, screen, node_id, voter: ctx.sender, at: ctx.timestamp };
+  if (ctx.db.variantVote.id.find(id)) ctx.db.variantVote.id.update(row);
+  else ctx.db.variantVote.insert(row);
+});
+
+export const reset_variants = spacetimedb.reducer({ screen: t.string() }, (ctx, { screen }) => {
+  requireOperator(ctx);
+  for (const v of [...ctx.db.variant.screen.filter(screen)]) ctx.db.variant.id.delete(v.id);
+  for (const m of [...ctx.db.variantMix.screen.filter(screen)]) ctx.db.variantMix.id.delete(m.id);
+  for (const v of [...ctx.db.variantVote.screen.filter(screen)]) ctx.db.variantVote.id.delete(v.id);
+  for (const j of [...ctx.db.variantJob.iter()]) if (j.screen === screen) ctx.db.variantJob.id.delete(j.id);
+  ctx.db.variantPick.screen.delete(screen);
+});
