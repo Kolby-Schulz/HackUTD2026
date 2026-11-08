@@ -119,10 +119,26 @@ export function useDock() {
 }
 
 type Dock = ReturnType<typeof useDock>;
+
+/** Which drops of view `v` onto group `g` would change anything. Moving into the group it is already
+ *  in, splitting a group that holds only `v`, or dropping a tab back on its own slot do nothing, so
+ *  the UI offers none of them. */
+export function dropTargets(g: Pick<Group, 'views'>, v: ViewId): { move: boolean; split: boolean } {
+  const inside = g.views.includes(v);
+  return { move: !inside, split: !(inside && g.views.length === 1) };
+}
+export function tabDropUseful(g: Pick<Group, 'views'>, v: ViewId, index: number): boolean {
+  const at = g.views.indexOf(v);
+  return at < 0 || (index !== at && index !== at + 1);
+}
 const MIME = 'application/x-insync-view';
 type Drop = { gid: string; kind: 'tab'; index: number } | { gid: string; kind: 'left' | 'right' | 'center' };
 
-export function DockArea({ dock, views }: { dock: Dock; views: Record<ViewId, { title: string; icon: ReactNode; hint?: string; render: () => ReactNode }> }) {
+/** `below`: content drawn under the group that holds `view` (only as wide as that group), e.g. the
+ *  Savings panel under the code map. */
+export function DockArea({ dock, views, below }: {
+  dock: Dock; views: Record<ViewId, { title: string; icon: ReactNode; hint?: string; render: () => ReactNode }>; below?: { view: ViewId; node: ReactNode };
+}) {
   const area = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState<ViewId>();
   const [drop, setDrop] = useState<Drop>();
@@ -154,10 +170,13 @@ export function DockArea({ dock, views }: { dock: Dock; views: Record<ViewId, { 
             <div className={'tabs' + (drop?.gid === g.id && drop.kind === 'tab' ? ' drop' : '')} role="tablist" aria-label={`Editor group ${gi + 1} tabs`}
               onDragOver={(e) => {
                 if (!dragging) return;
-                e.preventDefault();
                 const tabs = [...e.currentTarget.querySelectorAll<HTMLElement>('.etab')];
-                const index = tabs.findIndex((t) => { const r = t.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
-                setDrop({ gid: g.id, kind: 'tab', index: index < 0 ? tabs.length : index });
+                const found = tabs.findIndex((t) => { const r = t.getBoundingClientRect(); return e.clientX < r.left + r.width / 2; });
+                const index = found < 0 ? tabs.length : found;
+                // a drop that would leave the tab where it is: no marker, and the cursor says no
+                if (!tabDropUseful(g, dragging, index)) { setDrop((d) => (d?.gid === g.id ? undefined : d)); return; }
+                e.preventDefault();
+                setDrop({ gid: g.id, kind: 'tab', index });
               }}
               onDrop={(e) => { e.preventDefault(); const v = viewFrom(e); if (v) finish(v, drop); }}>
               {g.views.map((v, i) => (
@@ -196,10 +215,13 @@ export function DockArea({ dock, views }: { dock: Dock; views: Record<ViewId, { 
               {dragging && (
                 <div className="drop-layer"
                   onDragOver={(e) => {
-                    e.preventDefault();
                     const r = e.currentTarget.getBoundingClientRect();
                     const x = (e.clientX - r.left) / r.width;
-                    setDrop({ gid: g.id, kind: x < 0.3 ? 'left' : x > 0.7 ? 'right' : 'center' });
+                    const kind = x < 0.3 ? 'left' : x > 0.7 ? 'right' : 'center';
+                    const ok = dropTargets(g, dragging);
+                    if (kind === 'center' ? !ok.move : !ok.split) { setDrop((d) => (d?.gid === g.id ? undefined : d)); return; }
+                    e.preventDefault();
+                    setDrop({ gid: g.id, kind });
                   }}
                   onDragLeave={() => setDrop((d) => (d?.gid === g.id && d.kind !== 'tab' ? undefined : d))}
                   onDrop={(e) => { e.preventDefault(); const v = viewFrom(e); if (v) finish(v, drop); }}>
@@ -207,6 +229,7 @@ export function DockArea({ dock, views }: { dock: Dock; views: Record<ViewId, { 
                 </div>
               )}
             </div>
+            {below && g.views.includes(below.view) && below.node}
           </section>
           {gi < groups.length - 1 && (
             <GroupSash label={`Resize editor groups ${gi + 1} and ${gi + 2}`} onDrag={(dx, start) => dock.resize(gi, dx, area.current?.clientWidth ?? 1000, start)} sizes={groups.map((x) => x.size)} />
