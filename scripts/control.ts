@@ -11,7 +11,7 @@
 // Any repo: `npm run control -- --repo <owner/name | git URL | path>` (or CONTRACT_TARGET, or
 // the dashboard's Repository field) picks the repository. Every process it starts gets it as
 // CONTRACT_TARGET, which the worker, session, mapper, judge and reset scripts all honor
-// (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<name>.
+// (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<owner>/<name>.
 //
 // Safety: nothing listens on a port. Only dashboards paired with this machine (machine_access,
 // which only this daemon writes) can queue commands, every command goes through toCommand's
