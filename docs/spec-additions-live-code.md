@@ -2,6 +2,8 @@
 
 Proposed additions to sections 6, 7, 9, 10, 13 and 16, written so Tyler can paste each block into place.
 
+> **Status after the updated spec (Nov 7):** part B is now in the spec as `contract-hook` (section 11, "Automatic change reporting"); keep the notes below about not overwriting the shared code map. Parts A (live diffs) and C (claim guard) are still open proposals.
+
 **Why:** the spec covers coordination (plans, claims, conflicts) but not the code itself. The dashboard can say `calculateFee` changed, yet nobody can see the change, which is abstract for judges. These additions also close a gap in Rule 1: it only fires if the agent remembers to call `report_change`.
 
 **Context:** workers now run on the local Claude Code CLI instead of a custom Nemotron tool loop (see `CLAUDE.md`, "Model backend"). With no custom `write_file` tool to instrument, Claude Code **hooks** are the natural way to report edits. As a side effect, the stretch goal of real Claude Code sessions joining becomes cheap, because our own workers already use the same hooks.

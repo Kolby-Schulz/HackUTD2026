@@ -18,7 +18,9 @@
     "demo": "tsx scripts/run-demo.ts",
     "reset": "tsx scripts/reset.ts",
     "seed": "tsx scripts/seed.ts",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "triage": "npm run start -w @contract/triage --",
+    "mcp": "npm run start -w @contract/mcp --"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
