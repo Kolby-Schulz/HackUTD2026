@@ -30,7 +30,10 @@ export function makeHarness() {
     ]),
   );
 
-  /** Runs body as one reducer transaction from `who`; throws (and rolls back) like the server. */
+  /**
+   * Runs body as one reducer transaction from `who`; throws (and rolls back) like the server.
+   * Never read `t.db` inside body: the harness locks and aborts. Read it before or after.
+   */
   function as<T>(who: Who, body: (ctx: Ctx) => T): T {
     return h.withReducerTx(auths.get(who)!, body as never);
   }
