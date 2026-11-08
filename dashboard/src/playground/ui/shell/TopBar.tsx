@@ -4,7 +4,10 @@ import { TOOL_KEYS } from '../../actions/tools';
 import { RENAME_EVENT, cleanFileName, FILE_NAME_MAX } from '../../actions/panels';
 import { prefs } from '../../core/prefs';
 import { useStoreValue } from '../../core/react';
-import { toast } from '../../core/toast';
+import { toast, toasts } from '../../core/toast';
+import { getAction, shortcutLabels } from '../../core/actions';
+import { redoMine, undoMine } from '../../actions/edit';
+import type { BoardKit } from '../../core/commands';
 import { copyLink, exportSelection } from '../../actions/share';
 import { activeBoard } from '../board/state';
 import type { Persistence } from '../../core/persist';
@@ -54,6 +57,63 @@ function SaveDot({ ui }: { ui: SlotProps['ui'] }) {
   return <span className="pg-save" data-status={status} role="status" aria-label={label} title={label} />;
 }
 
+/** "Changed by Juno" / "Changed by Juno and Ada": who superseded the fields an undo had to leave alone. */
+export function skipText(board: BoardKit, by: string[]): string {
+  const names = [...new Set(by)].map((id) => board.actors.get(id)?.name ?? id);
+  return `Changed by ${names.length > 2 ? `${names.slice(0, 2).join(', ')} and others` : names.join(' and ')}`;
+}
+
+/** Tooltip: next action name plus the shortcut, e.g. "Undo Move 3 layers  ⌘Z". */
+const tip = (verb: string, label: string | null, id: string) => {
+  const a = getAction(id);
+  const keys = a ? shortcutLabels(a)[0] : undefined;
+  return (label ? `${verb} ${label}` : `Nothing to ${verb.toLowerCase()}`) + (keys ? `  ${keys}` : '');
+};
+
+/** Undo / redo buttons for the human's own stacks (HISTORY-16) and the one toast per undo (HISTORY-16, 18). */
+function UndoRedo({ board }: { board: BoardKit }) {
+  const um = board.undoManager;
+  const undoLabel = useStoreValue(um.subscribe, () => um.nextLabel(board.me, 'undo'));
+  const redoLabel = useStoreValue(um.subscribe, () => um.nextLabel(board.me, 'redo'));
+  useEffect(() => {
+    let shown: number | null = null;
+    let seen = um.last()?.n ?? 0;
+    const off = um.subscribe(() => {
+      const e = um.last();
+      if (!e || e.n === seen) return;
+      seen = e.n;
+      if (e.actor !== board.me) return;
+      if (shown !== null) toasts.dismiss(shown); // never stack more than one history toast
+      const skip = e.outcome.skipped.length ? skipText(board, e.outcome.skipped.map((s) => s.by)) : '';
+      const verb = { undo: 'Undid', redo: 'Redid', revert: 'Reverted', reapply: 'Re-applied' }[e.kind];
+      if (!e.outcome.ok && !skip) return; // "Nothing to undo" is toasted by the action
+      const text = e.outcome.ok ? `${verb}: ${e.label}${skip ? ` (${skip.toLowerCase()} kept)` : ''}` : skip;
+      const canBack = e.kind === 'revert' && e.outcome.ok && um.canReapply(e.txId);
+      shown = toasts.show(text, {
+        variant: e.outcome.ok ? 'info' : 'warn', ttlMs: canBack ? 6000 : e.outcome.ok && !skip ? 1500 : 3500,
+        ...(canBack ? { action: { label: 'Re-apply', run: () => {
+          // BoardKit has no reapply yet (see report); fall back to the manager so the button works today.
+          const b = board as BoardKit & { reapply?: (by: string, id: string) => unknown };
+          if (b.reapply) b.reapply(board.me, e.txId); else um.reapply(board.me, e.txId);
+        } } } : {}),
+      });
+    });
+    return () => { off(); if (shown !== null) toasts.dismiss(shown); };
+  }, [board, um]);
+  return (
+    <div className="pg-cbtn" role="group" aria-label="History">
+      <button className="pg-icon" disabled={!undoLabel} style={undoLabel ? undefined : { opacity: 0.4 }} title={tip('Undo', undoLabel, 'edit.undo')}
+        aria-label={undoLabel ? `Undo ${undoLabel}` : 'Undo'} onClick={() => undoMine(board)}>
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M9 7 4.5 11.5 9 16M5 11.5h9a5 5 0 0 1 0 10h-3" transform="translate(0 -3)" /></svg>
+      </button>
+      <button className="pg-icon" disabled={!redoLabel} style={redoLabel ? undefined : { opacity: 0.4 }} title={tip('Redo', redoLabel, 'edit.redo')}
+        aria-label={redoLabel ? `Redo ${redoLabel}` : 'Redo'} onClick={() => redoMine(board)}>
+        <svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 7l4.5 4.5L15 16M19 11.5h-9a5 5 0 0 0 0 10h3" transform="translate(0 -3)" /></svg>
+      </button>
+    </div>
+  );
+}
+
 export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolved }: SlotProps & {
   showPins: boolean;
   onShowPins: (v: boolean) => void;
@@ -79,6 +139,7 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
       <SaveDot ui={ui} />
       <span className="pg-sub">multi-agent design board · proof of concept</span>
       <span className="pg-grow" />
+      <UndoRedo board={board} />
       <AvatarStack cursors={cursors} onPick={(id) => jumpToActor(board, id)} />
       <div className="pg-cbtn">
         <button className={'pg-icon' + (tool === 'comment' ? ' on' : '')} title={`Comment (${TOOL_KEYS.comment.toUpperCase()})`} onClick={() => pickTool(ui, tool === 'comment' ? 'select' : 'comment')}>

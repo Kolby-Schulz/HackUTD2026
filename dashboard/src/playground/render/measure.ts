@@ -80,7 +80,21 @@ const MAX_CACHE = 5000;
 export function setMeasureEnv(e: MeasureEnv | null) { env = e; cache.clear(); }
 /** Drop cached results, e.g. after document.fonts finishes loading (fonts loading late). */
 export function clearMeasureCache() { cache.clear(); }
-function getEnv(): MeasureEnv { return (env ??= browserEnv()); }
+
+// Font fallback (TEXT-25): text measured before its font loads uses the fallback face. When document.fonts settles
+// the cache is dropped and subscribers (renderers, autosize) re-measure. Hooked lazily; a no-op in Node tests.
+const fontListeners = new Set<() => void>();
+let fontsHooked = false;
+/** Called after web fonts finish loading and the measure cache was cleared. Returns an unsubscribe. */
+export function onFontsLoaded(cb: () => void): () => void { fontListeners.add(cb); hookFonts(); return () => { fontListeners.delete(cb); }; }
+function fontsChanged() { cache.clear(); fontListeners.forEach((cb) => cb()); }
+function hookFonts() {
+  if (fontsHooked || typeof document === 'undefined' || !document.fonts) return;
+  fontsHooked = true;
+  void document.fonts.ready.then(fontsChanged);
+  document.fonts.addEventListener?.('loadingdone', fontsChanged);
+}
+function getEnv(): MeasureEnv { hookFonts(); return (env ??= browserEnv()); }
 
 /**
  * Measure text in world units. `width` is the box width (needed for auto-h and fixed; ignored by auto-w).
@@ -113,4 +127,33 @@ export function fitSize(shape: Pick<Shape, 'text' | 'textMode' | 'w' | 'h'> & Te
   if (mode === 'fixed') return null;
   const m = measureText(shape.text ?? '', shape, mode, shape.w);
   return { w: mode === 'auto-w' ? Math.ceil(m.w) : shape.w, h: Math.ceil(m.h) };
+}
+
+/**
+ * Fixed-box overflow (TEXT-21): true when the content is taller than the box. Auto modes never overflow.
+ * The renderer clips the box (overflow:hidden) and shows a bracket at the bottom right while selected.
+ */
+export function isOverflowing(shape: Pick<Shape, 'text' | 'textMode' | 'w' | 'h'> & TextStyle): boolean {
+  if ((shape.textMode ?? 'auto-h') !== 'fixed') return false;
+  return measureText(shape.text ?? '', shape, 'fixed', shape.w).h > shape.h + 0.5;
+}
+
+/** Index in `text` closest to a point inside the text box (box-local px at zoom 1), for placing the caret on click. */
+export function caretIndexAt(text: string, style: TextStyle, mode: TextMode, width: number, x: number, y: number): number {
+  const s = resolveStyle(style);
+  const m = measureText(text, style, mode, width);
+  const line = Math.max(0, Math.min(m.lines.length - 1, Math.floor(y / s.lh)));
+  let base = 0;
+  for (let i = 0; i < line; i++) base += m.lines[i].length + (text[base + m.lines[i].length] === '\n' ? 1 : 0);
+  const chars = Array.from(m.lines[line]);
+  const e = getEnv();
+  const total = e.lineWidth(m.lines[line], s);
+  const off = s.align === 'center' ? (width - total) / 2 : s.align === 'right' ? width - total : 0;
+  let idx = 0, prev = 0;
+  for (let k = 1; k <= chars.length; k++) {
+    const w = e.lineWidth(chars.slice(0, k).join(''), s);
+    if (x - off < (prev + w) / 2) break;
+    prev = w; idx += chars[k - 1].length;
+  }
+  return base + idx;
 }

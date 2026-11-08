@@ -49,6 +49,20 @@ export interface ChoreoOpts {
 
 export const PLAN_BUDGET_MS = 20000;
 
+/** Longest text typed one character at a time; longer text types in chunks so a layer stays under ~8 s nominal. */
+export const TYPE_MAX_TICKS = 240;
+
+/** Nominal ms to wait before typing the character that ends `typed` (about 30 cps, pauses after punctuation). */
+export function typeDelay(typed: string, rng: () => number): number {
+  const ch = typed.slice(-1);
+  const base = 25 + rng() * 45;
+  if (ch === ' ') return base + 10;
+  if (ch === '\n') return base + 140;
+  if (/[.!?]/.test(ch)) return base + 160;
+  if (/[,;:]/.test(ch)) return base + 70;
+  return base;
+}
+
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
@@ -166,14 +180,26 @@ export function createChoreographer(o: ChoreoOpts): Choreographer {
           const fs = r.h / 1.3;
           await moveTo(r.x, r.y + fs * 0.6);
           press(true); await wait(90); press(false);
-          for (let k = 1; k <= i.text.length; k++) {
-            await wait(25 + rng() * 45);
-            sink.onType?.(i.text.slice(0, k));
+          // One sink call per tick = one gesture update on the layer; long text types in chunks.
+          const chars = Array.from(i.text);
+          const step = Math.max(1, Math.ceil(chars.length / TYPE_MAX_TICKS));
+          for (let k = step; ; k = Math.min(chars.length, k + step)) {
+            const typed = chars.slice(0, k).join('');
+            await wait(typeDelay(typed, rng));
+            sink.onType?.(typed);
             cur = { x: r.x + Math.min(r.w, (k * fs * 0.56) % (r.w + 1)), y: cur.y };
-            publish({ typing: i.text.slice(0, k) });
+            publish({ typing: typed });
+            if (k >= chars.length) break;
           }
         } else {
-          for (let k = 1; k <= i.text.length; k++) { await wait(25 + rng() * 45); sink.onType?.(i.text.slice(0, k)); }
+          const chars = Array.from(i.text);
+          const step = Math.max(1, Math.ceil(chars.length / TYPE_MAX_TICKS));
+          for (let k = step; ; k = Math.min(chars.length, k + step)) {
+            const typed = chars.slice(0, k).join('');
+            await wait(typeDelay(typed, rng));
+            sink.onType?.(typed);
+            if (k >= chars.length) break;
+          }
         }
         publish({ typing: undefined });
         layerDone();

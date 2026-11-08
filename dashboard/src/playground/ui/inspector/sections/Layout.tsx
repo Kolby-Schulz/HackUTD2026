@@ -72,6 +72,13 @@ export function LayoutSection({ board }: SlotProps) {
           }}
         ><LockIcon on={locked} /></button>
       </div>
+      <div style={{ ...row, gridTemplateColumns: '1fr 1fr', marginBottom: hasRadius ? 6 : 0 }}>
+        {/* PROPS-4: stored clockwise; the field is counter-clockwise positive like Figma (scale -1), wraps to -180..180 on write. */}
+        <NumberField
+          board={board} sp={sp} prop="rotation" scale={-1} unit="°" decimals={2} undoLabel="Set rotation" ariaLabel="Rotation"
+          label={<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden><path d="M13 8a5 5 0 1 1-1.8-3.8M13 2.5V5h-2.5" /></svg>}
+        />
+      </div>
       {hasRadius && (
         <div style={{ ...row, gridTemplateColumns: '1fr 1fr', marginBottom: 0 }}>
           <NumberField

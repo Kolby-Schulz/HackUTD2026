@@ -62,3 +62,24 @@ describe('fitSize', () => {
     expect(fitSize({ text: 'aaa bbb', textMode: 'auto-h', fontSize: 10, w: 30, h: 0 })).toEqual({ w: 30, h: 24 });
   });
 });
+
+import { caretIndexAt, isOverflowing, onFontsLoaded } from './measure';
+describe('WP-76 overflow, caret, fonts', () => {
+  const fake = { lineWidth: (l: string) => l.length * 10, wrap: (t: string, _s: unknown, w: number) => { const n = Math.max(1, Math.floor(w / 10)); const out: string[] = []; for (const p of t.split('\n')) { if (!p) out.push(''); for (let i = 0; i < p.length; i += n) out.push(p.slice(i, i + n)); } return out; } };
+  it('flags only fixed boxes that overflow', () => {
+    setMeasureEnv(fake);
+    const base = { text: 'x'.repeat(40), w: 100, h: 20 };
+    expect(isOverflowing({ ...base, textMode: 'fixed' })).toBe(true);
+    expect(isOverflowing({ ...base, textMode: 'fixed', h: 200 })).toBe(false);
+    expect(isOverflowing({ ...base, textMode: 'auto-h' })).toBe(false);
+    setMeasureEnv(null);
+  });
+  it('maps a click to a caret index', () => {
+    setMeasureEnv(fake);
+    expect(caretIndexAt('hello', {}, 'auto-w', 50, 24, 5)).toBe(2);
+    expect(caretIndexAt('ab\ncd', {}, 'auto-w', 50, 12, 30)).toBe(4);
+    expect(caretIndexAt('hello', {}, 'auto-w', 50, 999, 5)).toBe(5);
+    setMeasureEnv(null);
+  });
+  it('onFontsLoaded unsubscribes', () => { const off = onFontsLoaded(() => {}); off(); });
+});

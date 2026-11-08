@@ -1,8 +1,9 @@
 // The list of everyone with a cursor: you, agents (pause / remove) and API cursors (remove).
 // Rows show colour, state dot and detail; clicking an actor jumps the camera to it (AGENT-20) and pulses its cursor.
 // Also: join/leave toasts (MULTI-14) and an AvatarStack with +N overflow (MULTI-4) for the top bar to mount.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { BoardKit } from '../core/commands';
+import { followActor, followingId, stopFollow, subscribeFollow } from '../core/follow';
 import { goTo } from '../core/goto';
 import { toast } from '../core/toast';
 import type { AgentState } from '../core/types';
@@ -10,6 +11,7 @@ import { ARROW, YOU_COLOR } from './constants';
 import { statusOf } from './meta';
 import type { Meta } from './meta';
 import { pulseActor } from './overlays/RemoteSelections';
+import { activeBoard } from './board/state';
 import type { SlotProps } from './slotProps';
 import '../styles/presence.css';
 
@@ -34,6 +36,13 @@ export function jumpToActor(board: Pick<BoardKit, 'presence' | 'me'>, id: string
   else return false;
   pulseActor(id);
   return true;
+}
+
+/** Start following an actor on the mounted board (toggles off when already following them). */
+export function toggleFollow(id: string): boolean {
+  if (followingId() === id) { stopFollow(); return false; }
+  const env = activeBoard();
+  return env ? followActor(env, id) : false;
 }
 
 /** Join / leave toasts for agents and API cursors (not for the first render). */
@@ -64,10 +73,12 @@ export function AvatarStack({ cursors, onMore, onPick }: { cursors: Meta[]; onMo
 
 export function PresenceList({ board, rt, cursors }: SlotProps) {
   useJoinLeaveToasts(cursors, board.me);
+  const following = useSyncExternalStore(subscribeFollow, followingId);
   return (
     <div className="pg-cursorlist">
       {cursors.map((c) => (
-        <div key={c.id} className="pg-crow" onClick={() => { if (c.kind !== 'human') jumpToActor(board, c.id); }}>
+        <div key={c.id} className="pg-crow" onClick={() => { if (c.kind !== 'human') jumpToActor(board, c.id); }}
+          onDoubleClick={() => { if (c.id !== board.me) toggleFollow(c.id); }}>
           <svg width="14" height="15" viewBox="0 0 22 24" style={{ ['--c' as string]: c.kind === 'human' ? YOU_COLOR : c.color }} className="pg-mini"><path d={ARROW} /></svg>
           <div className="pg-cname">
             <b>{c.name}</b>
@@ -77,6 +88,11 @@ export function PresenceList({ board, rt, cursors }: SlotProps) {
           {c.kind === 'agent' && (c.state === 'stopped'
             ? <button className="ghost" title="Restart" onClick={(e) => { e.stopPropagation(); rt?.restart(c.id); }}>▶</button>
             : <button className="ghost" title={c.state === 'paused' ? 'Resume' : 'Pause'} onClick={(e) => { e.stopPropagation(); rt?.setPaused(c.id, c.state !== 'paused'); }}>{c.state === 'paused' ? '▶' : '❚❚'}</button>)}
+          {c.id !== board.me && (
+            <button className="ghost" title={following === c.id ? 'Stop following' : 'Follow'} aria-pressed={following === c.id}
+              style={following === c.id ? { color: 'var(--pg-sel)' } : undefined}
+              onClick={(e) => { e.stopPropagation(); toggleFollow(c.id); }}>◉</button>
+          )}
           {c.kind !== 'human' && (
             <button className="ghost" title="Remove" onClick={(e) => {
               e.stopPropagation();

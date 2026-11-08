@@ -80,6 +80,32 @@ describe('hitTest', () => {
     expect(hitTest(v, idx, { x: 520, y: 10 })).toBeNull();
   });
 
+  it('rotated rect: empty corners miss, rotated body hits', () => {
+    // 200x20 at (0,0) rotated 45deg about its centre (100,10): runs along the diagonal
+    const { v, idx } = setup([mk('r', null, { w: 200, h: 20, rotation: 45 })]);
+    expect(hitTest(v, idx, { x: 100, y: 10 })).toBe('r');
+    expect(hitTest(v, idx, { x: 100 + 60, y: 10 + 60 })).toBe('r');
+    expect(hitTest(v, idx, { x: 100 + 60, y: 10 - 60 }, { z: 4 })).toBeNull(); // inside the bounds, off the shape
+    expect(hitTest(v, idx, { x: 2, y: 2 }, { z: 4 })).toBeNull(); // unrotated box corner is now empty
+  });
+
+  it('rotated ellipse tests in local space', () => {
+    const { v, idx } = setup([mk('e', null, { kind: 'ellipse', w: 200, h: 40, rotation: 90 })]);
+    // centre (100,20); rotated 90deg it is tall
+    expect(hitTest(v, idx, { x: 100, y: 100 }, { z: 4 })).toBe('e');
+    expect(hitTest(v, idx, { x: 190, y: 20 }, { z: 4 })).toBeNull();
+  });
+
+  it('nested rotation: rotated parent group carries its child', () => {
+    const { v, idx } = setup([
+      mk('g', null, { kind: 'group', x: 0, y: 0, w: 200, h: 200, rotation: 90, fills: [] }),
+      mk('c', 'g', { x: 150, y: 0, w: 50, h: 50 }),
+    ]);
+    // child local centre (175,25); group centre (100,100); rotating 90deg cw maps it to (175,175)
+    expect(hitTest(v, idx, { x: 175, y: 175 }, { deep: true })).toBe('c');
+    expect(hitTest(v, idx, { x: 175, y: 25 }, { deep: true, z: 4 })).toBeNull();
+  });
+
   it('5k-shape hit test is fast', () => {
     const list = Array.from({ length: 5000 }, (_, i) => mk(`s${i}`, null, { x: (i % 100) * 120, y: Math.floor(i / 100) * 120, w: 100, h: 100, index: String(i).padStart(5, '0') }));
     const { v, idx } = setup(list);
