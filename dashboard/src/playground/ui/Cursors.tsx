@@ -8,8 +8,8 @@ import { useUi } from './hooks';
 import { statusOf } from './meta';
 import type { Meta } from './meta';
 import { badgeOf, contrastOnWhite, needsBadge, resolveColors } from '../presence/colors';
-import { DRAW_LOCAL_CURSOR, createSmoother } from '../presence/cursors';
-import type { Smoother } from '../presence/cursors';
+import { DRAW_LOCAL_CURSOR, createSmoother, cursorScale, layoutTags } from '../presence/cursors';
+import type { Smoother, TagItem, TagPlan } from '../presence/cursors';
 import '../styles/cursors.css';
 
 const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -61,6 +61,8 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
   const smoothers = useRef(new Map<string, Smoother>());
   const sticky = useRef(new Map<string, string>());
   const hot = useRef<Hot | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const plans = useRef(new Map<string, TagPlan>());
   const shown = useMemo(() => (DRAW_LOCAL_CURSOR ? cursors : cursors.filter((c) => c.id !== env.board.me)), [cursors, env]);
   const colors = useMemo(() => resolveColors(shown.filter((c) => c.kind !== 'human').map((c) => ({ id: c.id, color: c.color })), sticky.current), [shown]);
 
@@ -105,8 +107,34 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
       const g = glyphFor('agent', p!.state, p!.tool);
       if (el.dataset.glyph !== g) el.dataset.glyph = g;
     }
+    paintTags(cam, at);
     paintHover(at);
   });
+
+  // Declutter (MULTI-16, MULTI-22): arrows shrink when zoomed out; crowded tags drop their action text, then
+  // become dots, with a "+n" chip on the winner. Only classes and data attributes change here: the tag's
+  // transform belongs to paintHover (a pinned tag follows your pointer and is never hidden).
+  function paintTags(cam: { z: number }, at: Map<string, { x: number; y: number }>) {
+    const items: TagItem[] = [];
+    for (const [id, v] of at) {
+      const p = env.board.presence.get(id);
+      const idle = !p?.state || p.state === 'idle';
+      items.push({ id, x: v.x, y: v.y, name: id, hasStatus: !idle, kind: 'agent', idle, boosted: hot.current?.id === id });
+    }
+    const box = root.current;
+    const view = { w: box?.clientWidth || 4000, h: box?.clientHeight || 4000 };
+    plans.current = layoutTags(items, { zoom: cam.z, view, focus: env.pointer.inside ? { x: env.pointer.x, y: env.pointer.y } : undefined, prev: plans.current });
+    const scale = String(cursorScale(cam.z));
+    for (const [id, el] of els.current) {
+      if (el.style.getPropertyValue('--cs') !== scale) el.style.setProperty('--cs', scale);
+      const plan = plans.current.get(id);
+      if (!plan) continue;
+      for (const m of ['full', 'short', 'dot'] as const) el.classList.toggle('t-' + m, plan.mode === m);
+      const tag = el.querySelector<HTMLElement>('.pg-tag');
+      if (!tag) continue;
+      if (plan.hidden) tag.dataset.more = String(plan.hidden); else delete tag.dataset.more;
+    }
+  }
 
   // Hover an agent's arrow: its pill (name · status) pins where your pointer is, so the agent keeps
   // moving freely. When your pointer leaves the pill, it animates back to the agent's cursor.
@@ -156,7 +184,7 @@ export function Cursors({ cursors }: { cursors: Meta[] }) {
   }, [cursors]);
 
   return (
-    <div className="pg-cursors">
+    <div className="pg-cursors" ref={root}>
       {shown.map((c) => {
         const human = c.kind === 'human';
         const status = statusOf(c);

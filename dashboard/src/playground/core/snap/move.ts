@@ -5,6 +5,7 @@ import type { Rect, ShapeId } from '../types';
 import { collectCandidates, getSnapSource } from './candidates';
 import type { Candidate } from './candidates';
 import { withParent } from './parent';
+import { snapSpacing } from './spacing';
 
 const NONE: SnapResult = { dx: 0, dy: 0, lines: [], gaps: [] };
 const EPS = 0.01;
@@ -119,6 +120,15 @@ export function snapMoveImpl(box: Rect, ctx: SnapCtx): SnapResult {
     snapped.push({ axis: a, at, src: pick.src });
   }
   if (snapped.length) memory.set(ctx.actor, next); else memory.delete(ctx.actor);
+
+  // equal-spacing snap on the axes no edge snap holds (ALIGN-14); no hysteresis yet
+  const free = (['x', 'y'] as const).filter((a) => !snapped.some((s) => s.axis === a));
+  if (free.length) {
+    const edged: Rect = { x: box.x + out.dx, y: box.y + out.dy, w: box.w, h: box.h };
+    const sp = snapSpacing(edged, cands, t, round, free);
+    out.dx += sp.dx; out.dy += sp.dy;
+    out.gaps.push(...sp.gaps);
+  }
 
   const final: Rect = { x: box.x + out.dx, y: box.y + out.dy, w: box.w, h: box.h };
   for (const s of snapped) out.lines.push(guide(final, cands, s.axis, s.at, s.src, round ? 0.5 + EPS : EPS));

@@ -11,6 +11,7 @@ import { absRect, descendants, toLocal } from '../../core/tree';
 import type { Command, Gesture, Pt, Rect, ShapeId } from '../../core/types';
 import { selectedIds } from '../board/state';
 import type { BoardEnv } from '../board/state';
+import { modeAfterResize } from '../text/autosize';
 import type { Mode, PointerInfo } from './pipeline';
 
 /** Box for dragging `corner` of `orig` to the local point (px, py); the opposite corner is the anchor. */
@@ -64,7 +65,16 @@ export function startResize(env: BoardEnv, p0: PointerInfo): Mode | null {
     return res;
   };
 
-  const commands = (p: PointerInfo): Command[] => {
+  // text boxes change mode with the handle: width edges -> auto-h, height edges and corners -> fixed (TEXT-4)
+  const textModes: Command[] = roots.flatMap((id) => {
+    const s = st.shapes.get(id)!;
+    if (s.kind !== 'text') return [];
+    const mode = modeAfterResize(s.textMode, handle);
+    return mode === (s.textMode ?? 'auto-h') ? [] : [{ t: 'shape.update', ids: [id], patch: { textMode: mode } } as Command];
+  });
+
+  const commands = (p: PointerInfo): Command[] => [...sizeCommands(p), ...textModes];
+  const sizeCommands = (p: PointerInfo): Command[] => {
     const res = compute(p);
     if (members.length === 1 && sameParent) return [{ t: 'shape.resize', id: members[0].id, box: res.box }];
     return members.map((m) => {

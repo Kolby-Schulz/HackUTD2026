@@ -22,7 +22,7 @@ import { enterAt } from '../gestures/select';
 import { cursorFor } from './cursor';
 import type { PointerInfo } from '../gestures/pipeline';
 import { trackSpace } from '../gestures/pan';
-import { startEditing } from '../gestures/text';
+import { resetTextHandle, startEditing } from '../gestures/text';
 import { Claims } from '../overlays/Claims';
 import { Hover } from '../overlays/Hover';
 import type { DescribeTarget } from '../overlays/Hover';
@@ -106,6 +106,7 @@ export function Board(props: {
 }) {
   const viewRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
+  const applyRef = useRef<() => void>(() => {});
   const [env] = useState(() => {
     const painter = createPainter(props.camera, () => worldRef.current);
     const e: BoardEnv & { painter: typeof painter } = {
@@ -142,6 +143,7 @@ export function Board(props: {
       // the local human gets native per-tool cursors; remote and agent cursors are drawn by ui/Cursors.tsx
       view.style.cursor = s.panning ? 'grabbing' : s.space ? 'grab' : cursorFor(s.tool, s.hover);
     }
+    applyRef.current = applyUi;
     applyUi();
     paint.wake();
     return () => {
@@ -186,10 +188,12 @@ export function Board(props: {
           viewRef.current!.setPointerCapture(e.pointerId);
           track(e);
           pipeline.down(info(e));
+          // the rotate gesture sets a body cursor; the view's own cursor would hide it, so mirror it while the gesture runs
+          if (pipeline.active() && document.body.style.cursor) viewRef.current!.style.cursor = document.body.style.cursor;
         }}
-        onPointerMove={(e) => { track(e); pipeline.move(info(e)); }}
-        onPointerUp={(e) => { track(e); pipeline.up(info(e)); }}
-        onPointerCancel={() => { pipeline.cancel(); }}
+        onPointerMove={(e) => { track(e); pipeline.move(info(e)); if (!pipeline.active()) applyRef.current(); }}
+        onPointerUp={(e) => { track(e); pipeline.up(info(e)); applyRef.current(); }}
+        onPointerCancel={() => { pipeline.cancel(); applyRef.current(); }}
         onPointerEnter={(e) => track(e)}
         onPointerLeave={() => { env.pointer.inside = false; env.ui.set({ hover: null }); env.paint.wake(); }}
         // keep focus where the board put it (a fresh text editor) and stop middle-button autoscroll
@@ -197,6 +201,8 @@ export function Board(props: {
         onDoubleClick={(e) => {
           if ((e.target as HTMLElement).closest(OWN_INPUT)) return;
           if (env.ui.get().tool !== 'select') return;
+          const handle = (e.target as HTMLElement).closest<HTMLElement>('[data-handle]')?.dataset.handle;
+          if (handle) { resetTextHandle(env); return; }
           const id = shapeAt(env, info(e).world, true);
           const s = id ? env.board.doc.getState().shapes.get(id) : undefined;
           if (s?.kind === 'text') startEditing(env, s.id);

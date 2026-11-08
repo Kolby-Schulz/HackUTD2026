@@ -37,3 +37,10 @@
 .pg-cursor.hot .pg-tag { opacity: 1; }
 .pg-tag { transition: opacity .4s, transform .22s cubic-bezier(.2, .8, .2, 1); }
 .pg-cursor.pinned .pg-tag { transition: opacity .15s; }
+
+/* WP-53: zoomed-out arrows shrink; crowded tags lose the action text, then become dots with a +n chip.
+   A hovered (.hot) tag is never decluttered. */
+.pg-cursor .arrow { scale: var(--cs, 1); }
+.pg-cursor.t-short:not(.hot) .pg-tag .st { display: none; }
+.pg-cursor.t-dot:not(.hot) .pg-tag { display: none; }
+.pg-tag[data-more]::after { content: '+' attr(data-more); font-weight: 700; color: var(--pg-muted); }

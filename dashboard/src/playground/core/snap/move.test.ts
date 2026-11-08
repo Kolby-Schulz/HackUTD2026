@@ -231,4 +231,11 @@ describe('snapMove', () => {
     for (let i = 0; i < 200; i++) snapMove(box(rnd() * 8000, rnd() * 8000, 40, 30), ctx());
     expect((performance.now() - t0) / 200).toBeLessThan(5);
   });
+
+  it('applies the equal-spacing snap on an axis with no edge snap (ALIGN-14)', () => {
+    bind([mk('a', null, { x: 0, y: 0 }), mk('b', null, { x: 300, y: 0 })]);
+    const r = snapMove(box(172, 0), ctx());
+    expect(r.dx).toBe(3);
+    expect(r.gaps.length).toBeGreaterThan(0);
+  });
 });
