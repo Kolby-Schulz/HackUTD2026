@@ -27,12 +27,10 @@ const HEARTBEAT_TIMEOUT_SECS = 60;
 const EXPIRE_EVERY_MICROS = 30_000_000n; // 30 s
 const REQUIRE_CLAIM_FOR_CHANGE = false;
 
-const AGENT_STATUSES = ['idle', 'working', 'paused', 'done'] as const;
 const TASK_STATUSES = ['todo', 'in_progress', 'paused', 'done', 'discarded'] as const;
 const SYMBOL_KINDS = ['function', 'class', 'method', 'const'] as const;
 const INTENTS = ['modify', 'create', 'depend'] as const;
 const CHANGE_KINDS = ['signature', 'behavior', 'created', 'removed'] as const;
-const CONFLICT_KINDS = ['broken_dependency', 'duplicate', 'claim_contention'] as const;
 const RUN_MODES = ['with_contract', 'without_contract'] as const;
 const PURPOSES = ['plan', 'code', 'context', 'test_fix', 'merge_fix', 'coordination'] as const;
 const SAVING_KINDS = ['early_stop', 'reuse', 'context_slice', 'cache_hit'] as const;
@@ -600,7 +598,7 @@ export const publish_plan = spacetimedb.reducer(
       }
     }
 
-    for (const old of ctx.db.plan.agent_id.filter(agent_id)) {
+    for (const old of [...ctx.db.plan.agent_id.filter(agent_id)]) {
       if (old.active) ctx.db.plan.id.update({ ...old, active: false });
     }
     const p = ctx.db.plan.insert({
@@ -760,6 +758,9 @@ export const resolve_conflict = spacetimedb.reducer(
     if (!c) throw new SenderError(`unknown conflict ${conflict_id}`);
     // 'resolving' is allowed too: the coordinator marks a conflict resolving while it thinks.
     if (!isLiveConflict(c.status)) throw new SenderError(`conflict ${conflict_id} is ${c.status}, not open`);
+    if (owner_agent !== c.agent_a && owner_agent !== c.agent_b) {
+      throw new SenderError(`owner_agent '${owner_agent}' is not part of conflict ${conflict_id}`);
+    }
 
     ctx.db.decision.insert({
       id: 0n,
@@ -876,7 +877,8 @@ export const expire_claims = spacetimedb.reducer(
     }
     const cutoff = now - BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n;
     for (const a of [...ctx.db.agent.iter()]) {
-      if (a.status !== 'idle' && micros(a.last_heartbeat) < cutoff) {
+      // 'done' agents finished their work; leave them so the dashboard shows it.
+      if ((a.status === 'working' || a.status === 'paused') && micros(a.last_heartbeat) < cutoff) {
         ctx.db.agent.id.update({ ...a, status: 'idle' });
       }
     }
