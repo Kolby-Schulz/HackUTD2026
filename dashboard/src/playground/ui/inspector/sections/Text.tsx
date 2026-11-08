@@ -5,6 +5,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { Shape, ShapeProps } from '../../../core/types';
 import type { SlotProps } from '../../slotProps';
+import { writeMeasuredSize } from '../../text/autosize';
 import { NumberField } from '../NumberField';
 import { mixedValue, useFieldFlash, useSelectionProps } from '../useSelectionProps';
 import type { SelectionProps } from '../useSelectionProps';
@@ -103,7 +104,10 @@ function IconGroup<T extends string>(props: {
 const Label = ({ children }: { children: ReactNode }) => <span style={{ color: 'var(--pg-muted)' }}>{children}</span>;
 
 export function TextSection({ board }: SlotProps) {
-  const raw = useSelectionProps(board);
+  const base = useSelectionProps(board);
+  /** Font, size and mode changes re-measure so auto-width/auto-height text refits (TEXT-4). One extra 'Fit text' undo entry. */
+  const remeasure = () => { for (const id of base.ids) writeMeasuredSize(board, id, { role: 'editor', actor: board.me }); };
+  const raw: SelectionProps = { ...base, set: (patch, label) => { const ok = base.set(patch, label); if (ok) remeasure(); return ok; } };
   const texts = raw.shapes.filter((s) => s.kind === 'text');
   if (!texts.length || texts.length !== raw.shapes.length) return null;
   const sp = withLineHeight(raw);
@@ -117,13 +121,13 @@ export function TextSection({ board }: SlotProps) {
           options={FONTS.map((f) => ({ value: f.value, label: f.label }))} />
       </div>
       <div style={{ ...row, gridTemplateColumns: '1fr 1fr' }}>
-        <NumberField board={board} sp={sp} prop="fontSize" label="Aa" ariaLabel="Font size" min={1} max={999} decimals={1} undoLabel="Set font size" />
+        <NumberField board={board} sp={sp} prop="fontSize" label="Aa" ariaLabel="Font size" min={1} max={999} decimals={1} undoLabel="Set font size" afterCommit={remeasure} />
         <SelectField sp={raw} board={board} prop="fontWeight" label="Font weight" undo="Set font weight" fallback={400}
           options={WEIGHTS.map(([value, label]) => ({ value, label }))} />
       </div>
       <div style={{ ...row, gridTemplateColumns: '1fr 1fr' }}>
-        <NumberField board={board} sp={sp} prop={'lineHeight' as 'x'} label={<Label>LH</Label>} ariaLabel="Line height" unit="px" min={0} decimals={1} undoLabel="Set line height" />
-        <NumberField board={board} sp={sp} prop="letterSpacing" label={<Label>LS</Label>} ariaLabel="Letter spacing" unit="px" min={-100} max={100} decimals={2} undoLabel="Set letter spacing" />
+        <NumberField board={board} sp={sp} prop={'lineHeight' as 'x'} label={<Label>LH</Label>} ariaLabel="Line height" unit="px" min={0} decimals={1} undoLabel="Set line height" afterCommit={remeasure} />
+        <NumberField board={board} sp={sp} prop="letterSpacing" label={<Label>LS</Label>} ariaLabel="Letter spacing" unit="px" min={-100} max={100} decimals={2} undoLabel="Set letter spacing" afterCommit={remeasure} />
       </div>
       {!isAuto && (
         <button type="button" onClick={() => raw.set({ lineHeight: 'auto' }, 'Set line height auto')}

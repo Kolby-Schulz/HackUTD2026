@@ -6,6 +6,7 @@ import '../../styles/chat.css';
 import { MentionTextarea } from './MentionTextarea';
 import { Messages } from './MessageView';
 import type { MessageEnv } from './MessageView';
+import { setTitleUnread } from '../title';
 
 /** One chat line (see chat/store.ts). `thread` is an agent id (one chat per agent) or 'general'; `from` 'you' marks the human. */
 export type Msg = ChatMsg;
@@ -64,13 +65,11 @@ export function ChatPanel(p: {
     return () => { clearTimeout(t); p.onActive(null); };
   }, [thread.id, focused]);
 
-  // total badge in the browser tab title: "(2) Playground"
+  // unread total goes through the one title owner: "(2) <name> · Playground"
   const total = Object.values(p.unread).reduce((a, b) => a + b, 0);
   useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const base = document.title.replace(/^\(\d+\)\s/, '');
-    document.title = total > 0 ? `(${total}) ${base}` : base;
-    return () => { document.title = base; };
+    setTitleUnread(total);
+    return () => setTitleUnread(0);
   }, [total]);
 
   // stick to the bottom as messages arrive, unless the user scrolled up to read
