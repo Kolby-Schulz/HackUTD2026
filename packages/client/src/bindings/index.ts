@@ -36,50 +36,80 @@ import {
 // Import all reducer arg schemas
 import AcknowledgeInstructionReducer from "./acknowledge_instruction_reducer";
 import CacheSummaryReducer from "./cache_summary_reducer";
+import ClaimDesignReducer from "./claim_design_reducer";
 import ClaimServiceReducer from "./claim_service_reducer";
 import ClaimSymbolReducer from "./claim_symbol_reducer";
+import CreateBoardReducer from "./create_board_reducer";
 import CreateTaskReducer from "./create_task_reducer";
 import DeleteMachineProcessReducer from "./delete_machine_process_reducer";
+import DeleteVariantMixReducer from "./delete_variant_mix_reducer";
 import DiscardUnmergedRunReducer from "./discard_unmerged_run_reducer";
 import DismissConflictReducer from "./dismiss_conflict_reducer";
 import EndRunReducer from "./end_run_reducer";
+import FailVariantJobReducer from "./fail_variant_job_reducer";
 import FinishMachineCommandReducer from "./finish_machine_command_reducer";
+import FinishVariantJobReducer from "./finish_variant_job_reducer";
 import GrantMachineAccessReducer from "./grant_machine_access_reducer";
 import HeartbeatReducer from "./heartbeat_reducer";
+import JoinBoardReducer from "./join_board_reducer";
+import LeaveBoardReducer from "./leave_board_reducer";
 import LogSavingReducer from "./log_saving_reducer";
 import LogTokensReducer from "./log_tokens_reducer";
 import MarkAttemptWastedReducer from "./mark_attempt_wasted_reducer";
 import MarkConflictResolvingReducer from "./mark_conflict_resolving_reducer";
+import MoveCursorReducer from "./move_cursor_reducer";
+import PickVariantReducer from "./pick_variant_reducer";
+import PostBoardMessageReducer from "./post_board_message_reducer";
 import PostMachineChatReducer from "./post_machine_chat_reducer";
 import PublishPlanReducer from "./publish_plan_reducer";
+import PushOpsReducer from "./push_ops_reducer";
 import PutMachineProcessReducer from "./put_machine_process_reducer";
+import QueueVariantJobReducer from "./queue_variant_job_reducer";
 import RecordCacheHitReducer from "./record_cache_hit_reducer";
 import RegisterAgentReducer from "./register_agent_reducer";
 import RegisterMachineReducer from "./register_machine_reducer";
 import ReleaseClaimReducer from "./release_claim_reducer";
+import ReleaseDesignClaimReducer from "./release_design_claim_reducer";
 import ReleaseServiceReducer from "./release_service_reducer";
+import RenewDesignClaimReducer from "./renew_design_claim_reducer";
 import ReportChangeReducer from "./report_change_reducer";
 import ReportEditReducer from "./report_edit_reducer";
 import RequestMachinePairingReducer from "./request_machine_pairing_reducer";
+import ResetBoardReducer from "./reset_board_reducer";
 import ResetDemoStateReducer from "./reset_demo_state_reducer";
+import ResetVariantsReducer from "./reset_variants_reducer";
+import ResolveBoardThreadReducer from "./resolve_board_thread_reducer";
 import ResolveConflictReducer from "./resolve_conflict_reducer";
 import ResolveMachinePairingReducer from "./resolve_machine_pairing_reducer";
 import RevokeMachineAccessReducer from "./revoke_machine_access_reducer";
+import SaveVariantMixReducer from "./save_variant_mix_reducer";
 import SendInstructionReducer from "./send_instruction_reducer";
 import SendMachineCommandReducer from "./send_machine_command_reducer";
+import SetBoardPresenceReducer from "./set_board_presence_reducer";
 import SetTaskStatusReducer from "./set_task_status_reducer";
 import StartRunReducer from "./start_run_reducer";
+import StartVariantJobReducer from "./start_variant_job_reducer";
 import UpdateMachineReducer from "./update_machine_reducer";
 import UpsertSymbolsReducer from "./upsert_symbols_reducer";
+import VoteVariantReducer from "./vote_variant_reducer";
+import WriteBoardSnapshotReducer from "./write_board_snapshot_reducer";
 
 // Import all procedure arg schemas
 
 // Import all table schema definitions
 import AgentRow from "./agent_table";
+import BoardRow from "./board_table";
+import BoardActorRow from "./board_actor_table";
+import BoardCursorRow from "./board_cursor_table";
+import BoardMessageRow from "./board_message_table";
+import BoardOpRow from "./board_op_table";
+import BoardPresenceRow from "./board_presence_table";
+import BoardSnapshotRow from "./board_snapshot_table";
 import ChangeRow from "./change_table";
 import ClaimRow from "./claim_table";
 import ConflictRow from "./conflict_table";
 import DecisionRow from "./decision_table";
+import DesignClaimRow from "./design_claim_table";
 import FileEditRow from "./file_edit_table";
 import InstructionRow from "./instruction_table";
 import MachineRow from "./machine_table";
@@ -98,6 +128,11 @@ import SymbolEdgeRow from "./symbol_edge_table";
 import TaskRow from "./task_table";
 import TokenSavingRow from "./token_saving_table";
 import TokenUsageRow from "./token_usage_table";
+import VariantRow from "./variant_table";
+import VariantJobRow from "./variant_job_table";
+import VariantMixRow from "./variant_mix_table";
+import VariantPickRow from "./variant_pick_table";
+import VariantVoteRow from "./variant_vote_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -114,6 +149,101 @@ const tablesSchema = __schema({
       { name: 'agent_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, AgentRow),
+  board: __table({
+    name: 'board',
+    indexes: [
+      { accessor: 'id', name: 'board_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'board_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, BoardRow),
+  boardActor: __table({
+    name: 'board_actor',
+    indexes: [
+      { accessor: 'actor', name: 'board_actor_actor_idx_btree', algorithm: 'btree', columns: [
+        'actor',
+      ] },
+      { accessor: 'board_id', name: 'board_actor_board_id_idx_btree', algorithm: 'btree', columns: [
+        'boardId',
+      ] },
+    ],
+    constraints: [
+      { name: 'board_actor_actor_key', constraint: 'unique', columns: ['actor'] },
+    ],
+  }, BoardActorRow),
+  boardCursor: __table({
+    name: 'board_cursor',
+    indexes: [
+    ],
+    constraints: [
+    ],
+    event: true,
+  }, BoardCursorRow),
+  boardMessage: __table({
+    name: 'board_message',
+    indexes: [
+      { accessor: 'board_id', name: 'board_message_board_id_idx_btree', algorithm: 'btree', columns: [
+        'boardId',
+      ] },
+      { accessor: 'id', name: 'board_message_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'thread_id', name: 'board_message_thread_id_idx_btree', algorithm: 'btree', columns: [
+        'threadId',
+      ] },
+    ],
+    constraints: [
+      { name: 'board_message_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, BoardMessageRow),
+  boardOp: __table({
+    name: 'board_op',
+    indexes: [
+      { accessor: 'board_id', name: 'board_op_board_id_idx_btree', algorithm: 'btree', columns: [
+        'boardId',
+      ] },
+      { accessor: 'op_id', name: 'board_op_op_id_idx_btree', algorithm: 'btree', columns: [
+        'opId',
+      ] },
+      { accessor: 'seq', name: 'board_op_seq_idx_btree', algorithm: 'btree', columns: [
+        'seq',
+      ] },
+    ],
+    constraints: [
+      { name: 'board_op_op_id_key', constraint: 'unique', columns: ['opId'] },
+    ],
+  }, BoardOpRow),
+  boardPresence: __table({
+    name: 'board_presence',
+    indexes: [
+      { accessor: 'board_id', name: 'board_presence_board_id_idx_btree', algorithm: 'btree', columns: [
+        'boardId',
+      ] },
+      { accessor: 'connection', name: 'board_presence_connection_idx_btree', algorithm: 'btree', columns: [
+        'connection',
+      ] },
+      { accessor: 'presence_id', name: 'board_presence_presence_id_idx_btree', algorithm: 'btree', columns: [
+        'presenceId',
+      ] },
+    ],
+    constraints: [
+      { name: 'board_presence_presence_id_key', constraint: 'unique', columns: ['presenceId'] },
+    ],
+  }, BoardPresenceRow),
+  boardSnapshot: __table({
+    name: 'board_snapshot',
+    indexes: [
+      { accessor: 'board_id', name: 'board_snapshot_board_id_idx_btree', algorithm: 'btree', columns: [
+        'boardId',
+      ] },
+    ],
+    constraints: [
+      { name: 'board_snapshot_board_id_key', constraint: 'unique', columns: ['boardId'] },
+    ],
+  }, BoardSnapshotRow),
   change: __table({
     name: 'change',
     indexes: [
@@ -161,6 +291,17 @@ const tablesSchema = __schema({
       { name: 'decision_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, DecisionRow),
+  designClaim: __table({
+    name: 'design_claim',
+    indexes: [
+      { accessor: 'target', name: 'design_claim_target_idx_btree', algorithm: 'btree', columns: [
+        'target',
+      ] },
+    ],
+    constraints: [
+      { name: 'design_claim_target_key', constraint: 'unique', columns: ['target'] },
+    ],
+  }, DesignClaimRow),
   fileEdit: __table({
     name: 'file_edit',
     indexes: [
@@ -404,47 +545,133 @@ const tablesSchema = __schema({
       { name: 'token_usage_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, TokenUsageRow),
+  variant: __table({
+    name: 'variant',
+    indexes: [
+      { accessor: 'id', name: 'variant_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'screen', name: 'variant_screen_idx_btree', algorithm: 'btree', columns: [
+        'screen',
+      ] },
+    ],
+    constraints: [
+      { name: 'variant_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VariantRow),
+  variantJob: __table({
+    name: 'variant_job',
+    indexes: [
+      { accessor: 'id', name: 'variant_job_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'variant_job_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VariantJobRow),
+  variantMix: __table({
+    name: 'variant_mix',
+    indexes: [
+      { accessor: 'id', name: 'variant_mix_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'screen', name: 'variant_mix_screen_idx_btree', algorithm: 'btree', columns: [
+        'screen',
+      ] },
+    ],
+    constraints: [
+      { name: 'variant_mix_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VariantMixRow),
+  variantPick: __table({
+    name: 'variant_pick',
+    indexes: [
+      { accessor: 'screen', name: 'variant_pick_screen_idx_btree', algorithm: 'btree', columns: [
+        'screen',
+      ] },
+    ],
+    constraints: [
+      { name: 'variant_pick_screen_key', constraint: 'unique', columns: ['screen'] },
+    ],
+  }, VariantPickRow),
+  variantVote: __table({
+    name: 'variant_vote',
+    indexes: [
+      { accessor: 'id', name: 'variant_vote_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'screen', name: 'variant_vote_screen_idx_btree', algorithm: 'btree', columns: [
+        'screen',
+      ] },
+    ],
+    constraints: [
+      { name: 'variant_vote_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, VariantVoteRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("acknowledge_instruction", AcknowledgeInstructionReducer),
   __reducerSchema("cache_summary", CacheSummaryReducer),
+  __reducerSchema("claim_design", ClaimDesignReducer),
   __reducerSchema("claim_service", ClaimServiceReducer),
   __reducerSchema("claim_symbol", ClaimSymbolReducer),
+  __reducerSchema("create_board", CreateBoardReducer),
   __reducerSchema("create_task", CreateTaskReducer),
   __reducerSchema("delete_machine_process", DeleteMachineProcessReducer),
+  __reducerSchema("delete_variant_mix", DeleteVariantMixReducer),
   __reducerSchema("discard_unmerged_run", DiscardUnmergedRunReducer),
   __reducerSchema("dismiss_conflict", DismissConflictReducer),
   __reducerSchema("end_run", EndRunReducer),
+  __reducerSchema("fail_variant_job", FailVariantJobReducer),
   __reducerSchema("finish_machine_command", FinishMachineCommandReducer),
+  __reducerSchema("finish_variant_job", FinishVariantJobReducer),
   __reducerSchema("grant_machine_access", GrantMachineAccessReducer),
   __reducerSchema("heartbeat", HeartbeatReducer),
+  __reducerSchema("join_board", JoinBoardReducer),
+  __reducerSchema("leave_board", LeaveBoardReducer),
   __reducerSchema("log_saving", LogSavingReducer),
   __reducerSchema("log_tokens", LogTokensReducer),
   __reducerSchema("mark_attempt_wasted", MarkAttemptWastedReducer),
   __reducerSchema("mark_conflict_resolving", MarkConflictResolvingReducer),
+  __reducerSchema("move_cursor", MoveCursorReducer),
+  __reducerSchema("pick_variant", PickVariantReducer),
+  __reducerSchema("post_board_message", PostBoardMessageReducer),
   __reducerSchema("post_machine_chat", PostMachineChatReducer),
   __reducerSchema("publish_plan", PublishPlanReducer),
+  __reducerSchema("push_ops", PushOpsReducer),
   __reducerSchema("put_machine_process", PutMachineProcessReducer),
+  __reducerSchema("queue_variant_job", QueueVariantJobReducer),
   __reducerSchema("record_cache_hit", RecordCacheHitReducer),
   __reducerSchema("register_agent", RegisterAgentReducer),
   __reducerSchema("register_machine", RegisterMachineReducer),
   __reducerSchema("release_claim", ReleaseClaimReducer),
+  __reducerSchema("release_design_claim", ReleaseDesignClaimReducer),
   __reducerSchema("release_service", ReleaseServiceReducer),
+  __reducerSchema("renew_design_claim", RenewDesignClaimReducer),
   __reducerSchema("report_change", ReportChangeReducer),
   __reducerSchema("report_edit", ReportEditReducer),
   __reducerSchema("request_machine_pairing", RequestMachinePairingReducer),
+  __reducerSchema("reset_board", ResetBoardReducer),
   __reducerSchema("reset_demo_state", ResetDemoStateReducer),
+  __reducerSchema("reset_variants", ResetVariantsReducer),
+  __reducerSchema("resolve_board_thread", ResolveBoardThreadReducer),
   __reducerSchema("resolve_conflict", ResolveConflictReducer),
   __reducerSchema("resolve_machine_pairing", ResolveMachinePairingReducer),
   __reducerSchema("revoke_machine_access", RevokeMachineAccessReducer),
+  __reducerSchema("save_variant_mix", SaveVariantMixReducer),
   __reducerSchema("send_instruction", SendInstructionReducer),
   __reducerSchema("send_machine_command", SendMachineCommandReducer),
+  __reducerSchema("set_board_presence", SetBoardPresenceReducer),
   __reducerSchema("set_task_status", SetTaskStatusReducer),
   __reducerSchema("start_run", StartRunReducer),
+  __reducerSchema("start_variant_job", StartVariantJobReducer),
   __reducerSchema("update_machine", UpdateMachineReducer),
   __reducerSchema("upsert_symbols", UpsertSymbolsReducer),
+  __reducerSchema("vote_variant", VoteVariantReducer),
+  __reducerSchema("write_board_snapshot", WriteBoardSnapshotReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
