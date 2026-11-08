@@ -12,7 +12,7 @@ const SPEEDS = [1, 4, 16];
 const TICK_MS = 100;
 
 const duration = (r?: R.Run) => (r?.endedAt ? ms(r.endedAt) - ms(r.startedAt) : 0);
-const label = (r: R.Run) => `run ${r.id} · ${r.mode === 'with_contract' ? 'with Contract' : 'without'}`;
+const label = (r: R.Run) => `run ${r.id} · ${r.mode === 'with_contract' ? 'with InSync' : 'without'}`;
 
 export function ReplayTab({ live }: { live: Tables }) {
   const finished = live.runs.filter((r) => r.endedAt).slice().sort((a, b) => Number(b.id - a.id));

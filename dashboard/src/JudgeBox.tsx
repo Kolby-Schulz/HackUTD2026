@@ -12,7 +12,7 @@ export const JUDGE_MAX_CHARS = 300;
 const STATE: Record<string, string> = {
   todo: 'Queued: the judge agent picks it up in a few seconds',
   in_progress: 'The judge agent is working on it',
-  paused: 'Paused by Contract: it collided with another agent; the coordinator is deciding',
+  paused: 'Paused by InSync: it collided with another agent; the coordinator is deciding',
   done: 'Done',
   discarded: 'Stopped by a guard rail (time or token limit)',
 };

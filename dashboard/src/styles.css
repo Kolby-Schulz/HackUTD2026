@@ -20,6 +20,8 @@
   --radius: 6px;
   --pop: 0 8px 24px rgba(1, 4, 9, 0.8);
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+  --display: 'Unbounded Variable', var(--font);
+  --tagfont: 'JetBrains Mono Variable', var(--mono);
   --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   color-scheme: dark;
 }
@@ -47,7 +49,7 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 .topnav { height: 60px; display: flex; align-items: center; gap: 16px; padding: 0 20px; flex: none; }
 .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--on-agent); display: grid; place-items: center; font-weight: 700; font-size: 15px; }
-.brand { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+.brand { display: flex; align-items: center; gap: 10px; font-family: var(--display); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
 .vsep { width: 1px; height: 24px; background: var(--border); opacity: 0.7; }
 .runsel { display: inline-flex; align-items: center; gap: 8px; border-radius: var(--radius); padding: 0 10px; height: 32px; font-size: 13px; background: var(--surface); border: 1px solid var(--border); }
 .runsel select { background: transparent; border: none; color: var(--text); font-family: var(--mono); font-size: 12px; outline: none; cursor: pointer; }
@@ -219,3 +221,18 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 table.bench { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.bench th { text-align: left; font-weight: 600; color: var(--text2); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 table.bench td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+
+/* ---- intro title card (Intro.tsx) ---- */
+.logo-btn { background: none; border: none; padding: 0; cursor: pointer; display: grid; border-radius: 9px; }
+.logo-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.intro { position: fixed; inset: 0; z-index: 1000; background: var(--bg); display: grid; place-items: center; overflow: hidden; cursor: pointer; }
+.intro-stage { position: relative; width: min(94vw, 150vh); aspect-ratio: 3 / 2; }
+.intro-stage svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.intro-title { position: absolute; left: 0; right: 0; bottom: calc(50% + 14px); display: flex; justify-content: center; overflow: hidden; padding-top: 0.1em;
+  font-family: var(--display); font-size: clamp(40px, 8vw, 100px); font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
+.intro-title span { display: inline-block; will-change: transform; }
+.intro-tag { position: absolute; left: 0; right: 0; top: calc(50% + 24px); margin: 0; text-align: center; color: var(--text2); font-family: var(--tagfont); font-size: clamp(10px, 1vw, 13px); font-weight: 500; letter-spacing: 0.16em; text-transform: uppercase; }
+.intro-skip { position: absolute; right: 24px; bottom: 22px; background: transparent; border: 1px solid var(--border); color: var(--text2); border-radius: 999px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.intro-skip:hover { color: var(--text); border-color: var(--text2); }
+.intro-spark { transform-box: fill-box; transform-origin: center; animation: intro-spin 1.6s linear infinite; }
+@keyframes intro-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

@@ -8,7 +8,7 @@ export function TokensTab({ stats, agents, coord, cases, runStart }: { stats: To
     { label: 'Total this run', v: fmtK(stats.total), sub: `${fmtUsd(stats.cost)} · ${fmtK(stats.cached)} cached reads not counted`, color: undefined },
     { label: 'Useful', v: fmtK(stats.useful), sub: 'kept work', color: 'var(--accent)' },
     { label: 'Wasted', v: fmtK(stats.wasted), sub: 'attempts thrown away or merge fixes', color: 'var(--warn)' },
-    { label: 'Contract’s own', v: fmtK(stats.contract), sub: 'coordinator, only when a rule fires', color: 'var(--text2)' },
+    { label: 'InSync’s own', v: fmtK(stats.contract), sub: 'coordinator, only when a rule fires', color: 'var(--text2)' },
   ];
   return (
     <>
@@ -27,7 +27,7 @@ export function TokensTab({ stats, agents, coord, cases, runStart }: { stats: To
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <h2 style={{ fontSize: 16 }}>Tokens over time</h2>
             <div className="muted" style={{ display: 'flex', gap: 14, fontSize: 12 }}>
-              {[['useful', 'var(--accent)'], ['wasted', 'var(--warn)'], ['Contract’s own', 'var(--text2)']].map(([l, c]) => (
+              {[['useful', 'var(--accent)'], ['wasted', 'var(--warn)'], ['InSync’s own', 'var(--text2)']].map(([l, c]) => (
                 <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 6 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: c }} />{l}</span>
               ))}
             </div>
@@ -79,7 +79,7 @@ export function TokensTab({ stats, agents, coord, cases, runStart }: { stats: To
               ))}
               <tr>
                 <td><span style={{ display: 'flex', alignItems: 'center', gap: 9, fontWeight: 600 }}><Avatar p={{ id: 'coordinator', name: 'Coordinator', letter: 'C', color: '#9198a1' }} size={24} />Coordinator</span></td>
-                <td className="muted">Contract’s own cost, only runs when a rule fires</td>
+                <td className="muted">InSync’s own cost, only runs when a rule fires</td>
                 <td className="num muted">n/a</td><td className="num muted">n/a</td>
                 <td className="num">{fmtK(coord.tokens)}</td><td />
               </tr>
@@ -120,7 +120,7 @@ function Chart({ stats, cases, start }: { stats: TokenStats; cases: CaseView[]; 
   const marks = cases.flatMap((c) => [{ at: c.openedAt, label: c.rule || 'Conflict', color: 'var(--danger)' }, ...(c.decidedAt ? [{ at: c.decidedAt, label: 'Decision', color: 'var(--ok)' }] : [])])
     .filter((m) => m.at >= start && m.at <= end);
   return (
-    <svg viewBox={`0 0 ${CW} ${CH}`} width="100%" style={{ display: 'block', marginTop: 14 }} role="img" aria-label={`Cumulative tokens: ${fmtK(stats.useful)} useful, ${fmtK(stats.wasted)} wasted, ${fmtK(stats.contract)} Contract's own`}>
+    <svg viewBox={`0 0 ${CW} ${CH}`} width="100%" style={{ display: 'block', marginTop: 14 }} role="img" aria-label={`Cumulative tokens: ${fmtK(stats.useful)} useful, ${fmtK(stats.wasted)} wasted, ${fmtK(stats.contract)} InSync's own`}>
       {grid.map((g) => (
         <g key={g}><line x1={PL} x2={CW - PR} y1={Y(g)} y2={Y(g)} stroke="var(--border)" strokeWidth={1} /><text x={PL - 6} y={Y(g) + 4} fontSize={11} fill="var(--text2)" textAnchor="end">{fmtK(g)}</text></g>
       ))}
