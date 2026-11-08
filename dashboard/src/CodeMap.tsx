@@ -35,15 +35,22 @@ function SymbolNode({ data }: NodeProps<SymNode>) {
 const nodeTypes = { sym: SymbolNode };
 
 export function CodeMap({ nodes, edges, selected, onSelect }: { nodes: MapNode[]; edges: MapEdge[]; selected?: string; onSelect: (id: string) => void }) {
+  // The dashboard re-renders every second (T+ clock), and `nodes` is rebuilt each time. React Flow
+  // treats a new node object as unmeasured and hides it until a ResizeObserver re-measures it,
+  // which browsers pause in background tabs, so the map could come back blank. So: only rebuild
+  // the React Flow arrays when what they show changes, and give every node its fixed size up front.
+  const nodeSig = JSON.stringify([nodes, selected]);
+  const edgeSig = JSON.stringify(edges);
   const rfNodes = useMemo<SymNode[]>(() => nodes.map((n) => ({
     id: n.id, type: 'sym', position: { x: n.col * (W + GX), y: n.row * (H + GY) },
+    width: W, height: H, measured: { width: W, height: H },
     data: { n, selected: n.id === selected }, draggable: false, connectable: false,
-  })), [nodes, selected]);
+  })), [nodeSig]);
   const rfEdges = useMemo<Edge[]>(() => edges.map((e) => {
     const color = e.hot ? '#f85149' : '#656c76';
     return { id: e.id, source: e.source, target: e.target, type: 'smoothstep', animated: e.hot,
       style: { stroke: color, strokeWidth: e.hot ? 2 : 1.25 }, markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 } };
-  }), [edges]);
+  }), [edgeSig]);
   // re-fit when the set of symbols changes, not on every claim or color change
   const shape = nodes.map((n) => n.id).join('|');
 
@@ -64,13 +71,20 @@ export function CodeMap({ nodes, edges, selected, onSelect }: { nodes: MapNode[]
 
 const FIT = { padding: 0.12, maxZoom: 1.1 };
 
-/** The map's height follows the window, so re-fit whenever the panel changes size. */
+/** The map's height follows the window, so re-fit whenever the panel changes size, and again
+ *  when the browser tab comes back into view (sizes read while hidden can be zero). */
 function FitOnResize() {
   const { fitView } = useReactFlow();
   const w = useStore((s) => s.width);
   const h = useStore((s) => s.height);
   useEffect(() => {
-    if (w && h) void fitView(FIT);
+    if (w && h && !document.hidden) void fitView(FIT);
   }, [w, h, fitView]);
+  useEffect(() => {
+    // a timer, not requestAnimationFrame: rAF stays paused until the page paints again
+    const onShow = () => { if (!document.hidden) setTimeout(() => void fitView(FIT), 50); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => document.removeEventListener('visibilitychange', onShow);
+  }, [fitView]);
   return null;
 }
