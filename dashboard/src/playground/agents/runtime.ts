@@ -19,6 +19,10 @@ export interface RuntimeOpts {
   frameMs?: number;
   animate?: boolean;
   maxAgents?: number;
+  /** Chat lines go here (the board's chat.say command needs a handler the page owns). */
+  onSay?: (agent: Actor, text: string) => void;
+  /** false = this browser does not host agents: spawn/request do nothing (see startAgents). */
+  host?: boolean;
 }
 export interface SpawnOpts { name?: string; color?: string; at?: Pt; role?: string; driver?: 'scripted' | 'llm' }
 export interface NoteReq { text: string; shapeId?: string; threadId?: string; from?: ActorId; priority?: 0 | 1 | 2 | 3 }
@@ -44,7 +48,10 @@ export function createRuntime(opts: RuntimeOpts) {
     board.exec({ actor: a.id, opId: opId(a.id), commands: [{ t: 'status.set', state: s, detail }] });
   }
 
+  const hosting = opts.host !== false;
+
   function spawn(o: SpawnOpts = {}): ActorId {
+    if (!hosting) return '';
     const n = spawned++;
     if (agents.size >= (opts.maxAgents ?? 200)) throw new Error('agent roster is full');
     const kind = o.driver ?? 'scripted';
@@ -71,7 +78,7 @@ export function createRuntime(opts: RuntimeOpts) {
       me: actor, board, choreo: agent.choreo, signal: ctrl.signal, rng,
       intent: (i) => agent.choreo.intent(i),
       setState: (s, d) => setState(actor, s, d),
-      say: (text) => { board.exec({ actor: id, opId: opId(id), commands: [{ t: 'chat.say', thread: id, body: { kind: 'text', text } }] }); },
+      say: (text) => { opts.onSay?.(actor, text); },
       paused: () => agent.paused,
     };
     setState(actor, allPaused ? 'paused' : 'idle', 'joining');
@@ -109,7 +116,7 @@ export function createRuntime(opts: RuntimeOpts) {
   /** Queue a note for an agent (higher priority first, FIFO within a priority). Resolves when handled. */
   function request(id: ActorId, r: NoteReq): Promise<void> {
     const a = agents.get(id);
-    if (!a || a.ctrl.signal.aborted) return Promise.resolve();   // no script to act on it
+    if (!hosting || !a || a.ctrl.signal.aborted) return Promise.resolve();   // no script to act on it
     const task: Task = { id: `t${++taskN}`, agent: id, kind: 'note', text: r.text, shapeId: r.shapeId, threadId: r.threadId, priority: r.priority ?? 1, from: r.from ?? 'human-you', state: 'queued' };
     a.queue.push(task);
     a.queue.sort((x, y) => y.priority - x.priority);
@@ -126,7 +133,7 @@ export function createRuntime(opts: RuntimeOpts) {
   }
 
   return {
-    spawn, stop, remove, setPaused, setAllPaused, request, resetSlots, reset,
+    hosting, spawn, stop, remove, setPaused, setAllPaused, request, resetSlots, reset,
     setSpeed(s: number) { speed = s; },
     getSpeed: () => speed,
     agentIds: () => [...agents.keys()],
@@ -135,3 +142,24 @@ export function createRuntime(opts: RuntimeOpts) {
   };
 }
 export type AgentRuntime = ReturnType<typeof createRuntime>;
+
+export interface StartAgentsOpts extends Omit<RuntimeOpts, 'board'> {
+  /**
+   * Only ONE browser should host agents on a networked board, or every viewer would run its own
+   * copy of every agent. Pass `host: false` on the others: they get an inert runtime and simply
+   * see the hosting browser's agents through the shared document and presence.
+   */
+  host?: boolean;
+}
+
+/**
+ * The single entry point the page calls to run scripted agents on a board.
+ * Agents act only through `board.exec` / `board.gesture` and presence.
+ *
+ * NOTE for viewers: text and frames written by agents carry their final size from the author.
+ * A viewer must not re-measure agent text and write the size back (that would make every viewer
+ * rewrite the same layer); only a human editing a text layer may trigger auto-size writes.
+ */
+export function startAgents(board: Board, opts: StartAgentsOpts = {}): AgentRuntime {
+  return createRuntime({ ...opts, board });
+}

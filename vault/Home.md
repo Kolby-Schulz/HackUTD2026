@@ -29,6 +29,7 @@ while code is written, not at merge. Source of truth stays `docs/SPEC.md` and `C
 ## Folders
 - `Areas/`: one index note per part. Owners keep their own note current.
 - `Scopes/`: how-and-where reports from scoping a change before building it.
+  - [[design-board]]: wiring the `#/playground` design board through SpacetimeDB (proposal)
 - `Runs/`: details from agent runs worth keeping.
 
 ## Rules for writing here
