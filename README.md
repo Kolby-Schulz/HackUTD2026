@@ -96,7 +96,7 @@ them as messages. It needs one daemon running on the laptop
 that does the work:
 
 ```bash
-npm run control     # prints a pairing link: click it (or type its code on the Control tab)
+npm run control     # first run: opens the dashboard in your browser, already linked to this laptop
 ```
 
 The daemon connects out to SpacetimeDB as this laptop's `machine` row; nothing listens on a port,
@@ -104,7 +104,8 @@ so the hosted dashboard drives it the same as a local one. Set `CONTRACT_DASHBOA
 hosted dashboard so the link points there (default `http://localhost:5173`). Pairing is once per
 browser: the code works once, expires after 10 minutes, and never reaches the database (the
 browser sends a hash of it with its own identity). Press Enter in the daemon's terminal for a new
-code. The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
+code. When no browser is paired yet, the daemon opens the link itself (`--no-open` to skip,
+`--open` to force). The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
 **Manual controls** under the chat start and stop each piece yourself (coordinator, session,
 workers, judge, merge, reset) and show each process's output. Only paired browsers can send it
 commands, every command goes through a fixed allowlist, and it runs things only on the laptop

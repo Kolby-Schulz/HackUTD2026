@@ -197,3 +197,10 @@ export class Pairer {
     return `${dashboardUrl.replace(/\/+$/, '')}/#/pair?machine=${encodeURIComponent(machineId)}&code=${shown}`;
   }
 }
+
+/** The argv that opens a URL in the default browser, without a shell (a URL's & would split a cmd line). */
+export function browserCommand(platform: string, url: string): [string, string[]] {
+  if (platform === 'darwin') return ['open', [url]];
+  if (platform === 'win32') return ['rundll32', ['url.dll,FileProtocolHandler', url]];
+  return ['xdg-open', [url]];
+}
