@@ -93,5 +93,12 @@ humanEdited rule, palette.open, toast action, share link and URL view.
   `actions/align.ts`, `actions/view.ts`, `actions/layers.ts`, `actions/share.ts`, `ui/shell/TopBar.tsx`,
   `ui/inspector/*` (export section only).
 
+## Visual pass (browser, 2026-11-08)
+- done (fix/visual-pass): activity-based locks + one focus outline per agent (owner-reported clutter); humans win
+  even after an activity lock lapses; Restart / Restart all for stopped agents; toasts above the toolbar; copy-link
+  fallback (execCommand, then a dialog); playground class names scoped (.diff/.card/.chip/.body leaked dark styles).
+- known, not fixed: "Restart all" only shows when every agent is stopped; 60 fps not proven in the app's throttled
+  pane (per-frame work under 1 ms; culling mounts ~370 of 5,000).
+
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).
