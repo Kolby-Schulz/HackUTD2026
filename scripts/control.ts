@@ -429,10 +429,18 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
     if (!open) return;
     // No browser paired yet (or --open): open the link, so the dashboard comes up already linked to this laptop.
     const [bin, args] = browserCommand(process.platform, link);
+    // Report the outcome, not the attempt: a missing opener errors, a failed one exits non-zero.
+    // Node can fire both 'error' and 'exit' for a missing opener, so only the first one reports.
+    let told = false;
+    const tell = (opened: boolean) => {
+      if (told) return;
+      told = true;
+      console.log(opened ? '[control] opened it in your browser.' : '[control]   (couldn\'t open a browser; click the link above)');
+    };
     const child = spawn(bin, args, { stdio: 'ignore', detached: true });
-    child.on('error', () => console.log('[control]   (couldn\'t open a browser; click the link above)'));
+    child.on('error', () => tell(false));
+    child.on('exit', (code) => tell(code === 0));
     child.unref();
-    console.log('[control] opened it in your browser.');
   };
   showPairing(!values['no-open'] && (values.open === true || paired === 0));
   process.stdin.on('data', () => showPairing(false));
