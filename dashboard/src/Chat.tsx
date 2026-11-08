@@ -10,7 +10,7 @@ import { useReducer } from 'spacetimedb/react';
 import { reducers } from '@bindings/index.ts';
 import type * as R from '@bindings/types.ts';
 import type { AgentCard, FeedEvent } from './model.ts';
-import { fmtClock } from './model.ts';
+import { defaultRecipient, fmtClock, sameMachine } from './model.ts';
 import { EXAMPLES, useAssistant, type ChatMessage } from './ControlTab.tsx';
 import { useMachine } from './machine.tsx';
 
@@ -93,10 +93,10 @@ function Composer({ agents, openRun, connected, assistant, empty, machine }: {
   // database, which includes teammates' agents on other laptops, so it is never the default and
   // the line under the picker names exactly who it reaches.
   const online = agents.filter((a) => !a.offline);
-  const mine = (a: AgentCard) => !!machine && a.machine === machine;
+  const mine = (a: AgentCard) => sameMachine(a.machine, machine);
   const here = agents.filter(mine), elsewhere = agents.filter((a) => !mine(a));
   const running = agents.filter((a) => a.status === 'Working' || a.status === 'Paused');
-  const fallback = assistant.up ? 'insync' : (online.find(mine) ?? online[0])?.id ?? '';
+  const fallback = defaultRecipient(agents, machine, assistant.up);
   const [picked, setPicked] = useState<string>();
   const valid = (k?: string) => !!k && (k === 'insync' ? assistant.up : k === 'all' ? running.length > 0 : online.some((a) => a.id === k));
   const to = valid(picked) ? picked! : fallback;
@@ -112,6 +112,7 @@ function Composer({ agents, openRun, connected, assistant, empty, machine }: {
     : to === 'all' ? `Reaches ${running.map((a) => `${a.person.name} (${where(a)})`).join(', ')}${machine && others ? ` · ${others} on other laptops` : laptops > 1 ? ` · ${laptops} laptops` : ''}.`
     : asTask && !paired ? `${where(target!)} · ${target!.status} · becomes a new task, so pair this browser with a laptop first (Control tab)`
     : target ? `${where(target)} · ${target.status}${asTask ? ' · becomes a new task' : ''}`
+    : online.length > 0 ? 'Pick an agent above. Pair your own laptop in the Control tab to message your agents by default.'
     : 'No agent is online. Start one from the Control tab, or run a worker on a laptop.';
 
   async function submit() {

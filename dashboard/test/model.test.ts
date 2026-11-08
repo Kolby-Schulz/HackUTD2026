@@ -306,3 +306,18 @@ describe('called agents', () => {
     expect(calledAgents(withC, undefined, NOW).size).toBe(0);
   });
 });
+
+describe('chat recipient on a shared database', () => {
+  it('defaults to the assistant, else your own laptop\'s agent, never a teammate\'s', async () => {
+    const { defaultRecipient, sameMachine } = await import('../src/model.ts');
+    const a = (id: string, machine: string, offline = false) => ({ id, machine, offline });
+    const agents = [a('agent-k', 'kolbys-mbp'), a('agent-e', 'Ethans-MacBook-Pro.local'), a('agent-z', 'ethans-macbook-pro', true)];
+    expect(defaultRecipient(agents, 'ethans-macbook-pro', true)).toBe('insync');
+    expect(defaultRecipient(agents, 'ethans-macbook-pro', false)).toBe('agent-e'); // case and .local differ, same laptop
+    expect(defaultRecipient(agents, 'tylers-mbp', false)).toBe(''); // only other laptops' agents online
+    expect(defaultRecipient(agents, undefined, false)).toBe(''); // nothing paired
+    expect(sameMachine('Ethans-MacBook-Pro.local', 'ethans-macbook-pro')).toBe(true);
+    expect(sameMachine('ethans-macbook-pro', 'ethans-macbook-pro-k7q4')).toBe(false);
+    expect(sameMachine(undefined, 'x')).toBe(false);
+  });
+});
