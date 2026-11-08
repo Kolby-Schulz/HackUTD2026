@@ -18,4 +18,6 @@ export default {
   purpose: __t.string(),
   promptTokens: __t.u32(),
   completionTokens: __t.u32(),
+  cacheReadTokens: __t.u32(),
+  costUsd: __t.f64(),
 };

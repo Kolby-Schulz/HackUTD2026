@@ -361,14 +361,19 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
 
     async logTokens(taskId, attempt, purpose, usage) {
       live();
+      const promptTokens = u32(usage.prompt_tokens);
       await r.logTokens({
         runId: currentRunId(),
         agentId,
         taskId,
         attempt: u32(attempt),
         purpose,
-        promptTokens: u32(usage.prompt_tokens),
+        promptTokens,
         completionTokens: u32(usage.completion_tokens),
+        // The server rejects cache reads above prompt tokens and negative/NaN cost;
+        // clamp here so an odd estimate never loses the whole row.
+        cacheReadTokens: Math.min(promptTokens, u32(usage.cache_read_tokens ?? 0)),
+        costUsd: Number.isFinite(usage.cost_usd) && usage.cost_usd > 0 ? usage.cost_usd : 0,
       });
     },
 
