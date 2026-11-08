@@ -58,8 +58,15 @@ describe('resolveTarget', () => {
     expect(() => resolveTarget(MONO, join(dir, '.worktrees/agent-a'))).toThrow(/worktree/);
   });
 
-  it('clones git URLs into .contract/repos/<name>', () => {
-    expect(cloneDirFor(MONO, 'https://github.com/acme/shop.git')).toBe(`${MONO}/.contract/repos/shop`);
+  it('clones git URLs into .contract/repos/<owner>/<name>', () => {
+    expect(cloneDirFor(MONO, 'https://github.com/acme/shop.git')).toBe(`${MONO}/.contract/repos/acme/shop`);
+    expect(cloneDirFor(MONO, 'git@github.com:acme/shop.git')).toBe(`${MONO}/.contract/repos/acme/shop`);
+    expect(cloneDirFor(MONO, 'https://github.com/acme/shop/')).toBe(`${MONO}/.contract/repos/acme/shop`);
+    expect(cloneDirFor(MONO, 'shop.git')).toBe(`${MONO}/.contract/repos/shop`);
+  });
+
+  it('gives two forks with the same name their own clone folders', () => {
+    expect(cloneDirFor(MONO, 'https://github.com/alice/shop.git')).not.toBe(cloneDirFor(MONO, 'https://github.com/bob/shop.git'));
   });
 });
 
