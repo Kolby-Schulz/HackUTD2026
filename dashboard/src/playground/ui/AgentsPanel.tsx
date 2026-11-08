@@ -1,7 +1,8 @@
 // Agent controls in the right panel: add, pause all, speed, clear board, and the "drive from code"
 // snippet. `children` (the presence list) sits between the controls and the footer.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { setActionRuntime } from '../actions/agents';
 import { opId } from '../core/ids';
 import { selectIds } from './board/state';
 import { viewCenter } from './kit';
@@ -9,7 +10,15 @@ import type { SlotProps } from './slotProps';
 import '../styles/agents.css';
 
 export function AgentsPanel({ board, rt, cursors, children }: SlotProps & { children?: ReactNode }) {
-  const [speed, setSpeed] = useState(1);
+  const [speed, setSpeed] = useState(() => {
+    try { const v = Number(localStorage.getItem('pg.agentSpeed')); return [0, 0.5, 1, 2, 4].includes(v) && localStorage.getItem('pg.agentSpeed') !== null ? v : 1; } catch { return 1; }
+  });
+  useEffect(() => { rt?.setSpeed(speed); }, [rt]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setActionRuntime(rt); return () => setActionRuntime(null); }, [rt]);
+  const pickSpeed = (v: number) => {
+    setSpeed(v); rt?.setSpeed(v);
+    try { localStorage.setItem('pg.agentSpeed', String(v)); } catch { /* storage may be blocked */ }
+  };
   const me = board.me;
   const agents = cursors.filter((c) => c.kind === 'agent');
   const allPaused = agents.length > 0 && agents.every((c) => c.state === 'paused');
@@ -34,15 +43,17 @@ export function AgentsPanel({ board, rt, cursors, children }: SlotProps & { chil
         <button className="primary" onClick={() => rt?.spawn({ at: viewCenter() })}>+ Agent</button>
         <button onClick={() => { for (let i = 0; i < 5; i++) rt?.spawn({ at: viewCenter() }); }}>+5</button>
         <button onClick={() => rt?.setAllPaused(!allPaused)}>{allPaused ? 'Resume' : 'Pause'} all</button>
+        <button onClick={() => rt?.stopAll(board.actors.get(me)?.name ?? 'you')} title="Stop every agent (Ctrl/Cmd+Shift+.)">Stop all</button>
       </div>
       <div className="pg-row">
         <label>Speed</label>
         <div className="pg-seg">
-          {[0.5, 1, 2, 4].map((v) => (
-            <button key={v} className={speed === v ? 'on' : ''} onClick={() => { setSpeed(v); rt?.setSpeed(v); }}>{v}×</button>
+          {[0, 0.5, 1, 2, 4].map((v) => (
+            <button key={v} className={speed === v ? 'on' : ''} onClick={() => pickSpeed(v)} title={v === 0 ? 'Step mode' : undefined}>{v === 0 ? 'Step' : `${v}×`}</button>
           ))}
         </div>
       </div>
+      {speed === 0 && <div className="pg-actions"><button onClick={() => rt?.step()}>Step</button></div>}
       {children}
       <div className="pg-foot">
         <button onClick={clearBoard}>Clear board</button>
