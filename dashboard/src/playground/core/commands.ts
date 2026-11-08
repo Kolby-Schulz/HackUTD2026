@@ -212,6 +212,11 @@ function compile(cmd: Command, c: Ctx, clock: { n: number }): Compiled {
       if (!Array.isArray(ids)) return ids;
       const patch = cleanProps(cmd.patch, true);
       if ('ok' in patch) return patch;
+      if (!isHuman(actor)) {
+        if ('humanEdited' in patch) return fail('forbidden', 'only a human edit marks text as human-edited');
+        const pinned = 'text' in patch ? ids.find((id) => s.shapes.get(id)?.humanEdited) : undefined;
+        if (pinned) return fail('forbidden', `${pinned} was edited by a human; its text is pinned`);
+      }
       return done(ids.map((id) => ({ t: 'set', id, patch: { ...patch } }) as Op), ids[0]);
     }
 

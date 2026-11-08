@@ -1,7 +1,8 @@
 // Toast store (SHELL-24 family). No React: the shell subscribes and renders.
 export type ToastVariant = 'info' | 'success' | 'warn' | 'error';
-export interface Toast { id: number; text: string; variant: ToastVariant; ttlMs: number; at: number }
-export interface ToastOpts { variant?: ToastVariant; ttlMs?: number; key?: string; onceMs?: number }
+export interface ToastAction { label: string; run: () => void }
+export interface Toast { id: number; text: string; variant: ToastVariant; ttlMs: number; at: number; key?: string; action?: ToastAction }
+export interface ToastOpts { variant?: ToastVariant; ttlMs?: number; key?: string; onceMs?: number; action?: ToastAction }
 
 const MAX_VISIBLE = 4;
 
@@ -28,7 +29,7 @@ export function createToasts(now: () => number = Date.now) {
       if (o.onceMs && last !== undefined && t - last < o.onceMs) return null;
       lastByKey.set(o.key, t);
     }
-    const toast: Toast = { id: nextId++, text, variant: o.variant ?? 'info', ttlMs: o.ttlMs ?? 1800, at: t };
+    const toast: Toast = { id: nextId++, text, variant: o.variant ?? 'info', ttlMs: o.ttlMs ?? 4000, at: t, ...(o.key ? { key: o.key } : {}), ...(o.action ? { action: o.action } : {}) };
     list = [...list, toast].slice(-MAX_VISIBLE);
     if (toast.ttlMs > 0) timers.set(toast.id, setTimeout(() => dismiss(toast.id), toast.ttlMs));
     emit();

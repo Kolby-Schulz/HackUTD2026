@@ -5,7 +5,7 @@ import { useCallback } from 'react';
 import { useStoreValue } from '../../core/react';
 import type { Shape } from '../../core/types';
 import { useBoardEnv } from '../board/context';
-import { commitText } from '../gestures/text';
+import { TextEditor } from './TextEditor';
 
 export function TextView({ shape }: { shape: Shape }) {
   const env = useBoardEnv();
@@ -16,17 +16,5 @@ export function TextView({ shape }: { shape: Shape }) {
     if (shape.text) return <span style={{ whiteSpace: wrap, overflowWrap: 'anywhere' }}>{shape.text}</span>;
     return <span className="pg-text-ph" data-export-ignore="" style={{ color: 'var(--pg-muted)', fontStyle: 'italic', whiteSpace: 'pre', pointerEvents: 'none' }}>Type something</span>;
   }
-  return (
-    <textarea
-      autoFocus
-      defaultValue={shape.text}
-      spellCheck={false}
-      placeholder="Type something"
-      onFocus={(e) => e.currentTarget.select()}
-      onBlur={(e) => commitText(env, id, e.currentTarget.value)}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); e.currentTarget.blur(); }
-      }}
-    />
-  );
+  return <TextEditor shape={shape} />;
 }

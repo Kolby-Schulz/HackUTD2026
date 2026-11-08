@@ -16,6 +16,7 @@ import type { ChatStore } from '../chat/store';
 import { commentThreads } from '../comments/threads';
 import { install as installKeys } from '../core/keys';
 import { registerViewFallbacks } from './board/viewActions';
+import { applyViewFromUrl } from '../actions/share';
 import { DEMO, HOST_AGENTS, viewCenter } from './kit';
 import type { ChatSink } from './kit';
 
@@ -55,6 +56,8 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
     // the runtime cannot yet tell which slots a restored board occupies: start idle instead of building over it
     if (restored) r.setAllPaused(true);
+    // a shared link (#/playground?x=&y=&z=&sel=) moves the camera there and selects the ids that exist
+    const offUrl = applyViewFromUrl(board, camera);
 
     const apiCursors = new Map<string, Choreographer>();
     const choreo = (id: string) => r.choreographer(id) ?? apiCursors.get(id) ?? (apiCursors.set(id, createChoreographer({ actor: id, presence: board.presence })), apiCursors.get(id)!);
@@ -72,7 +75,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     return () => {
       persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
       sink.persistence = null; sink.ui.set({ persistence: null });
-      offKeys(); offView(); offDev();
+      offUrl(); offKeys(); offView(); offDev();
       for (const id of r.agentIds()) board.presence.remove(id);
       r.reset();
       rtRef.current = null;

@@ -5,6 +5,8 @@ import { RENAME_EVENT, cleanFileName, FILE_NAME_MAX } from '../../actions/panels
 import { prefs } from '../../core/prefs';
 import { useStoreValue } from '../../core/react';
 import { toast } from '../../core/toast';
+import { copyLink } from '../../actions/share';
+import { activeBoard } from '../board/state';
 import type { Persistence } from '../../core/persist';
 import { BUBBLE } from '../constants';
 import { useUi } from '../hooks';
@@ -62,6 +64,8 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
   useEffect(() => ui.onEscape(() => setMenu(false)), [ui]);
 
   const share = () => {
+    const env = activeBoard();
+    if (env) { void copyLink(env.board, env.camera); return; }
     navigator.clipboard?.writeText(location.href).catch(() => {});
     toast('Link copied', { ttlMs: 1600 });
   };

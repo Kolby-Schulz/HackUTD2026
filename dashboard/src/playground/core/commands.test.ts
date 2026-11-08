@@ -208,3 +208,17 @@ describe('claim.acquire (WP-40 wiring)', () => {
     expect(h.ok).toBe(true);
   });
 });
+
+describe('human-edited text (WP-22 rule)', () => {
+  it('agents cannot overwrite text a human edited, nor set the flag', () => {
+    const board = createBoard({ me: 'human-you' });
+    const mk = board.exec({ actor: 'agent-iris', opId: 't-mk', commands: [{ t: 'shape.create', kind: 'text', props: { x: 0, y: 0, w: 100, h: 20, text: 'Agent copy' } }] });
+    const id = mk.results[0].ok ? mk.results[0].id! : '';
+    expect(board.exec({ actor: 'agent-iris', opId: 't-flag', commands: [{ t: 'shape.update', ids: [id], patch: { humanEdited: true } }] }).ok).toBe(false);
+    expect(board.exec({ actor: 'human-you', opId: 't-h', commands: [{ t: 'shape.update', ids: [id], patch: { text: 'Human copy', humanEdited: true } }] }).ok).toBe(true);
+    const a = board.exec({ actor: 'agent-iris', opId: 't-a', commands: [{ t: 'shape.update', ids: [id], patch: { text: 'Agent again' } }] });
+    expect(a.ok).toBe(false);
+    expect(board.doc.getState().shapes.get(id)!.text).toBe('Human copy');
+    expect(board.exec({ actor: 'agent-iris', opId: 't-c', commands: [{ t: 'shape.update', ids: [id], patch: { color: '#ff0000' } }] }).ok).toBe(true); // other fields stay editable
+  });
+});
