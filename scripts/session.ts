@@ -23,7 +23,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { DEP_PATHSPEC, resolveTarget, runInstall, subdirPrefix, worktreeDir, type DbConnection } from '@contract/client';
+import { resolveTarget, runInstall, stageAll, subdirPrefix, worktreeDir, type DbConnection } from '@contract/client';
 import { conflictMarkers, merge, mergeFix, run, runChecks, warnIfNoCoordinator } from './merge.ts';
 import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, waitFor } from './lib.ts';
 
@@ -161,7 +161,7 @@ async function mergeSession() {
       }
     }
   }
-  git(['add', '-A', ...DEP_PATHSPEC], mergeDir); // never installed dependencies
+  stageAll(mergeDir); // never installed dependencies
   git(['commit', '-m', `merge run ${runRow.id} (session: ${agents.join(', ')})`, '--allow-empty', '--no-verify'], mergeDir);
   if (values.push) git(['push', '--force', '-u', 'origin', mergeBranch], mergeDir);
 

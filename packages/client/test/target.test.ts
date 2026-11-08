@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkTools, cloneDirFor, DEP_PATHSPEC, detectChecks, missingTools, detectInstall, repoKey, resolveTarget, runInstall, toolPath, worktreeDir } from '../src/target.ts';
+import { checkTools, cloneDirFor, detectChecks, missingTools, detectInstall, repoKey, resolveTarget, runInstall, stageAll, toolPath, worktreeDir } from '../src/target.ts';
 
 const MONO = '/repo/mono';
 
@@ -116,9 +116,17 @@ describe('any repo: worktrees, installs, checks', () => {
 
   it('keeps installed folders out of commits', () => {
     const dir = gitRepo({ 'a.py': 'x = 1', 'node_modules/x/index.js': '', '.venv/bin/python': '', 'sub/node_modules/y.js': '' });
-    execFileSync('git', ['add', '-A', ...DEP_PATHSPEC], { cwd: dir });
+    stageAll(dir);
     const staged = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir, encoding: 'utf8' }).trim().split('\n');
     expect(staged).toEqual(['a.py']);
+  });
+
+  it('stages a repo that already gitignores its dependency folders', () => {
+    // `git add -A . :(exclude)node_modules/**` exits 1 here ("paths are ignored by .gitignore").
+    const dir = gitRepo({ '.gitignore': 'node_modules\n', 'a.py': 'x = 1', 'node_modules/x/index.js': '', 'sub/node_modules/y.js': '' });
+    expect(() => stageAll(dir)).not.toThrow();
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: dir, encoding: 'utf8' }).trim().split('\n');
+    expect(staged).toEqual(['.gitignore', 'a.py']);
   });
 
   it('names tools this laptop is missing, with a brew hint, and trusts the venv for python', () => {

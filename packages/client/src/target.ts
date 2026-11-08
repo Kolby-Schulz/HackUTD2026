@@ -282,7 +282,19 @@ export function toolPath(dir: string, path = process.env.PATH ?? ''): string {
 
 /** Folders installs create; never committed (git pathspec excludes, no repo config changes). */
 export const DEP_DIRS = ['node_modules', '.venv', 'vendor/bundle', 'target', '__pycache__'];
-export const DEP_PATHSPEC = ['--', '.', ...DEP_DIRS.flatMap((d) => [`:(exclude,glob)${d}/**`, `:(exclude,glob)**/${d}/**`])];
+const DEP_GLOBS = DEP_DIRS.flatMap((d) => [`:(glob)${d}/**`, `:(glob)**/${d}/**`]);
+
+/**
+ * Stages everything in `dir` except installed dependencies, whether or not the repo ignores
+ * them. Not one `git add` with `:(exclude)` pathspecs: when a dep folder is gitignored, git
+ * treats that exclude as "a pathspec that only matched ignored files" and exits 1 ("The
+ * following paths are ignored by one of your .gitignore files"), which killed every worker on
+ * a repo with node_modules in .gitignore. So: add all, then unstage the dep folders.
+ */
+export function stageAll(dir: string): void {
+  execFileSync('git', ['add', '-A', '--', '.'], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', ['reset', '-q', '--', ...DEP_GLOBS], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+}
 
 /**
  * Installs the target's dependencies in a checkout of it (`dir` = the target folder in a
