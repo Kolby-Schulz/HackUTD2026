@@ -14,12 +14,20 @@ export interface ServiceLock {
 
 /**
  * Claims `name` (throws "… is already running on <machine>" if another live process holds
- * it), then re-claims every SERVICE_HEARTBEAT_MS. If the lock is lost (another laptop took
+ * it; on a server without claim_service it warns and returns a no-op lock), then re-claims every SERVICE_HEARTBEAT_MS. If the lock is lost (another laptop took
  * over a stale row), onLost is called and the heartbeat stops.
  */
 export async function holdService(reducers: Reducers, name: string, machine: string, onLost?: (why: string) => void): Promise<ServiceLock> {
   const holder = `${machine}:${process.pid}:${randomUUID().slice(0, 8)}`;
-  await reducers.claimService({ name, machine, holder });
+  try {
+    await reducers.claimService({ name, machine, holder });
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    if (/already running/.test(why)) throw e;
+    // An older server module without claim_service: run unlocked rather than not at all.
+    console.warn(`[contract] could not take the ${name} lock (${why}); running without it. Republish the server module to enable it.`);
+    return { release: async () => {} };
+  }
   const timer = setInterval(() => {
     reducers.claimService({ name, machine, holder }).catch((e: unknown) => {
       const why = e instanceof Error ? e.message : String(e);
