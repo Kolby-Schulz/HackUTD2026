@@ -19,14 +19,23 @@ describe('variant jobs', () => {
     register(t, 'agent-b');
   });
 
-  it('queue_variant_job (any caller) makes a queued job; an unknown parent is refused', () => {
+  it('queue_variant_job (any caller) makes a queued job; a malformed parent is refused', () => {
     // Act
     queue();
 
     // Assert
     const j = t.db.variantJob.id.find(1n)!;
     expect([j.screen, j.status, j.agent_id, j.parent]).toEqual(['home', 'queued', undefined, undefined]);
-    expect(() => queue('home/ghost')).toThrow(/unknown parent/);
+    expect(() => queue('other/v1')).toThrow(/must be 'home\/<id>'/);
+    expect(() => queue('home/../x')).toThrow(/must be 'home\/<id>'/);
+  });
+
+  it('a parent that exists only as a code folder in git (no variant row) is accepted', () => {
+    // Act
+    queue('home/b-calm');
+
+    // Assert
+    expect(t.db.variantJob.id.find(1n)!.parent).toBe('home/b-calm');
   });
 
   it('start_variant_job runs the job and inserts a generating root variant', () => {
@@ -131,7 +140,7 @@ describe('variant mixes, picks and votes', () => {
     // Act + Assert
     expect(() => save('worker-b')).toThrow(/belongs to someone else/);
     expect(() => save('worker-a', 'other/mix')).toThrow(/must look like home\//);
-    expect(() => save('worker-a', 'home/m2', 'home/ghost')).toThrow(/unknown parent/);
+    expect(() => save('worker-a', 'home/m2', 'other/v1')).toThrow(/must be 'home\/<id>'/);
     expect(() => save('worker-a', 'home/m2', undefined, 'x'.repeat(201))).toThrow(/title/);
     expect(() => save('worker-a', 'home/m2', undefined, 'x', 'y'.repeat(2_001))).toThrow(/note/);
     expect(() => save('worker-a', 'home/m2', undefined, 'x'.repeat(200), 'y'.repeat(2_000))).not.toThrow();
