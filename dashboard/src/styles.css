@@ -163,3 +163,15 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .new-task select:focus, .new-task textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .new-task button { align-self: flex-end; background: var(--ok); color: var(--on-agent); border: none; border-radius: var(--radius); padding: 5px 14px; font-weight: 600; cursor: pointer; }
 .new-task button:disabled { opacity: 0.5; cursor: default; }
+
+/* Operator message box (issue #11) */
+.msgbox { display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.msgbox form { display: flex; gap: 6px; }
+.msgbox input { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 8px; font: inherit; font-size: 12px; }
+.msgbox input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.msgbox button { background: var(--accent); color: var(--on-agent); border: none; border-radius: var(--radius); padding: 4px 10px; font-weight: 600; cursor: pointer; font-size: 12px; }
+.msgbox button:disabled { opacity: 0.5; cursor: default; }
+.msgbox .msg { display: flex; align-items: center; gap: 6px; color: var(--text2); }
+.msgbox .msg-state { font-size: 11px; color: var(--text2); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
+.msgbox .msg-state.read { color: var(--ok); border-color: var(--ok); }
+.msgbox .msg-error { color: var(--danger); }

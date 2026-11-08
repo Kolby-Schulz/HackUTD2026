@@ -52,6 +52,7 @@ import ReleaseClaimReducer from "./release_claim_reducer";
 import ReportChangeReducer from "./report_change_reducer";
 import ResetDemoStateReducer from "./reset_demo_state_reducer";
 import ResolveConflictReducer from "./resolve_conflict_reducer";
+import SendInstructionReducer from "./send_instruction_reducer";
 import SetTaskStatusReducer from "./set_task_status_reducer";
 import StartRunReducer from "./start_run_reducer";
 import UpsertSymbolsReducer from "./upsert_symbols_reducer";
@@ -293,6 +294,7 @@ const reducersSchema = __reducers(
   __reducerSchema("report_change", ReportChangeReducer),
   __reducerSchema("reset_demo_state", ResetDemoStateReducer),
   __reducerSchema("resolve_conflict", ResolveConflictReducer),
+  __reducerSchema("send_instruction", SendInstructionReducer),
   __reducerSchema("set_task_status", SetTaskStatusReducer),
   __reducerSchema("start_run", StartRunReducer),
   __reducerSchema("upsert_symbols", UpsertSymbolsReducer),

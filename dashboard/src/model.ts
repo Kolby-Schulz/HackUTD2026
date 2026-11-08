@@ -98,6 +98,7 @@ export function people(agents: Rows<R.Agent>): Map<string, Person> {
     map.set(a.id, { id: a.id, name: a.name || a.id, letter: (tail[0] || a.id[0] || '?').toUpperCase(), color: AGENT_COLORS[i % AGENT_COLORS.length] });
   });
   map.set('coordinator', { id: 'coordinator', name: 'Coordinator', letter: 'C', color: COORD_COLOR });
+  map.set('operator', { id: 'operator', name: 'Operator', letter: 'O', color: COORD_COLOR });
   return map;
 }
 
@@ -203,7 +204,13 @@ export interface AgentCard {
   wastePct: number;
   waitingOn?: string; // conflict number the agent is paused on
   note?: string; // latest instruction it received
+  messages: OperatorMsg[]; // operator messages sent to it this run, oldest first (issue #11)
 }
+
+/** Operator messages are instruction rows from send_instruction, marked by this prefix. */
+export const OPERATOR_PREFIX = 'Operator: ';
+export const isOperator = (i: R.Instruction) => i.conflictId === undefined && i.text.startsWith(OPERATOR_PREFIX);
+export interface OperatorMsg { id: string; text: string; acked: boolean; at: number }
 
 const STATUS_LABEL: Record<string, string> = { idle: 'Idle', working: 'Working', paused: 'Paused', done: 'Done' };
 
@@ -233,6 +240,10 @@ export function agentCards(t: Tables, run: R.Run | undefined, now: number): Agen
         wastePct: budget ? Math.min(100, (wasted / budget) * 100) : 0,
         waitingOn: a.status === 'paused' && pending ? String(pending.id) : undefined,
         note: lastPush?.text,
+        messages: t.instructions
+          .filter((i) => i.agentId === a.id && isOperator(i) && inWin(w, ms(i.createdAt)))
+          .sort((p, q) => Number(p.id - q.id))
+          .map((i) => ({ id: String(i.id), text: i.text.slice(OPERATOR_PREFIX.length), acked: i.acknowledged, at: ms(i.createdAt) })),
       };
     });
 }
@@ -315,6 +326,11 @@ export function feed(t: Tables, w: Window): FeedEvent[] {
   for (const i of t.instructions) {
     const at = ms(i.createdAt);
     if (!inWin(w, at)) continue;
+    if (isOperator(i)) {
+      out.push({ key: 'push' + i.id, kind: 'instruction', at, time: rel(at), actor: person(ppl, 'operator'),
+        verb: `messaged ${person(ppl, i.agentId).name}${i.acknowledged ? ' · read' : ' · delivered'}`, sub: i.text.slice(OPERATOR_PREFIX.length) });
+      continue;
+    }
     out.push({ key: 'push' + i.id, kind: 'instruction', at, time: rel(at), actor: person(ppl, 'coordinator'), verb: `pushed to ${person(ppl, i.agentId).name}`, sub: i.text, conflictId: i.conflictId });
   }
   // newest first; within the same instant, the cause comes after (below) its effects
