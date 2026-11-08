@@ -10,9 +10,10 @@ import { ActivityTab } from './ActivityTab.tsx';
 import { TokensTab } from './TokensTab.tsx';
 import { ScoreboardTab } from './ScoreboardTab.tsx';
 import { CodeTab } from './CodeTab.tsx';
+import { ReplayTab } from './ReplayTab.tsx';
 
-type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard';
-const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard']];
+type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard' | 'replay';
+const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard'], ['replay', 'Replay']];
 
 function useHashTab(): Tab {
   const read = (): Tab => {
@@ -103,6 +104,7 @@ export function App() {
           {tab === 'code' && <CodeTab agents={view.agents} edits={view.edits} />}
           {tab === 'activity' && <ActivityTab events={view.events} cases={view.cases} people={view.people} />}
           {tab === 'tokens' && <TokensTab stats={view.stats} agents={view.agents} coord={view.coord} cases={view.cases} runStart={w.start} />}
+          {tab === 'replay' && <ReplayTab live={live} />}
           {tab === 'scoreboard' && <ScoreboardTab without={view.without} withC={view.withC} />}
         </main>
       </div>
