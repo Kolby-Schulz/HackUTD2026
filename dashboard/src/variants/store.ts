@@ -1,57 +1,86 @@
-// Loads and saves lineage.json through the dev plugin. Without it (a static build), falls back to
-// localStorage and says so, so the page still works but decisions stay in this browser.
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { EMPTY_LINEAGE, normalizeLineage } from './files.ts';
-import type { ScaffoldRequest } from './files.ts';
-import type { Lineage } from './types.ts';
+// The variants page's link to SpacetimeDB: live rows from the variant tables (through the dashboard's one
+// connection, data.ts) and the reducers that change them. Every pick, mix, vote and generation job goes through
+// here, so all browsers and the variant agent see the same state.
+import { useCallback, useMemo } from 'react';
+import { useReducer, useSpacetimeDB, useTable } from 'spacetimedb/react';
+import { reducers, tables } from '@bindings/index.ts';
+import { ms, OFFLINE_AFTER_MS } from '../model.ts';
+import { useNow } from '../data.ts';
+import { dbId, slotsJson } from './live.ts';
+import type { Recs } from './live.ts';
+import type { Combo, NodeId } from './types.ts';
 
-const LOCAL_KEY = 'vx.lineage.v1';
-export type SaveMode = 'loading' | 'repo' | 'local';
+/** Variant agents register as `variant-<host>` (agents/variants). */
+export const VARIANT_AGENT_PREFIX = 'variant-';
 
-function readLocal(): Lineage {
-  try { return normalizeLineage(JSON.parse(localStorage.getItem(LOCAL_KEY) ?? 'null')); } catch { return EMPTY_LINEAGE; }
+type Ts = { toDate(): Date };
+const iso = (t: Ts) => t.toDate().toISOString();
+
+export interface VariantsStore {
+  recs: Recs;
+  /** This browser's identity (hex), for "my vote". */
+  me?: string;
+  ready: boolean;
+  connected: boolean;
+  error?: string;
+  /** Variant agents with a recent heartbeat. */
+  agentsOnline: number;
+  pick: (screen: string, node: NodeId | null) => Promise<void>;
+  saveMix: (combo: Combo, parent: NodeId | null) => Promise<void>;
+  deleteMix: (screen: string, id: NodeId) => Promise<void>;
+  vote: (screen: string, node: NodeId | null) => Promise<void>;
+  queueJob: (screen: string, parent: NodeId | null, brief: string) => Promise<void>;
 }
 
-async function json(res: Response) {
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
-  return body;
-}
+export function useVariantsStore(): VariantsStore {
+  const conn = useSpacetimeDB();
+  const [variants, r1] = useTable(tables.variant);
+  const [mixes, r2] = useTable(tables.variantMix);
+  const [picks, r3] = useTable(tables.variantPick);
+  const [votes, r4] = useTable(tables.variantVote);
+  const [jobs, r5] = useTable(tables.variantJob);
+  const [agents] = useTable(tables.agent);
+  const now = useNow(5000);
 
-export function useLineage() {
-  const [lineage, setLineage] = useState<Lineage>(EMPTY_LINEAGE);
-  const [mode, setMode] = useState<SaveMode>('loading');
-  const [error, setError] = useState<string | null>(null);
-  const modeRef = useRef<SaveMode>('loading');
+  const recs = useMemo<Recs>(() => ({
+    variants: variants.map((v) => ({
+      id: v.id, screen: v.screen, parent: v.parent, kind: v.kind, author: v.author, model: v.model, status: v.status,
+      tokens: Number(v.tokens), costUsd: v.costUsd, durationMs: Number(v.durationMs), commit: v.commit, createdAt: iso(v.createdAt),
+    })),
+    mixes: mixes.map((m) => ({
+      id: m.id, screen: m.screen, title: m.title, note: m.note, slotsJson: m.slots, author: m.author.toHexString(), createdAt: iso(m.createdAt),
+    })),
+    picks: picks.map((p) => ({ screen: p.screen, nodeId: p.nodeId, by: p.by.toHexString() })),
+    votes: votes.map((v) => ({ screen: v.screen, nodeId: v.nodeId, voter: v.voter.toHexString() })),
+    jobs: jobs.map((j) => ({
+      id: j.id, screen: j.screen, brief: j.brief, model: j.model, parent: j.parent, status: j.status,
+      agentId: j.agentId, variantId: j.variantId, error: j.error, createdAt: iso(j.createdAt),
+    })),
+  }), [variants, mixes, picks, votes, jobs]);
 
-  useEffect(() => {
-    let live = true;
-    fetch('/__variants/lineage')
-      .then((r) => (r.headers.get('content-type')?.includes('json') ? json(r) : Promise.reject(new Error('no dev endpoint'))))
-      .then((l) => { if (live) { setLineage(normalizeLineage(l)); setMode((modeRef.current = 'repo')); } })
-      .catch(() => { if (live) { setLineage(readLocal()); setMode((modeRef.current = 'local')); } });
-    return () => { live = false; };
-  }, []);
+  const agentsOnline = agents.filter((a) => a.id.startsWith(VARIANT_AGENT_PREFIX) && now - ms(a.lastHeartbeat) < OFFLINE_AFTER_MS).length;
 
-  const save = useCallback(async (next: Lineage) => {
-    setLineage(next);
-    setError(null);
-    if (modeRef.current !== 'repo') {
-      try { localStorage.setItem(LOCAL_KEY, JSON.stringify(next)); } catch { /* storage full or blocked */ }
-      return;
-    }
-    try {
-      await json(await fetch('/__variants/lineage', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(next) }));
-    } catch (e) {
-      setError(`Not saved: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }, []);
+  const pickR = useReducer(reducers.pickVariant);
+  const saveR = useReducer(reducers.saveVariantMix);
+  const deleteR = useReducer(reducers.deleteVariantMix);
+  const voteR = useReducer(reducers.voteVariant);
+  const queueR = useReducer(reducers.queueVariantJob);
 
-  const scaffold = useCallback(async (req: ScaffoldRequest): Promise<string> => {
-    if (modeRef.current !== 'repo') throw new Error('Creating variant files needs the dev server (npm run dashboard).');
-    const body = await json(await fetch('/__variants/scaffold', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(req) }));
-    return (body as { path: string }).path;
-  }, []);
+  const pick = useCallback((screen: string, node: NodeId | null) => pickR({ screen, nodeId: node ? dbId(screen, node) : '' }), [pickR]);
+  const saveMix = useCallback(
+    (c: Combo, parent: NodeId | null) =>
+      saveR({ id: dbId(c.screen, c.id), screen: c.screen, parent: parent ? dbId(c.screen, parent) : undefined, title: c.title, note: c.note ?? '', slotsJson: slotsJson(c.screen, c.picks) }),
+    [saveR],
+  );
+  const deleteMix = useCallback((screen: string, id: NodeId) => deleteR({ id: dbId(screen, id) }), [deleteR]);
+  const vote = useCallback((screen: string, node: NodeId | null) => voteR({ screen, nodeId: node ? dbId(screen, node) : '' }), [voteR]);
+  const queueJob = useCallback(
+    (screen: string, parent: NodeId | null, brief: string) => queueR({ screen, parent: parent ? dbId(screen, parent) : undefined, brief, model: '' }),
+    [queueR],
+  );
 
-  return { lineage, mode, error, setError, save, scaffold };
+  return {
+    recs, me: conn.identity?.toHexString(), ready: r1 && r2 && r3 && r4 && r5, connected: conn.isActive, error: conn.connectionError?.message,
+    agentsOnline, pick, saveMix, deleteMix, vote, queueJob,
+  };
 }

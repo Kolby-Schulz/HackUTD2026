@@ -11,10 +11,10 @@ export interface CodeInfo {
   /** Slots this variant fills itself. */
   own: SlotId[];
   path?: string;
-  /** Where the design comes from: code in src/designs/, or a frame from the playground board. */
-  source?: 'code' | 'live' | 'copy';
-  /** A board frame with no layers named after the screen's parts: compared as one whole page. */
-  whole?: boolean;
+  /** An agent-generated variant whose code is not in this build: what to show instead of the design. */
+  pending?: string;
+  /** Generation status, for agent-generated variants. */
+  status?: 'generating' | 'ready' | 'failed';
 }
 
 export interface GNode {
@@ -28,8 +28,8 @@ export interface GNode {
   picks?: Record<SlotId, NodeId>;
   createdAt?: string;
   path?: string;
-  source?: 'code' | 'live' | 'copy';
-  whole?: boolean;
+  pending?: string;
+  status?: 'generating' | 'ready' | 'failed';
 }
 
 export interface Graph {
@@ -41,7 +41,7 @@ export interface Graph {
 export function buildGraph(screen: string, slots: SlotId[], code: CodeInfo[], combos: Combo[]): Graph {
   const nodes = new Map<NodeId, GNode>();
   for (const c of [...code].sort((a, b) => a.id.localeCompare(b.id))) {
-    nodes.set(c.id, { id: c.id, kind: 'code', title: c.title, note: c.note, parents: c.extends ? [c.extends] : [], own: c.own, path: c.path, source: c.source ?? 'code', whole: c.whole });
+    nodes.set(c.id, { id: c.id, kind: 'code', title: c.title, note: c.note, parents: c.extends ? [c.extends] : [], own: c.own, path: c.path, pending: c.pending, status: c.status });
   }
   const mine = combos.filter((c) => c.screen === screen).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const m of mine) {
@@ -172,8 +172,8 @@ export function problems(g: Graph): string[] {
     for (const p of n.parents) if (!g.nodes.has(p)) out.push(`${n.id}: parent "${p}" does not exist`);
     for (const [s, p] of Object.entries(n.picks ?? {})) if (!g.nodes.has(p)) out.push(`${n.id}: slot "${s}" comes from missing "${p}"`);
     const { missing } = resolveAll(g, n.id);
-    // Board frames often draw only some parts; that is information, not a problem in the code.
-    if (missing.length && !n.whole && (n.source ?? 'code') === 'code') out.push(`${n.id}: nothing fills ${missing.map((s) => `"${s}"`).join(', ')}`);
+    // A generated variant still on its way has no code yet; that is a status, not a problem in the code.
+    if (missing.length && !n.pending) out.push(`${n.id}: nothing fills ${missing.map((s) => `"${s}"`).join(', ')}`);
   }
   return out;
 }

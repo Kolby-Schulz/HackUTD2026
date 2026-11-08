@@ -273,15 +273,11 @@
 /* ---- playground frames ---- */
 .vx-btn.sm { height: 24px; padding: 0 8px; font-size: 12px; gap: 4px; }
 a.vx-btn { text-decoration: none; }
-.vx-tag.live { background: var(--success-soft); color: var(--success); }
-.vx-tag.live.lost { background: var(--warning-soft); color: var(--warning); }
-.vx-bblock { position: relative; margin: 0 auto; overflow: hidden; }
-.vx-bshape { position: absolute; left: 0; top: 0; box-sizing: border-box; }
-.vx-bshape.k-text { white-space: pre-wrap; overflow-wrap: break-word; }
-.vx-import { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; max-height: 360px; overflow: auto; }
-.vx-import li { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
-.vx-import li + li { border-top: 1px solid var(--hover); }
-.vx-import-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.vx-import-empty { display: flex; flex-direction: column; gap: 10px; }
-.vx-import-empty p:first-child { margin: 0; font: 14.5px/1.5 ui-serif, Georgia, serif; color: var(--stone); }
+.vx-tag.gen { background: var(--warning-soft); color: var(--warning); }
+.vx-tag.fail { background: var(--error-soft); color: var(--error); }
+.vx-votes { font: 600 11px var(--sans); color: var(--pebble); min-width: 1.5em; text-align: right; }
+.vx-votes.mine { color: var(--primary); }
+.vx-job { display: inline-flex; align-items: center; gap: 6px; }
+.vx-job.fail { color: var(--error); }
+.vx-absent.vx-pending { padding: 48px 24px; font-size: 14px; }
 .vx-absent { padding: 14px; text-align: center; font: 12px var(--sans); color: var(--pebble); border: 1px dashed var(--line-strong); margin: 8px; border-radius: 6px; }
