@@ -77,6 +77,8 @@ beforeAll(async () => {
   // The coordinator id is fixed by the spec; the setup publish wiped the database, and
   // this suite runs once per publish, so this client owns it.
   await registerAgent(coord, 'coordinator');
+  // upsert_symbols is accepted only from the holder of the mapper service lock (#62).
+  await mapper.conn.reducers.claimService({ name: 'mapper', machine: 'ci', holder: 'live-test' });
   await mapper.conn.reducers.upsertSymbols({
     file: 'src/billing/fees.ts',
     symbols: [

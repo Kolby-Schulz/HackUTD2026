@@ -18,7 +18,6 @@
 // allowlist, and arguments are passed as argv, never through a shell.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createLLM } from '@contract/llm';
@@ -26,7 +25,7 @@ import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingToo
 import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
 import { browserCommand, Daemon, Pairer, TakeoverGuard, takeOverPidFile, type MachinePort } from './daemon.ts';
-import { REPO, savedToken, saveToken, TSX } from './lib.ts';
+import { machineId, machineTokenKey, REPO, savedToken, saveToken, TSX } from './lib.ts';
 
 const LOG_LINES = 300;
 
@@ -350,18 +349,15 @@ export class Registry {
   }
 }
 
-/** This laptop's machine id: the hostname, lowercased (override with --machine or CONTRACT_MACHINE). */
-export function machineId(name = hostname()): string {
-  const id = name.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
-  return id || 'laptop';
-}
+/** This laptop's machine id (shared with the admin scripts in lib.ts, which connect as the same machine). */
+export { machineId };
 
 /** Connects as this laptop's daemon (same saved token every run, so pairings survive restarts). */
 function connectDaemon(id: string): Promise<DbConnection> {
   const host = process.env.SPACETIME_HOST;
   const dbName = process.env.SPACETIME_DB_NAME;
   if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
-  const tokenKey = `machine:${id}`;
+  const tokenKey = machineTokenKey(id);
   const q = (s: string) => s.replace(/'/g, "''");
   return new Promise((res, rej) => {
     const timer = setTimeout(() => rej(new Error(`no response from ${host} (${dbName}) within 10 s`)), 10_000);

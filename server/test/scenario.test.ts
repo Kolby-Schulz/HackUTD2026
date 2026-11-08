@@ -1,7 +1,7 @@
 // End-to-end walk through the planted "changed behavior" conflict (spec sections 3 and 14):
 // A changes calculateFee to round half-up; B is mid-way through checkout, which calls it.
 import { describe, it, expect } from 'vitest';
-import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, AGENT_OF, FEES, CHECKOUT, INVOICE } from './helpers';
+import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, AGENT_OF, FEES, CHECKOUT, INVOICE, asOperator } from './helpers';
 
 describe('spec section 14: changed behavior, with Contract', () => {
   it('detects, pauses B, coordinator resolves, B resumes with instructions', () => {
@@ -9,13 +9,13 @@ describe('spec section 14: changed behavior, with Contract', () => {
     const t = makeHarness();
     seedCodeMap(t);
     for (const id of ['agent-a', 'agent-b', 'coordinator']) register(t, id);
-    t.as('outsider', (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
+    asOperator(t, (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
     const runId = all(t.db.run.iter())[0].id;
     for (const [agent_id, title] of [
       ['agent-a', 'Add late fees to invoices'],
       ['agent-b', 'Add a receipt to checkout'],
     ]) {
-      t.as('outsider', (ctx) => mod.create_task(ctx, { title, description: title, agent_id, run_id: runId }));
+      asOperator(t, (ctx) => mod.create_task(ctx, { title, description: title, agent_id, run_id: runId }));
     }
     const [taskA, taskB] = all(t.db.task.iter());
     for (const tk of [taskA, taskB]) {
@@ -91,7 +91,7 @@ describe('spec section 14: changed behavior, with Contract', () => {
       t.as(AGENT_OF[tk.agent_id], (ctx) => mod.set_task_status(ctx, { task_id: tk.id, status: 'done' }));
     }
     t.as('worker-a', (ctx) => mod.release_claim(ctx, { agent_id: 'agent-a', symbol_id: FEES }));
-    t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: runId }));
+    asOperator(t, (ctx) => mod.end_run(ctx, { run_id: runId }));
 
     // Assert 4
     expect(all(t.db.task.iter()).every((tk) => tk.status === 'done')).toBe(true);
