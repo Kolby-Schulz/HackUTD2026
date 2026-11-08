@@ -5,7 +5,7 @@
 // This file is the shell and composition root: it creates the board, the UI store and the agent
 // runtime, and draws the panels. The board itself (rendering, pointer gestures, camera) lives in
 // ui/board and ui/gestures; every document change goes through board.exec / board.gesture.
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { makeActorId } from './core/actors';
 import { camera } from './core/camera';
 import { createBoard } from './core/commands';
@@ -16,7 +16,7 @@ import { install as installKeys } from './core/keys';
 import { useDoc, useShape, useStoreValue } from './core/react';
 import { absRect, ancestors, flatten } from './core/tree';
 import type { Actor, ActorId, ActorKind, AgentState, ShapeId } from './core/types';
-import * as agentRuntime from './agents/runtime';
+import { startAgents } from './agents/runtime';
 import type { AgentRuntime } from './agents/runtime';
 import { createChoreographer } from './agents/choreographer';
 import type { Choreographer } from './agents/choreographer';
@@ -45,13 +45,6 @@ const HOST_AGENTS = true;
 /** Actor that reassigns an unowned layer to the agent a note was routed to (kept off the human's undo stack). */
 const ROUTER: ActorId = 'system-router';
 
-type StartAgents = (board: BoardKit, opts: { host?: boolean; onSay?: (agent: Actor, text: string) => void }) => AgentRuntime;
-/**
- * The agent runtime's single startup entry point (WP-10 `startAgents`). Older copies of agents/
- * only had createRuntime; this keeps the page building against either until the merge settles.
- */
-const startAgents: StartAgents = (agentRuntime as unknown as { startAgents?: StartAgents }).startAgents
-  ?? ((board, opts) => agentRuntime.createRuntime({ ...opts, board }));
 
 /** A comment pin, anchored to a layer (offset from its top-left) so it follows the layer around. */
 export type Pin = { id: string; n: number; shapeId: string; dx: number; dy: number; thread: string; done: boolean };
@@ -124,7 +117,7 @@ function createKit() {
   const sink: { say: ((actor: ActorId, text: string) => void) | null } = { say: null };
   const board = createBoard({
     me: humanId(),
-    // chat lives in the page for now; agents on an older runtime still speak through chat.say
+    // chat lives in the page for now; a `chat.say` board command (console, future bridge) lands in the same panel
     extra: (actor, cmd) => {
       if (cmd.t !== 'chat.say' || cmd.body.kind !== 'text') return undefined;
       sink.say?.(actor, cmd.body.text);
@@ -569,8 +562,16 @@ function CommentPopover({ pop, ui, board, rt, threadOf, onSend }: {
   const ref = useRef<HTMLFormElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const route = useMemo(() => routeFor(board, rt, pop.shapeId), [board, rt, pop]);
-  // focus once the click that opened it has finished (mousedown would steal it)
-  useEffect(() => { const t = setTimeout(() => input.current?.focus(), 0); return () => clearTimeout(t); }, [pop]);
+  // Focus now (the board prevents the mousedown default, so nothing steals it), and again once the
+  // click that opened it has finished, in case something else took focus in between.
+  useLayoutEffect(() => {
+    input.current?.focus();
+    const again = () => { if (document.activeElement !== input.current) input.current?.focus(); };
+    const t = setTimeout(again, 0);
+    window.addEventListener('pointerup', again, { once: true });
+    window.addEventListener('click', again, { once: true });
+    return () => { clearTimeout(t); window.removeEventListener('pointerup', again); window.removeEventListener('click', again); };
+  }, [pop]);
   usePainter((cam) => {
     if (!ref.current) return;
     const v = w2v(cam, { x: pop.wx, y: pop.wy });

@@ -1,5 +1,5 @@
 // React context carrying the BoardEnv to shape views, overlays and shell children of the board.
-import { createContext, useContext, useEffect, useRef } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef } from 'react';
 import type { Cam } from '../../core/types';
 import type { BoardEnv } from './state';
 
@@ -21,6 +21,8 @@ export function usePainter(fn: (cam: Cam, env: BoardEnv) => void) {
     env.paint.wake();
     return off;
   }, [env]);
-  // a re-render may have changed what the painter shows (new element, new target): repaint
-  useEffect(() => { env.paint.wake(); });
+  // paint this component right after every render (new element, new target), without waiting for a frame
+  useLayoutEffect(() => {
+    try { ref.current(env.camera.getCam(), env); } catch (e) { console.error('[board] painter failed', e); }
+  });
 }

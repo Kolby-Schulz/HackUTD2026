@@ -57,7 +57,7 @@ function createPainter(camera: CameraStore, world: () => HTMLElement | null): Pa
   return {
     add(fn) { fns.add(fn); return () => { fns.delete(fn); }; },
     wake: () => sub?.wake(),
-    start() { sub ??= scheduler.register(frame, 1); sub.wake(); },
+    start() { sub ??= scheduler.register(frame, 1); frame(); },
     stop() { sub?.dispose(); sub = null; },
   };
 }
