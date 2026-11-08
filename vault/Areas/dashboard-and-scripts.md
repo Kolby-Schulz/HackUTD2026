@@ -33,7 +33,7 @@ All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `np
 - `bench-report.ts`: pure averaging and README rendering, unit tested.
 - `scenarios.ts`: five scenarios: `planted`, duplicate helper, claim contention, signature change, control.
 - `merge.ts`: shared merge, check and merge-fix helpers. `CHECKS` at `:12`.
-- `lib.ts`: `REPO` (`:9`), `DEMO_REPO`, dotenv load, `adminConnect`, `endOpenRuns`, `AGENTS`, `MODES`.
+- `lib.ts`: `REPO` (`:9`), `DEMO_REPO`, dotenv load, `adminConnect`, `endOpenRuns`, `AGENTS`, `MODES`, `machineId` (shared with `control.ts`). `adminConnect` is an operator connection (#62): it connects as this laptop's `machine` row with the daemon's saved token (`machine:<hostname>`), registers the row when no daemon has, and refuses when the row belongs to another identity (another checkout's daemon; set `CONTRACT_MACHINE`). The Chat composer tells an unpaired browser to pair before it creates a task.
 
 ## Demo flow
 

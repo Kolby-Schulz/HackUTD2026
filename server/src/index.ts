@@ -23,6 +23,8 @@ import { duplicateReason, nameOf } from './rules';
 // ---------------------------------------------------------------------------------
 
 const COORDINATOR_ID = 'coordinator';
+/** The service lock (claim_service) the mapper holds while it writes the code map. */
+const MAPPER_SERVICE = 'mapper';
 const FILE_EDITS_PER_AGENT = 50;
 const SERVICE_TIMEOUT_SECS = 30;
 const MAX_DIFF_CHARS = 20_000;
@@ -474,6 +476,28 @@ function requireCoordinator(ctx: Ctx): void {
   }
 }
 
+/**
+ * An operator: a caller that is already known to the database in some way. The identity of
+ * a registered agent (any id), of a laptop's control daemon (`machine`), or of a dashboard
+ * paired with one (`machine_access`). The scripts in scripts/lib.ts connect as this laptop's
+ * machine (same saved token as `npm run control`), so run bookkeeping needs no extra setup,
+ * while a connection that only knows the public database name can't reset or open runs.
+ */
+function requireOperator(ctx: Ctx): void {
+  for (const a of ctx.db.agent.iter()) if (a.identity.equals(ctx.sender)) return;
+  for (const m of ctx.db.machine.iter()) if (m.identity.equals(ctx.sender)) return;
+  for (const a of ctx.db.machineAccess.iter()) if (a.identity.equals(ctx.sender)) return;
+  throw new SenderError('only an operator can do this: a registered agent, a laptop running npm run control, or a dashboard paired with one');
+}
+
+/** The caller must hold the `mapper` service lock (claim_service), as the mapper CLI does. */
+function requireMapper(ctx: Ctx): void {
+  const row = ctx.db.service.name.find(MAPPER_SERVICE);
+  if (!row || !row.identity.equals(ctx.sender)) {
+    throw new SenderError('only the mapper can write the code map (hold the mapper service lock first)');
+  }
+}
+
 /** The caller must be the identity of some registered agent (any id). */
 function requireRegistered(ctx: Ctx): void {
   for (const a of ctx.db.agent.iter()) if (a.identity.equals(ctx.sender)) return;
@@ -736,6 +760,7 @@ export const heartbeat = spacetimedb.reducer({ agent_id: t.string() }, (ctx, { a
 });
 
 export const start_run = spacetimedb.reducer({ mode: t.string(), seed: t.u32() }, (ctx, { mode, seed }) => {
+  requireOperator(ctx);
   oneOf(mode, RUN_MODES, 'run mode');
   for (const r of ctx.db.run.iter()) {
     if (r.ended_at === undefined) throw new SenderError(`run ${r.id} is already open`);
@@ -744,6 +769,7 @@ export const start_run = spacetimedb.reducer({ mode: t.string(), seed: t.u32() }
 });
 
 export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }) => {
+  requireOperator(ctx);
   const r = ctx.db.run.id.find(run_id);
   if (!r) throw new SenderError(`unknown run ${run_id}`);
   if (r.ended_at !== undefined) throw new SenderError(`run ${run_id} already ended`);
@@ -759,8 +785,10 @@ export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }
  * the summary cache (keyed by content hash, so it stays correct). Refused while a run is open,
  * and while any worker is still running (working or paused with a fresh heartbeat): the database
  * is shared, and a reset under a live worker would strip its plan and claims mid-task.
+ * Operators only (requireOperator): the database name is public.
  */
 export const reset_demo_state = spacetimedb.reducer({}, (ctx) => {
+  requireOperator(ctx);
   for (const r of ctx.db.run.iter()) {
     if (r.ended_at === undefined) throw new SenderError(`run ${r.id} is still open; end it first`);
   }
@@ -795,6 +823,7 @@ export const reset_demo_state = spacetimedb.reducer({}, (ctx) => {
 export const upsert_symbols = spacetimedb.reducer(
   { file: t.string(), symbols: t.array(SymbolInput), edges: t.array(EdgeInput) },
   (ctx, { file, symbols, edges }) => {
+    requireMapper(ctx);
     const oldById = new Map([...ctx.db.symbol.file.filter(file)].map((s) => [s.id, s]));
     const newIds = new Set(symbols.map((s) => s.id));
 
@@ -842,6 +871,7 @@ export const upsert_symbols = spacetimedb.reducer(
 export const create_task = spacetimedb.reducer(
   { title: t.string(), description: t.string(), agent_id: t.string(), run_id: t.u64() },
   (ctx, { title, description, agent_id, run_id }) => {
+    requireOperator(ctx);
     if (!ctx.db.run.id.find(run_id)) throw new SenderError(`unknown run ${run_id}`);
     ctx.db.task.insert({ id: 0n, title, description, agent_id, status: 'todo', attempt: 1, run_id });
   },
@@ -1229,6 +1259,7 @@ export const log_tokens = spacetimedb.reducer(
 export const mark_attempt_wasted = spacetimedb.reducer(
   { task_id: t.u64(), attempt: t.u32() },
   (ctx, { task_id, attempt }) => {
+    requireOperator(ctx);
     for (const row of [...ctx.db.tokenUsage.iter()]) {
       if (row.task_id === task_id && row.attempt === attempt && !row.wasted) {
         ctx.db.tokenUsage.id.update({ ...row, wasted: true });

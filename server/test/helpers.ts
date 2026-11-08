@@ -8,13 +8,15 @@ import spacetimedb, * as mod from '../src/index';
 
 export { mod };
 export type Harness = ReturnType<typeof makeHarness>;
-type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
+export type Ctx = ReducerCtx<InferSchema<typeof spacetimedb>>;
 
 /** A fixed start time (2026-11-07 12:00:00 UTC) so time-based rules are predictable. */
 export const T0 = 1_794_052_800_000_000n;
 export const SEC = 1_000_000n;
 
-const users = ['worker-a', 'worker-b', 'worker-c', 'coordinator', 'mapper', 'outsider'] as const;
+// 'daemon' is a laptop's control daemon (a `machine` row), 'dashboard' a browser paired with it
+// (a `machine_access` row), 'outsider' a connection that only knows the database name.
+const users = ['worker-a', 'worker-b', 'worker-c', 'coordinator', 'mapper', 'daemon', 'dashboard', 'outsider'] as const;
 export type Who = (typeof users)[number];
 
 export function makeHarness() {
@@ -76,6 +78,27 @@ export function register(t: Harness, agentId: string, who: Who = AGENT_OF[agentI
   );
 }
 
+/** The laptop the test operator's daemon registered (see asOperator). */
+export const MACHINE = 'laptop';
+
+/**
+ * Runs body as an operator for run bookkeeping (start_run, end_run, create_task,
+ * mark_attempt_wasted, reset_demo_state): this laptop's control daemon, registered on first use.
+ * Mirrors scripts/lib.ts adminConnect, which connects as the machine with the daemon's token.
+ */
+export function asOperator<T>(t: Harness, body: (ctx: Ctx) => T): T {
+  if (!t.db.machine.id.find(MACHINE)) t.as('daemon', (ctx) => mod.register_machine(ctx, { id: MACHINE }));
+  return t.as('daemon', body);
+}
+
+/** Runs body as the mapper, holding the `mapper` service lock that upsert_symbols requires. */
+export function asMapper<T>(t: Harness, body: (ctx: Ctx) => T): T {
+  if (!t.db.service.name.find('mapper')) {
+    t.as('mapper', (ctx) => mod.claim_service(ctx, { name: 'mapper', machine: MACHINE, holder: 'test-mapper' }));
+  }
+  return t.as('mapper', body);
+}
+
 /** The demo-repo code map from spec section 14: invoice + checkout both call calculateFee. */
 export const FEES = 'src/billing/fees.ts#calculateFee';
 export const INVOICE = 'src/billing/invoice.ts#buildInvoice';
@@ -87,14 +110,14 @@ export function sym(id: string, signature = `${id.split('#')[1]}()`, hash = 'h1'
 }
 
 export function seedCodeMap(t: Harness) {
-  t.as('mapper', (ctx) =>
+  asMapper(t, (ctx) =>
     mod.upsert_symbols(ctx, {
       file: 'src/billing/fees.ts',
       symbols: [sym(FEES, 'calculateFee(amountCents: number): number')],
       edges: [],
     }),
   );
-  t.as('mapper', (ctx) =>
+  asMapper(t, (ctx) =>
     mod.upsert_symbols(ctx, {
       file: 'src/billing/invoice.ts',
       symbols: [sym(INVOICE, 'buildInvoice(order: Order): Invoice'), sym(TOTAL, 'computeTotal(cart: Cart): number')],
@@ -104,7 +127,7 @@ export function seedCodeMap(t: Harness) {
       ],
     }),
   );
-  t.as('mapper', (ctx) =>
+  asMapper(t, (ctx) =>
     mod.upsert_symbols(ctx, {
       file: 'src/checkout/checkout.ts',
       symbols: [sym(CHECKOUT, 'checkout(cart: Cart): Receipt')],

@@ -2,6 +2,7 @@
 import { config as loadEnv } from 'dotenv';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DbConnection } from '@contract/client';
@@ -32,28 +33,60 @@ export function log(scope: string, msg: string) {
   console.log(`[${scope}] ${msg}`);
 }
 
+/** This laptop's machine id: the hostname, lowercased (override with --machine or CONTRACT_MACHINE). */
+export function machineId(name = hostname()): string {
+  const id = name.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
+  return id || 'laptop';
+}
+
+/** The identities.json key the control daemon and the scripts share for this laptop's machine row. */
+export const machineTokenKey = (id: string) => `machine:${id}`;
+
 /**
- * A plain SpacetimeDB connection (not an agent) for run bookkeeping: start_run, end_run,
- * create_task, mark_attempt_wasted, and reading token_usage. None of those reducers check
- * the caller's identity.
+ * An operator connection for run bookkeeping: start_run, end_run, create_task,
+ * mark_attempt_wasted, reset_demo_state, and reading token_usage. Those reducers accept only
+ * operators (a registered agent, a laptop's control daemon, or a dashboard paired with one),
+ * so this connects as this laptop's `machine` row with the same saved token `npm run control`
+ * uses (.contract/identities.json). Without a daemon it registers the machine row itself; the
+ * daemon later re-registers it with the same identity, so nothing is lost. A machine row held
+ * by another identity (a daemon from another checkout of this repo) is left alone: set
+ * CONTRACT_MACHINE to a different name for this checkout.
  */
 export function adminConnect(queries: string[], timeoutMs = 10_000): Promise<DbConnection> {
   const host = process.env.SPACETIME_HOST;
   const dbName = process.env.SPACETIME_DB_NAME;
   if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
+  const id = machineId(process.env.CONTRACT_MACHINE);
+  const tokenKey = machineTokenKey(id);
+  const machineQuery = `SELECT * FROM machine WHERE id = '${id.replace(/'/g, "''")}'`;
   return new Promise((res, rej) => {
     const timer = setTimeout(() => rej(new Error(`no response from ${host} (${dbName}) within ${timeoutMs} ms`)), timeoutMs);
+    const fail = (e: unknown) => (clearTimeout(timer), rej(e instanceof Error ? e : new Error(String(e))));
     const conn: DbConnection = DbConnection.builder()
       .withUri(host)
       .withDatabaseName(dbName)
-      .onConnect(() => {
+      .withToken(savedToken(tokenKey))
+      .onConnect((_ctx, identity, token) => {
+        saveToken(tokenKey, token);
         conn
           .subscriptionBuilder()
-          .onApplied(() => (clearTimeout(timer), res(conn)))
-          .onError((ctx) => (clearTimeout(timer), rej(new Error(`subscription failed: ${String(ctx.event ?? 'unknown')}`))))
-          .subscribe(queries);
+          .onApplied(() => {
+            const row = conn.db.machine.id.find(id);
+            if (row && !row.identity.equals(identity)) {
+              conn.disconnect();
+              fail(new Error(
+                `machine '${id}' belongs to another identity (npm run control from another checkout of this repo?). ` +
+                  `Run the scripts from that checkout, or set CONTRACT_MACHINE=<another name> for this one.`,
+              ));
+              return;
+            }
+            const ready = row ? Promise.resolve() : conn.reducers.registerMachine({ id });
+            ready.then(() => (clearTimeout(timer), res(conn)), fail);
+          })
+          .onError((ctx) => fail(new Error(`subscription failed: ${String(ctx.event ?? 'unknown')}`)))
+          .subscribe(queries.includes(machineQuery) ? queries : [...queries, machineQuery]);
       })
-      .onConnectError((_ctx, err) => (clearTimeout(timer), rej(err)))
+      .onConnectError((_ctx, err) => fail(err))
       .build();
   });
 }
