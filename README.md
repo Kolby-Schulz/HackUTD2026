@@ -66,8 +66,7 @@ panel is a live SpacetimeDB subscription, so every laptop and browser sees the s
 - **Savings** (bottom panel): conflicts caught, average time to resolve, tokens and dollars
   saved; click a number to see where it came from.
 
-Light and dark themes. `#/variants` is the design comparison page used to build it
-(`dashboard/src/designs/README.md`).
+Light and dark themes.
 
 ## Architecture
 

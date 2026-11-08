@@ -11,31 +11,24 @@ import { applyInitialTheme } from './theme.ts';
 
 applyInitialTheme();
 
-// #/variants is its own page on the same SpacetimeDB connection, loaded on demand so the main bundle doesn't grow.
-const Variants = lazy(() => import('./variants/Variants.tsx').then((m) => ({ default: m.Variants })));
 // #/playground (the design board) opens its own board connection (playground/net), so it sits outside the provider.
+// It loads on demand so the main bundle doesn't grow.
 const Playground = lazy(() => import('./playground/Playground.tsx').then((m) => ({ default: m.Playground })));
-type Page = 'variants' | 'playground' | 'app';
-const pageOf = (): Page => (/^#\/?variants/.test(location.hash) ? 'variants' : /^#\/?playground/.test(location.hash) ? 'playground' : 'app');
+const isPlayground = () => /^#\/?playground/.test(location.hash);
 
 function Root() {
-  const [page, setPage] = useState(pageOf);
+  const [playground, setPlayground] = useState(isPlayground);
   useEffect(() => {
-    const on = () => setPage(pageOf());
+    const on = () => setPlayground(isPlayground());
     window.addEventListener('hashchange', on);
     return () => window.removeEventListener('hashchange', on);
   }, []);
-  if (page === 'playground') return <Suspense fallback={null}><Playground /></Suspense>;
-  const variants = page === 'variants';
+  if (playground) return <Suspense fallback={null}><Playground /></Suspense>;
   return (
     <SpacetimeDBProvider connectionBuilder={connectionBuilder}>
-      {variants ? (
-        <Suspense fallback={null}><Variants /></Suspense>
-      ) : (
-        <MachineProvider>
-          <App />
-        </MachineProvider>
-      )}
+      <MachineProvider>
+        <App />
+      </MachineProvider>
     </SpacetimeDBProvider>
   );
 }

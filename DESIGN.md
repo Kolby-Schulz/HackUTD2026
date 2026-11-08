@@ -554,13 +554,6 @@ Icons are 16px line icons with a 1.7 to 1.8px stroke and round caps and joins, d
 - **Empty states:** a centred `headline-md` line, one serif sentence in Stone, then one to three
   example chips. No illustrations.
 
-### Comparison surfaces (design variants)
-
-The variant picker uses the same parts. Panes are editor panes with a pane header. Each pane's letter
-(A, B, C, D) is an agent-style badge in the first four agent colours. Picking a slot uses
-chips, and the live result is a pane with a dashed hairline border. Designs render on
-White inside the Paper canvas with the canvas-frame shadow, never directly on chrome.
-
 ## Do's and Don'ts
 
 - Do keep Blue for actions, focus and selection, and Clay for agent voice. Never swap them, and never
