@@ -2,34 +2,32 @@
 //   npm run control -- [--port 5199]
 //
 // The dashboard can't start processes and reducers have no process access (spec section 18),
-// so this small local HTTP server does it for the dashboard's Control tab. It starts the same
-// commands the README lists (coordinator, session start/merge, workers, judge, reset), keeps the
-// last lines of each one's output, and can stop them. Each laptop runs its own; it only controls
-// processes on this machine.
+// so this daemon does it for the dashboard's Control tab and chat. It connects out to
+// SpacetimeDB as this laptop's `machine` row and runs the commands paired dashboards queue
+// (scripts/daemon.ts): the same commands the README lists (coordinator, session start/merge,
+// workers, judge, reset). It keeps the last lines of each one's output, and can stop them.
+// Each laptop runs its own; it only controls processes on this machine.
 //
 // Any repo: `npm run control -- --repo <owner/name | git URL | path>` (or CONTRACT_TARGET, or
 // the dashboard's Repository field) picks the repository. Every process it starts gets it as
 // CONTRACT_TARGET, which the worker, session, mapper, judge and reset scripts all honor
 // (packages/client/src/target.ts). A git URL is cloned once into .contract/repos/<name>.
 //
-// Safety: it listens on 127.0.0.1 only, answers only pages served from localhost, and needs a
-// custom header on every POST (so a random website can't trigger it). Arguments are passed as
-// argv, never through a shell.
+// Safety: nothing listens on a port. Only dashboards paired with this machine (machine_access,
+// which only this daemon writes) can queue commands, every command goes through toCommand's
+// allowlist, and arguments are passed as argv, never through a shell.
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createLLM } from '@contract/llm';
-import { cloneDirFor, missingTools, resolveTarget, type DbConnection, type MissingTool } from '@contract/client';
+import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingTool } from '@contract/client';
+import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
-import { adminConnect, REPO, TSX } from './lib.ts';
+import { Daemon, Pairer, type MachinePort } from './daemon.ts';
+import { REPO, savedToken, saveToken, TSX } from './lib.ts';
 
-export const DEFAULT_PORT = 5199;
-export const HEADER = 'x-contract-control';
-/** Where GET / sends a browser (the dashboard's dev server, Chat tab). */
-export const DASHBOARD_URL = process.env.DASHBOARD_URL ?? 'http://localhost:5173/#/chat';
 const LOG_LINES = 300;
 
 export type Action =
@@ -155,17 +153,6 @@ export function toCommand(body: unknown): Command {
     }
     default:
       throw new Error(`unknown action ${JSON.stringify(b.action)}`);
-  }
-}
-
-/** Only pages served from this machine may call the control server. */
-export function allowedOrigin(origin: string | undefined): boolean {
-  if (!origin) return false;
-  try {
-    const { hostname: h, protocol } = new URL(origin);
-    return (protocol === 'http:' || protocol === 'https:') && (h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.localhost'));
-  } catch {
-    return false;
   }
 }
 
@@ -330,123 +317,134 @@ export class Registry {
   }
 }
 
-function send(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify(body));
+/** This laptop's machine id: the hostname, lowercased (override with --machine or CONTRACT_MACHINE). */
+export function machineId(name = hostname()): string {
+  const id = name.toLowerCase().replace(/\.local$/, '').replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
+  return id || 'laptop';
 }
 
-function readJson(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let s = '';
-    req.on('data', (c) => { s += c; if (s.length > 64_000) req.destroy(); });
-    req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch { reject(new Error('body is not JSON')); } });
-    req.on('error', reject);
+/** Connects as this laptop's daemon (same saved token every run, so pairings survive restarts). */
+function connectDaemon(id: string): Promise<DbConnection> {
+  const host = process.env.SPACETIME_HOST;
+  const dbName = process.env.SPACETIME_DB_NAME;
+  if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
+  const tokenKey = `machine:${id}`;
+  const q = (s: string) => s.replace(/'/g, "''");
+  return new Promise((res, rej) => {
+    const timer = setTimeout(() => rej(new Error(`no response from ${host} (${dbName}) within 10 s`)), 10_000);
+    const conn: DbConnection = DbConnection.builder()
+      .withUri(host)
+      .withDatabaseName(dbName)
+      .withToken(savedToken(tokenKey))
+      .onConnect((_ctx, _identity, token) => {
+        saveToken(tokenKey, token);
+        conn
+          .subscriptionBuilder()
+          .onApplied(() => (clearTimeout(timer), res(conn)))
+          .onError((ctx) => (clearTimeout(timer), rej(new Error(`subscription failed: ${String(ctx.event ?? 'unknown')}`))))
+          .subscribe([
+            `SELECT * FROM machine WHERE id = '${q(id)}'`,
+            `SELECT * FROM machine_access WHERE machine_id = '${q(id)}'`,
+            `SELECT * FROM machine_command WHERE machine_id = '${q(id)}'`,
+            `SELECT * FROM machine_pair_request WHERE machine_id = '${q(id)}'`,
+            'SELECT * FROM run',
+            'SELECT * FROM agent',
+            'SELECT * FROM task',
+          ]);
+      })
+      .onConnectError((_ctx, err) => (clearTimeout(timer), rej(err)))
+      .onDisconnect(() => {
+        console.error('[control] lost the connection to SpacetimeDB; restart npm run control');
+        process.exit(1);
+      })
+      .build();
   });
 }
 
-export function controlServer(reg = new Registry(), assistant?: Assistant) {
-  return createServer(async (req, res) => {
-    const origin = req.headers.origin;
-    // Requests from a page need a localhost origin; curl from this machine (no Origin) is fine.
-    if (origin !== undefined && !allowedOrigin(origin)) return send(res, 403, { error: 'origin not allowed' });
-    if (origin) {
-      res.setHeader('access-control-allow-origin', origin);
-      res.setHeader('vary', 'origin');
-      res.setHeader('access-control-allow-headers', `content-type, ${HEADER}`);
-      res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS');
-      // Chrome's private network access preflight (page on a LAN address calling 127.0.0.1)
-      res.setHeader('access-control-allow-private-network', 'true');
-    }
-    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
-
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    try {
-      // Opening the control server in a browser goes to the dashboard's Chat tab, where it's used.
-      if (req.method === 'GET' && url.pathname === '/') {
-        res.writeHead(302, { location: DASHBOARD_URL });
-        return res.end();
-      }
-      if (req.method === 'GET' && url.pathname === '/status') {
-        return send(res, 200, {
-          machine: hostname().replace(/\.local$/, ''),
-          repo: reg.repo,
-          repoLabel: reg.repoLabel(),
-          repoInfo: reg.info,
-          needsSession: reg.needsSession(),
-          processes: reg.view(Number(url.searchParams.get('tail') ?? 40)),
-        });
-      }
-      if (req.method === 'GET' && url.pathname === '/chat') {
-        if (!assistant) return send(res, 404, { error: 'chat is off' });
-        return send(res, 200, assistant.view(Number(url.searchParams.get('after') ?? 0)));
-      }
-      if (req.method === 'POST') {
-        if (req.headers[HEADER] !== '1') return send(res, 403, { error: `missing ${HEADER} header` });
-        const body = (await readJson(req)) as Record<string, unknown>;
-        if (url.pathname === '/run') {
-          const cmd = toCommand(body);
-          const p = reg.start(cmd);
-          console.log(`[control] started ${p.label}: tsx ${cmd.args.map((a) => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ')}`);
-          return send(res, 200, { ok: true, key: p.key });
-        }
-        if (url.pathname === '/chat' && assistant) {
-          const text = typeof body.text === 'string' ? body.text.trim() : '';
-          if (!text) return send(res, 400, { error: 'message is empty' });
-          if (text.length > 4000) return send(res, 400, { error: 'message is longer than 4000 characters' });
-          if (assistant.busy) return send(res, 409, { error: 'still working on your last message' });
-          void assistant.chat(text); // answers arrive through GET /chat
-          return send(res, 202, { ok: true });
-        }
-        if (url.pathname === '/repo' && typeof body.repo === 'string') {
-          const { repo, clone } = reg.setRepo(body.repo);
-          console.log(`[control] repository: ${repo || 'demo-repo'}${clone ? ' (cloning)' : ''}`);
-          return send(res, 200, { ok: true, repo, label: reg.repoLabel(), cloning: Boolean(clone) });
-        }
-        if (url.pathname === '/stop' && typeof body.key === 'string') {
-          reg.stop(body.key);
-          console.log(`[control] stopped ${body.key}`);
-          return send(res, 200, { ok: true });
-        }
-        if (url.pathname === '/forget' && typeof body.key === 'string') {
-          reg.forget(body.key);
-          return send(res, 200, { ok: true });
-        }
-      }
-      return send(res, 404, { error: 'not found' });
-    } catch (e) {
-      return send(res, 400, { error: e instanceof Error ? e.message : String(e) });
-    }
-  });
+function machinePort(conn: DbConnection, id: string): MachinePort {
+  return {
+    update: (s) => conn.reducers.updateMachine({ id, ...s }),
+    finish: (commandId, ok, error) => conn.reducers.finishMachineCommand({ commandId, ok, error }),
+    putProcess: (p) => conn.reducers.putMachineProcess({ machineId: id, ...p }),
+    deleteProcess: (procKey) => conn.reducers.deleteMachineProcess({ machineId: id, procKey }),
+    postChat: (m) => conn.reducers.postMachineChat({ machineId: id, role: m.role, text: m.text, atMs: m.at }),
+  };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'control.ts')) {
-  const { values } = parseArgs({ options: { port: { type: 'string' }, repo: { type: 'string' } } });
-  const port = Number(values.port ?? process.env.CONTROL_PORT ?? DEFAULT_PORT);
+  const { values } = parseArgs({ options: { repo: { type: 'string' }, machine: { type: 'string' }, pair: { type: 'string', multiple: true } } });
+  const id = machineId(values.machine ?? process.env.CONTRACT_MACHINE);
   const reg = new Registry();
   reg.stateFile = join(REPO, '.contract', 'control.json');
   const saved = reg.load();
   const { repo, clone } = reg.setRepo(values.repo ?? process.env.CONTRACT_TARGET ?? saved ?? '');
   console.log(`[control] repository: ${repo || 'demo-repo (built-in)'}${clone ? ' (cloning…)' : ''}`);
-  const server = controlServer(reg, new Assistant(liveDeps(reg)));
-  server.listen(port, '127.0.0.1', () => {
-    console.log(`[control] listening on http://127.0.0.1:${port}; open the dashboard's Control tab`);
+
+  const conn = await connectDaemon(id).catch((e: unknown) => {
+    console.error(`[control] ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
   });
-  server.on('error', (e) => { console.error(`[control] ${e.message}`); process.exit(1); });
+  await conn.reducers.registerMachine({ id }).catch((e: unknown) => {
+    console.error(`[control] ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  });
+  // --pair <identity>: lets that dashboard (its identity is on the Control tab) command this laptop.
+  for (const hex of values.pair ?? []) {
+    try {
+      await conn.reducers.grantMachineAccess({ machineId: id, identity: Identity.fromString(hex.trim()), label: 'paired from the terminal' });
+      console.log(`[control] paired dashboard ${hex.trim().slice(0, 12)}…`);
+    } catch (e) {
+      console.error(`[control] couldn't pair ${hex}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  const assistant = new Assistant(liveDeps(reg, conn));
+  const daemon = new Daemon(reg, machinePort(conn, id), assistant);
+  const toCmd = (row: { id: bigint; action: string; argsJson: string; status: string; createdAt: { microsSinceUnixEpoch: bigint } }) => ({
+    id: row.id, action: row.action, argsJson: row.argsJson, status: row.status, createdAtMs: Number(row.createdAt.microsSinceUnixEpoch / 1000n),
+  });
+  // One command at a time, in order, so "set repo" then "start session" never race.
+  let queue = Promise.resolve();
+  const enqueue = (row: Parameters<typeof toCmd>[0]) => { queue = queue.then(() => daemon.handle(toCmd(row))).catch(() => undefined); };
+  conn.db.machineCommand.onInsert((_ctx, row) => enqueue(row));
+  for (const row of [...conn.db.machineCommand.iter()].sort((a, b) => (a.id < b.id ? -1 : 1))) enqueue(row);
+
+  // Push process/log/chat changes every second; resend the machine row every 10 s as the heartbeat.
+  let ticks = 0;
+  setInterval(() => {
+    if (++ticks % 10 === 0) daemon.touch();
+    queue = queue.then(() => daemon.sync()).catch((e: unknown) => console.error(`[control] sync: ${e instanceof Error ? e.message : String(e)}`));
+  }, 1000);
+  await daemon.sync();
+  const paired = [...conn.db.machineAccess.iter()].length;
+  console.log(`[control] online as machine "${id}" on ${process.env.SPACETIME_HOST} (${process.env.SPACETIME_DB_NAME}); ${paired} paired dashboard${paired === 1 ? '' : 's'}`);
+
+  // Pairing: a one-time code, shown as a link (one click) and as text (type it on the Control tab).
+  const dashboardUrl = process.env.CONTRACT_DASHBOARD_URL || 'http://localhost:5173';
+  const pairer = new Pairer();
+  const showPairing = () => {
+    const shown = pairer.fresh();
+    console.log(`[control] pair a browser (works once, for 10 minutes): ${pairer.link(dashboardUrl, id, shown)}`);
+    console.log(`[control]   or enter code ${shown} on the dashboard's Control tab. Press Enter here for a new code.`);
+  };
+  showPairing();
+  process.stdin.on('data', () => showPairing());
+  const answer = (row: { id: bigint; identity: Identity; proof: string }) => {
+    const ok = pairer.check(row.identity.toHexString(), row.proof);
+    conn.reducers.resolveMachinePairing({ requestId: row.id, accept: ok, label: 'paired with a code' })
+      .then(() => { if (ok) console.log(`[control] paired a dashboard (${row.identity.toHexString().slice(0, 12)}…). Press Enter for a code for another browser.`); })
+      .catch((e: unknown) => console.error(`[control] pairing: ${e instanceof Error ? e.message : String(e)}`));
+  };
+  conn.db.machinePairRequest.onInsert((_ctx, row) => answer(row));
+  for (const row of [...conn.db.machinePairRequest.iter()]) answer(row); // queued while the daemon was off: the code is new, so these fail
+
   const quit = () => { reg.stopAll(); setTimeout(() => process.exit(0), 300); };
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
 }
 
 /** The chat's real dependencies: one SpacetimeDB connection (opened on first use) and the model. */
-function liveDeps(reg: Registry) {
-  let conn: Promise<DbConnection> | undefined;
-  const db = () => {
-    conn ??= adminConnect(['SELECT * FROM run', 'SELECT * FROM agent', 'SELECT * FROM task']).catch((e) => {
-      conn = undefined; // retry on the next message
-      throw e;
-    });
-    return conn;
-  };
+function liveDeps(reg: Registry, conn: DbConnection) {
+  const db = async () => conn;
   const llm = createLLM();
   return {
     reg,

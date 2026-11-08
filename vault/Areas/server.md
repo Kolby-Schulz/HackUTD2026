@@ -2,7 +2,7 @@
 title: Server (SpacetimeDB module)
 area: server
 sources: [server/]
-verified: 87debe9
+verified: feat/control-daemon
 ---
 Summary: The whole backend is one SpacetimeDB TypeScript module (`server/src/index.ts`, 1140 lines) with pure rule helpers in `server/src/rules.ts`. All state changes go through reducers; Rule 1-3 conflict checks run inline inside `report_change`, `publish_plan` and `claim_symbol`. Several reducers have no identity check (see Gotchas).
 
@@ -26,6 +26,7 @@ Summary: The whole backend is one SpacetimeDB TypeScript module (`server/src/ind
 - `instruction` (`id` autoInc): agent_id (btree), conflict_id, text, acknowledged. index.ts:203
 - `file_edit` (`id` autoInc, extra): agent_id and file (btree), diff, symbol_ids. Capped to 50 per agent. index.ts:217
 - `service` (`name` PK, extra): one-holder lock for `coordinator` / `mapper`, with holder and heartbeat_at. index.ts:231
+- Laptop daemons (extra, `scripts/control.ts`): `machine` (id PK, daemon identity, repo info, heartbeat), `machine_access` (paired dashboard identities; only the daemon writes), `machine_command` (queue; paired dashboards insert, daemon finishes; 20 pending max, 50 kept), `machine_process` (key `<machine>/<proc>`, log tail ≤16k), `machine_chat` (200 kept), `machine_pair_request` (proof hash only; 20 per machine). Reducers: `request_machine_pairing`, `resolve_machine_pairing` (daemon only), `register_machine` (another identity takes over only after 60 s silence and wipes access/commands/processes/chat), `update_machine`, `grant_machine_access`, `revoke_machine_access`, `send_machine_command`, `finish_machine_command`, `put_machine_process`, `delete_machine_process`, `post_machine_chat`. Tests: `server/test/machine.test.ts`.
 - `run` (`id` autoInc): mode, seed, started_at, ended_at. index.ts:244
 - `token_usage` (`id` autoInc): run_id (btree), agent_id, task_id, attempt, purpose, tokens, wasted, cache_read_tokens, cost_usd. index.ts:255
 - `token_saving` (`id` autoInc): run_id, agent_id, kind, tokens_avoided_est, note. index.ts:276

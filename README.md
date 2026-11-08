@@ -92,15 +92,22 @@ coding agent ("Add late fees to invoices, and have another agent format receipt 
 Contract plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
 session if they aren't running, puts one agent on each independent piece, and merges and runs
 the checks when they all finish. While agents work, follow-ups ("make it round half up") go to
-them as messages. It needs one local helper running:
+them as messages. It needs one daemon running on the laptop
+that does the work:
 
 ```bash
-npm run control     # then open the dashboard's Chat tab
+npm run control     # prints a pairing link: click it (or type its code on the Control tab)
 ```
 
+The daemon connects out to SpacetimeDB as this laptop's `machine` row; nothing listens on a port,
+so the hosted dashboard drives it the same as a local one. Set `CONTRACT_DASHBOARD_URL` to your
+hosted dashboard so the link points there (default `http://localhost:5173`). Pairing is once per
+browser: the code works once, expires after 10 minutes, and never reaches the database (the
+browser sends a hash of it with its own identity). Press Enter in the daemon's terminal for a new
+code. The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
 **Manual controls** under the chat start and stop each piece yourself (coordinator, session,
-workers, judge, merge, reset) and show each process's output. The helper listens on 127.0.0.1
-only, accepts requests only from pages served on localhost, and runs things only on the laptop
+workers, judge, merge, reset) and show each process's output. Only paired browsers can send it
+commands, every command goes through a fixed allowlist, and it runs things only on the laptop
 it runs on (each laptop runs its own). Workers push `agent/<id>` to origin as usual.
 
 ## Joining from a new laptop

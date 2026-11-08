@@ -1,11 +1,10 @@
-// Control server (scripts/control.ts): request validation, origin check, and the HTTP guards.
+// Control daemon (scripts/control.ts): request validation, the process registry and repo switching.
 import { EventEmitter } from 'node:events';
-import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { allowedOrigin, cloneCommand, controlServer, HEADER, normalizeRepo, Registry, toCommand } from '../control.ts';
+import { cloneCommand, machineId, normalizeRepo, Registry, toCommand } from '../control.ts';
 
 describe('toCommand', () => {
   it('maps each action to its script', () => {
@@ -28,15 +27,11 @@ describe('toCommand', () => {
   });
 });
 
-describe('allowedOrigin', () => {
-  it('accepts only pages served from this machine', () => {
-    expect(allowedOrigin('http://localhost:5173')).toBe(true);
-    expect(allowedOrigin('http://127.0.0.1:4174')).toBe(true);
-    expect(allowedOrigin('https://evil.example')).toBe(false);
-    expect(allowedOrigin('http://localhost.evil.example')).toBe(false);
-    expect(allowedOrigin('http://192.168.1.5:5173')).toBe(false);
-    expect(allowedOrigin(undefined)).toBe(false);
-    expect(allowedOrigin('null')).toBe(false);
+describe('machineId', () => {
+  it('turns a hostname into a machine id', () => {
+    expect(machineId('Ethans-MacBook-Pro.local')).toBe('ethans-macbook-pro');
+    expect(machineId('my laptop (2)')).toBe('my-laptop-2-');
+    expect(machineId('---')).toBe('laptop');
   });
 });
 
@@ -137,46 +132,4 @@ describe('switching repos safely', () => {
     expect(reg.needsSession()).toBe(true);
   });
 
-});
-
-describe('HTTP guards', () => {
-  let close: (() => void) | undefined;
-  afterEach(() => close?.());
-
-  async function serve() {
-    const { fn, calls } = fakeSpawn();
-    const server = controlServer(new Registry(fn, 'tsx', '/tmp'));
-    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-    close = () => server.close();
-    return { base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, calls };
-  }
-
-  it('sends a browser opening / to the dashboard', async () => {
-    const { base } = await serve();
-    const r = await fetch(`${base}/`, { redirect: 'manual' });
-    expect(r.status).toBe(302);
-    expect(r.headers.get('location')).toMatch(/#\/chat$/);
-  });
-
-  it('refuses other origins and POSTs without the header', async () => {
-    const { base, calls } = await serve();
-    const evil = await fetch(`${base}/run`, { method: 'POST', headers: { origin: 'https://evil.example', [HEADER]: '1' }, body: '{"action":"reset"}' });
-    expect(evil.status).toBe(403);
-    const noHeader = await fetch(`${base}/run`, { method: 'POST', headers: { origin: 'http://localhost:5173' }, body: '{"action":"reset"}' });
-    expect(noHeader.status).toBe(403);
-    expect(calls).toEqual([]);
-  });
-
-  it('runs an action for the local dashboard and lists it', async () => {
-    const { base, calls } = await serve();
-    const headers = { origin: 'http://localhost:5173', [HEADER]: '1', 'content-type': 'application/json' };
-    const ok = await fetch(`${base}/run`, { method: 'POST', headers, body: JSON.stringify({ action: 'worker', id: 'agent-b' }) });
-    expect(ok.status).toBe(200);
-    expect(ok.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
-    expect(calls).toEqual([['agents/worker/src/index.ts', '--id', 'agent-b', '--wait']]);
-    const bad = await fetch(`${base}/run`, { method: 'POST', headers, body: JSON.stringify({ action: 'worker', id: 'BAD ID' }) });
-    expect(bad.status).toBe(400);
-    const status = await (await fetch(`${base}/status`, { headers: { origin: 'http://localhost:5173' } })).json();
-    expect(status.processes).toMatchObject([{ key: 'worker:agent-b', status: 'running' }]);
-  });
 });
