@@ -3,7 +3,9 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { goToShape } from '../../core/goto';
 import { useDoc } from '../../core/react';
 import type { ShapeId } from '../../core/types';
+import { selectIds } from '../board/state';
 import { useSelection } from '../hooks';
+import { LayerFooter, LayerSearch, filterRows, useDebounced } from './LayerSearch';
 import type { SlotProps } from '../slotProps';
 import { LayerRow, ROW_HEIGHT } from './LayerRow';
 import { flattenTree, hiddenSelectionParents, isExpanded, rowActivity, subtreeParents, type ExpandedMap } from './treeView';
@@ -20,7 +22,13 @@ export function LayersPanel({ board, cursors }: SlotProps) {
   const selected = useSelection(board);
   const [exp, setExp] = useState<ExpandedMap>(overrides);
 
-  const rows = useMemo(() => flattenTree(st.children, st.shapes, exp), [st.children, st.shapes, exp]);
+  const [query, setQuery] = useState('');
+  const debounced = useDebounced(query);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const filtered = useMemo(() => filterRows(st.children, st.shapes, debounced), [st.children, st.shapes, debounced]);
+  const treeRows = useMemo(() => flattenTree(st.children, st.shapes, exp), [st.children, st.shapes, exp]);
+  const rows = filtered ? filtered.rows : treeRows;
+  const total = useMemo(() => { let n = 0; for (const s of st.shapes.values()) if (!s.deleted) n++; return n; }, [st.shapes]);
   const selSet = useMemo(() => new Set(selected), [selected]);
   const hidden = useMemo(() => hiddenSelectionParents(rows, st.shapes, selected), [rows, st.shapes, selected]);
   const colors = new Map(cursors.map((a) => [a.id, a.color]));
@@ -49,16 +57,42 @@ export function LayersPanel({ board, cursors }: SlotProps) {
     setExp(next);
   }, [st.children, st.shapes]);
 
+  const focusList = useCallback(() => listRef.current?.element()?.focus(), []);
+  // Left: collapse, else go to the parent. Right: expand, else go to the first child. Other keys: selection hook.
+  const onListKey = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.target as HTMLElement).tagName === 'INPUT' || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) { onKeyDown(e); return; }
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') { onKeyDown(e); return; }
+    const at = rows.findIndex((r) => r.id === selected[selected.length - 1]);
+    if (at < 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const row = rows[at];
+    const go = (id: ShapeId | undefined) => { if (!id) return; selectIds(board, [id]); listRef.current?.scrollToIndex(rows.findIndex((r) => r.id === id), 'auto'); };
+    if (e.key === 'ArrowLeft') {
+      if (row.expanded && !filtered) onToggle(row.id, false);
+      else { const p = st.shapes.get(row.id)?.parent; go(rows.find((r) => r.id === p)?.id); }
+    } else if (row.hasChildren && !row.expanded) onToggle(row.id, false);
+    else if (row.expanded) go(rows[at + 1]?.depth > row.depth ? rows[at + 1].id : undefined);
+  }, [rows, selected, board, filtered, onToggle, onKeyDown, st.shapes]);
+  // Cmd/Ctrl+F while the panel has focus opens the search box (the browser find is not useful here).
+  const onPanelKey = useCallback((e: React.KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault(); e.stopPropagation(); searchRef.current?.focus(); searchRef.current?.select();
+    }
+  }, []);
+
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }} onClickCapture={onClickCapture} onClick={onBackgroundClick}>
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }} onClickCapture={onClickCapture} onClick={onBackgroundClick} onKeyDown={onPanelKey}>
+      <LayerSearch ref={searchRef} value={query} onChange={setQuery} onLeave={focusList} />
       <VirtualList ref={listRef} className="pg-layers" items={rows} rowHeight={ROW_HEIGHT} getKey={(r) => r.id} aria-label="Layers"
-        onKeyDown={onKeyDown}
-        empty={<div className="pg-empty">Agents are warming up…</div>}
+        onKeyDown={onListKey}
+        empty={<div className="pg-empty">{filtered ? 'No layers match' : 'Agents are warming up…'}</div>}
         renderRow={(row) => (
           <LayerRow row={row} selected={selSet.has(row.id)} hiddenSelected={hidden.has(row.id)}
             lockColors={activity.own.get(row.id)} belowColors={activity.below.get(row.id)}
             onPick={onPick} onToggle={onToggle} onJump={onJump} />
         )} />
+      <LayerFooter total={total} selected={selected.length} matches={filtered ? filtered.matches : null} />
     </div>
   );
 }
