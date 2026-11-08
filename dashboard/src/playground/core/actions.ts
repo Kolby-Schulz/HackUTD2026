@@ -77,7 +77,9 @@ export function findConflicts(list: readonly Action[], platform: Platform): Arra
 // ---- the registry ----
 const byId = new Map<string, Action>();
 const subs = new Set<() => void>();
-const emit = () => subs.forEach(f => f());
+// the list is cached between changes so React's useSyncExternalStore gets a stable snapshot
+let cached: Action[] | null = null;
+const emit = () => { cached = null; subs.forEach(f => f()); };
 
 /** Add or replace an action by id. Returns an unregister function. */
 export function registerAction(a: Action): () => void {
@@ -91,7 +93,7 @@ export function registerAll(list: readonly Action[]): () => void {
   return () => { for (const a of list) if (byId.get(a.id) === a) byId.delete(a.id); emit(); };
 }
 export const getAction = (id: string): Action | undefined => byId.get(id);
-export const listActions = (): Action[] => [...byId.values()];
+export const listActions = (): Action[] => (cached ??= [...byId.values()]);
 export const subscribeActions = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 
 /** Run by id (palette, menus, agents). Returns false when missing or its `when()` says no (reason string). */

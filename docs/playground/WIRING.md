@@ -100,6 +100,16 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - known, not fixed: "Restart all" only shows when every agent is stopped; 60 fps not proven in the app's throttled
   pane (per-frame work under 1 ms; culling mounts ~370 of 5,000).
 
+## Waves 2-3 browser pass (2026-11-08)
+- done: cursor declutter "short" mode hid the action text (names are hover-only now), so short keeps it and only "dot"
+  hides the pill; minimap key spelled `Shift+m` (letters match e.key); help sheet crashed with "Maximum update depth"
+  because `listActions()` returned a new array per call (now cached until the registry changes, with a test);
+  present mode shows the counter from the first paint and its layout waits fall back to a timeout in a throttled pane.
+- checked: tags show the action, hover pins the name pill; Shift+M toggles the minimap; `?` opens help; Present button,
+  arrows, Esc and camera restore; title "(N) Demo board · Playground"; agents build and review.
+- not checked: rotate cursor, handle double-click, layer row flash, spacing snap labels, file import/export, LLM bridge
+  with a real bridge, demo panic key, real fullscreen (the pane does not grant it).
+
 ## Waves 2-3 seams
 - done (wire2) (WP-53): `ui/Cursors.tsx` painter calls `layoutTags(...)` and `cursorScale(zoom)` from `presence/cursors.ts` and
   toggles the `.pg-tag` full/short/dot classes and the "+n" chip (tag declutter when zoomed out / crowded).

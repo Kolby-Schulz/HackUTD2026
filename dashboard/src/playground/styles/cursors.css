@@ -41,6 +41,6 @@
 /* WP-53: zoomed-out arrows shrink; crowded tags lose the action text, then become dots with a +n chip.
    A hovered (.hot) tag is never decluttered. */
 .pg-cursor .arrow { scale: var(--cs, 1); }
-.pg-cursor.t-short:not(.hot) .pg-tag .st { display: none; }
+/* names are already hover-only, so the action is the whole tag: "short" keeps it and only "dot" hides the pill */
 .pg-cursor.t-dot:not(.hot) .pg-tag { display: none; }
 .pg-tag[data-more]::after { content: '+' attr(data-more); font-weight: 700; color: var(--pg-muted); }

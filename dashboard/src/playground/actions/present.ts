@@ -70,9 +70,13 @@ export function showFrame(index: number, instant = false) {
   else tweenCam(env.camera, cam, { duration: 150 });
 }
 
+/** Run once layout has settled: two frames, or 120 ms when frames are throttled (background pane), whichever is first. */
 const afterLayout = (fn: () => void) => {
-  if (typeof requestAnimationFrame === 'undefined') fn();
-  else requestAnimationFrame(() => requestAnimationFrame(fn));
+  if (typeof requestAnimationFrame === 'undefined') { fn(); return; }
+  let done = false;
+  const once = () => { if (!done) { done = true; fn(); } };
+  requestAnimationFrame(() => requestAnimationFrame(once));
+  setTimeout(once, 120);
 };
 
 export function startPresent() {
@@ -81,8 +85,9 @@ export function startPresent() {
   prevCam = env.camera.getCam();
   const r = root();
   r?.setAttribute('data-present', '1');
-  set({ active: true, index: 0, ids: [], cursors: true });
-  if (!presentFrames(env.board.doc.getState()).length) toast('No frames yet: showing everything. Add a frame to present slides.', { key: 'present.none', onceMs: 4000 });
+  const ids = presentFrames(env.board.doc.getState()).map((f) => f.id);
+  set({ active: true, index: 0, ids, cursors: true });   // the counter is right from the first paint
+  if (!ids.length) toast('No frames yet: showing everything. Add a frame to present slides.', { key: 'present.none', onceMs: 4000 });
   // Fullscreen needs this user gesture; it fails quietly (embedded pane, denied) and the page-level full viewport stays.
   try {
     const p = r?.requestFullscreen?.();
@@ -103,7 +108,9 @@ export function stopPresent() {
   if (env && back) {
     cancelTween(env.camera);
     env.camera.setCam(back);
-    afterLayout(() => env.camera.setCam(back));   // panels coming back resize the board; put the old view back after
+    // panels coming back and leaving fullscreen resize the board late; put the old view back after both settle
+    afterLayout(() => env.camera.setCam(back));
+    setTimeout(() => { if (!state.active) env.camera.setCam(back); }, 400);
   }
 }
 
