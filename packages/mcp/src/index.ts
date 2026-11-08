@@ -12,13 +12,13 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { ClaimedError, connect, type ContractClient, type Instruction } from '@contract/client';
+import { ClaimedError, connect, estimateTokens, type ContractClient, type Instruction } from '@contract/client';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 // Claude Code starts us in the agent's worktree, so load the monorepo's .env explicitly.
 loadEnv({ path: resolve(REPO, '.env'), quiet: true });
 
-/** Tool names are fixed by the spec (section 11). */
+/** Tool names are fixed by the spec (section 11, plus docs/spec-additions-summary-tools.md). */
 export const TOOLS = [
   'declare_plan', // -> client.publishPlan
   'claim_symbol', // -> client.claim
@@ -27,6 +27,8 @@ export const TOOLS = [
   'get_context', // -> client.getContext
   'find_existing', // -> client.findExisting
   'get_instructions', // -> client.pendingInstructions (+ ack)
+  'get_summary', // -> client.getSummary
+  'put_summary', // -> client.putSummary
 ] as const;
 
 /** find_existing matches at or above this score count as a reuse (same name, or same types + shared token). */
@@ -39,7 +41,7 @@ export const REUSE_MIN_SCORE = 0.8;
 const REUSE_EST_TOKENS = Number(process.env.CONTRACT_REUSE_EST_TOKENS ?? 1500);
 
 const ID_HINT =
-  'Symbol ids look like "<file>#<name>" or "<file>#Class.method", with the file relative to the repo root ' +
+  'Symbol ids look like "<file>#<name>" or "<file>#Class.method", with the file relative to your working directory ' +
   '(e.g. "src/billing/fees.ts#calculateFee"). Use find_existing to look ids up.';
 
 type ToolResult = { content: { type: 'text'; text: string }[]; isError?: boolean };
@@ -228,6 +230,41 @@ export function createServer(clientP: Promise<ContractClient>, taskId: bigint): 
     tool(async (c) => {
       const list = await takeInstructions(c);
       return ok(list.length ? { instructions: list } : 'No new instructions. Continue your task.');
+    }),
+  );
+
+  server.registerTool(
+    'get_summary',
+    {
+      description:
+        'Call before reading a whole file. Returns a summary another agent cached for the current ' +
+        "content of this file; much cheaper than reading it. On a miss, read the file and call put_summary.",
+      inputSchema: { file: z.string().describe('Path relative to your working directory, e.g. src/billing/fees.ts') },
+    },
+    tool(async (c, { file }: { file: string }) => {
+      const summary = await c.getSummary(file);
+      if (summary !== undefined) return ok({ file, summary });
+      return ok(
+        `No cached summary for ${file} (or the file changed). Read it, then call put_summary with 2-5 lines: ` +
+          'what each exported function does, plus rounding, units and side effects.',
+      );
+    }),
+  );
+
+  server.registerTool(
+    'put_summary',
+    {
+      description:
+        'After reading a whole file, cache a short summary of it (2-5 lines: what each exported function does, ' +
+        'plus rounding, units and side effects) so other agents can skip reading it. Tied to the current content.',
+      inputSchema: {
+        file: z.string().describe('Path relative to your working directory'),
+        summary: z.string().min(1),
+      },
+    },
+    tool(async (c, { file, summary }: { file: string; summary: string }) => {
+      await c.putSummary(file, summary, estimateTokens(summary));
+      return ok(`cached summary of ${file}`);
     }),
   );
 

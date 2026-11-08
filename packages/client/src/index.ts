@@ -18,6 +18,7 @@ export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' 
 /** Generated table row types (camelCase fields), for code that reads tables directly. */
 export type * as rows from './bindings/types.ts';
 export { DbConnection } from './bindings/index.ts';
+export { estimateTokens } from './context.ts';
 
 export interface AgentInfo {
   id: string; // 'agent-a', or the fixed ids 'coordinator', 'mapper', 'triage'
@@ -108,7 +109,12 @@ export interface ContractClient {
   // Token savers
   getContext(symbolIds: string[], depth?: number): Promise<SymbolContext[]>;
   findExisting(q: { name: string; params?: string[]; returns?: string }): Promise<ExistingMatch[]>;
-  getSummary(file: string): Promise<string | undefined>;
+  /**
+   * Cached summary of the file's current content. Counts a cache hit (record_cache_hit +
+   * a cache_hit saving) unless `countHit: false`, for callers that count it later once
+   * they know the summary was used instead of the file.
+   */
+  getSummary(file: string, opts?: { countHit?: boolean }): Promise<string | undefined>;
   putSummary(file: string, summary: string, tokens: number): Promise<void>;
 
   // Accounting
@@ -363,10 +369,11 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
       return rankExisting(q, db.symbol.iter());
     },
 
-    async getSummary(file) {
+    async getSummary(file, { countHit = true } = {}) {
       live();
       const hit = cachedSummary(file);
       if (!hit) return undefined;
+      if (!countHit) return hit.row.summary;
       await r.recordCacheHit({ key: hit.row.key });
       const avoided = estimateTokens(hit.content) - hit.row.summaryTokens;
       if (avoided > 0) await client.logSaving('cache_hit', avoided, `summary of ${file}`).catch(() => {});
