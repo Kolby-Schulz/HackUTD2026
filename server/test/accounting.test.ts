@@ -195,6 +195,19 @@ describe('log_saving', () => {
   let t: Harness;
   beforeEach(() => {
     t = makeHarness();
+    register(t, 'agent-b');
+  });
+
+  it('is refused from an identity that is not the agent', () => {
+    // Arrange
+    const args = { run_id: 1n, agent_id: 'agent-b', kind: 'reuse', tokens_avoided_est: 10, note: '' };
+
+    // Act
+    const act = () => t.as('worker-a', (ctx) => mod.log_saving(ctx, args));
+
+    // Assert
+    expect(act).toThrow(/linked to a different identity/);
+    expect(all(t.db.tokenSaving.iter())).toHaveLength(0);
   });
 
   it.each(['early_stop', 'reuse', 'context_slice', 'cache_hit'])('records a %s saving', (kind) => {
@@ -234,6 +247,19 @@ describe('cache_summary / record_cache_hit', () => {
 
   beforeEach(() => {
     t = makeHarness();
+    register(t, 'agent-a');
+    register(t, 'agent-b');
+  });
+
+  it('is refused from an identity with no agent row', () => {
+    // Act
+    const write = () => t.as('outsider', (ctx) => mod.cache_summary(ctx, { key: KEY, summary: 's', summary_tokens: 1 }));
+    const read = () => t.as('outsider', (ctx) => mod.record_cache_hit(ctx, { key: KEY }));
+
+    // Assert
+    expect(write).toThrow(/only a registered agent/);
+    expect(read).toThrow(/only a registered agent/);
+    expect(t.db.summaryCache.key.find(KEY)).toBeFalsy();
   });
 
   it('writes a new summary with 0 hits', () => {

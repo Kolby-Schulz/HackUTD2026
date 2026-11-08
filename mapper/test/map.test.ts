@@ -455,3 +455,32 @@ describe('size check', () => {
     expect(() => new RepoMapper(FIXTURE)).toThrow(/has 6 source files, over the limit of 3/);
   });
 });
+
+describe('JavaScript files with no exports (browser scripts and entry modules)', () => {
+  const maps = new RepoMapper(fixture('script-repo')).mapAll();
+
+  it('maps their top-level declarations; library modules and CommonJS keep the exports-only rule', () => {
+    expect(allSymbols(maps).map((s) => `${s.kind} ${s.id}  ${s.signature}`)).toEqual([
+      'const js/bootstrap.js#VERSION  const VERSION = "1.0"',
+      'function js/bootstrap.js#boot  boot()',
+      'function js/lib.js#formatCents  formatCents(cents)',
+      'function js/lib.js#total  total(items)',
+      'const js/page.js#cart  const cart',
+      'function js/page.js#renderTotal  renderTotal(items)',
+      'function js/page.js#checkTotals  checkTotals()',
+      'class js/page.js#Page  class Page',
+      'method js/page.js#Page.refresh  refresh()',
+    ]);
+  });
+
+  it('resolves edges from the entry module into the library it imports', () => {
+    expect(edgeList(maps)).toEqual([
+      'js/bootstrap.js#boot -> js/bootstrap.js#VERSION',
+      'js/page.js#Page.refresh -> js/page.js#checkTotals',
+      'js/page.js#checkTotals -> js/page.js#cart',
+      'js/page.js#checkTotals -> js/page.js#renderTotal',
+      'js/page.js#renderTotal -> js/lib.js#formatCents',
+      'js/page.js#renderTotal -> js/lib.js#total',
+    ]);
+  });
+});
