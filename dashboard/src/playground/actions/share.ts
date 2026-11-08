@@ -1,5 +1,7 @@
 // Share link (SHARE-1/2) and view persistence (CANVAS-36/37).
 // `copyLink` writes `#/playground?x&y&z&sel`; `applyViewFromUrl` is called once from boot.
+import { createElement } from 'react';
+import { confirm } from '../ui/shell/Dialog';
 import type { BoardKit } from '../core/commands';
 import type { CameraStore } from '../core/camera';
 import { opId } from '../core/ids';
@@ -22,16 +24,47 @@ export function buildLink(board: BoardKit, camera: CameraStore, loc: { origin: s
   return loc.origin + loc.pathname + encodeView(view, board.selection.get(board.me).ids);
 }
 
-export async function copyLink(board: BoardKit, camera: CameraStore): Promise<boolean> {
+export interface CopyEnv {
+  writeText?: (t: string) => Promise<void>;
+  execCopy?: (t: string) => boolean;
+}
+
+/** Hidden textarea + execCommand('copy'): works where the async clipboard API is denied. */
+function execCopyDom(text: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  try { return document.execCommand('copy'); } catch { return false; } finally { ta.remove(); }
+}
+
+/** Copy order: async clipboard, then execCommand. True only when a copy actually succeeded. */
+export async function copyText(text: string, env: CopyEnv = {}): Promise<boolean> {
+  const write = env.writeText ?? (typeof navigator !== 'undefined' && navigator.clipboard?.writeText ? (t: string) => navigator.clipboard.writeText(t) : undefined);
+  if (write) { try { await write(text); return true; } catch { /* denied: fall through */ } }
+  try { return (env.execCopy ?? execCopyDom)(text); } catch { return false; }
+}
+
+export async function copyLink(board: BoardKit, camera: CameraStore, env: CopyEnv = {}): Promise<boolean> {
   const url = buildLink(board, camera);
-  try {
-    await navigator.clipboard.writeText(url);
+  if (await copyText(url, env)) {
     toast('Link copied', { variant: 'success', ttlMs: 1600 });
     return true;
-  } catch {
-    toast('Could not copy the link', { variant: 'warn' });
-    return false;
   }
+  // Last resort: show the link pre-selected so it can be copied by hand.
+  void confirm({
+    title: 'Copy this link',
+    body: createElement('input', {
+      readOnly: true, value: url, 'aria-label': 'Link', style: { width: '100%', boxSizing: 'border-box' },
+      ref: (el: HTMLInputElement | null) => { if (el) setTimeout(() => { el.focus(); el.select(); }, 0); },
+      onFocus: (e: { currentTarget: HTMLInputElement }) => e.currentTarget.select(),
+    }),
+    confirmLabel: 'Done', cancelLabel: 'Close',
+  });
+  return false;
 }
 
 /** Waits (max ~1s) for the view to be measured: the centre needs its size. */

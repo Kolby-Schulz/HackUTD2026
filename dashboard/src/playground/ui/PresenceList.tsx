@@ -74,9 +74,9 @@ export function PresenceList({ board, rt, cursors }: SlotProps) {
             <small>{c.kind === 'human' ? 'you · mouse' : c.kind === 'api' ? 'window.board' : statusOf(c)}</small>
           </div>
           {c.kind === 'agent' && <span className={`pg-dot ${toneOf(c.state)}`} title={c.state ?? 'idle'} />}
-          {c.kind === 'agent' && (
-            <button className="ghost" title={c.state === 'paused' ? 'Resume' : 'Pause'} onClick={(e) => { e.stopPropagation(); rt?.setPaused(c.id, c.state !== 'paused'); }}>{c.state === 'paused' ? '▶' : '❚❚'}</button>
-          )}
+          {c.kind === 'agent' && (c.state === 'stopped'
+            ? <button className="ghost" title="Restart" onClick={(e) => { e.stopPropagation(); rt?.restart(c.id); }}>▶</button>
+            : <button className="ghost" title={c.state === 'paused' ? 'Resume' : 'Pause'} onClick={(e) => { e.stopPropagation(); rt?.setPaused(c.id, c.state !== 'paused'); }}>{c.state === 'paused' ? '▶' : '❚❚'}</button>)}
           {c.kind !== 'human' && (
             <button className="ghost" title="Remove" onClick={(e) => {
               e.stopPropagation();

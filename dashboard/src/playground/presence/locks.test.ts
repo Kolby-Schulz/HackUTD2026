@@ -84,6 +84,22 @@ describe('soft locks', () => {
 });
 
 describe('createLocks ttl', () => {
+  it('a gesture that keeps re-planning a finished child no longer holds its lock; the active shape stays locked', () => {
+    const { board, tick } = setup();
+    const mk = (id: string, x: number) => ({ t: 'shape.create' as const, kind: 'rect' as const, id, props: { x, y: 0, w: 10, h: 10 } });
+    const g = board.gesture('agent-iris', 'build');
+    g.update([mk('done', 0), mk('active', 0)]);
+    expect(board.locks.list().map((l) => l.shapeId).sort()).toEqual(['active', 'done']);
+    tick(700);
+    g.update([mk('done', 0), mk('active', 5)]); // 'done' unchanged, 'active' changed
+    tick(700);
+    g.update([mk('done', 0), mk('active', 9)]);
+    expect(board.locks.list().map((l) => l.shapeId)).toEqual(['active']);
+    expect(board.locks.check(['done'], 'agent-bolt').ok).toBe(true);
+    expect(board.locks.check(['active'], 'agent-bolt').ok).toBe(false);
+    g.abort();
+  });
+
   it('locks expire after their TTL', () => {
     let t = 0;
     const l = createLocks(() => t);
@@ -101,5 +117,22 @@ describe('createLocks ttl', () => {
     expect(l.check(['s'], 'human-you').ok).toBe(true);
     l.release('s', 'agent-b');
     expect(l.list()).toHaveLength(1);
+  });
+});
+
+describe('humans win after an activity lock lapsed', () => {
+  it('a human edit still takes over an open agent gesture that touched the shape', () => {
+    const { board, make, events, tick } = setup();
+    make();
+    const g = board.gesture('agent-iris', 'build');
+    g.update([{ t: 'shape.translate', ids: ['s1'], dx: 40, dy: 0 }]);
+    tick(5000); // the agent stalls; its 1.2 s activity lock lapses
+    expect(board.locks.list().some((l) => l.holder === 'agent-iris')).toBe(false);
+    const h = board.gesture('human-you', 'drag');
+    h.update([{ t: 'shape.translate', ids: ['s1'], dx: 7, dy: 0 }]);
+    h.commit();
+    expect(events.some((e) => (e as { holder?: string }).holder === 'agent-iris')).toBe(true);
+    expect(g.commit().ok).toBe(false); // the agent cannot commit over the human later
+    expect(board.doc.getState().shapes.get('s1')!.x).toBe(47); // agent's +40 kept as its own tx, human's +7 on top
   });
 });

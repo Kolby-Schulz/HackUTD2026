@@ -30,6 +30,32 @@ describe('tx diff and Changed since', () => {
   });
 });
 
+describe('colour swatch before-value', () => {
+  it('beige to purple on a rect built in a gesture, with opacity and a parent frame', () => {
+    const board = createBoard({ me: 'human-1' });
+    board.actors.spawn({ id: 'agent-a', kind: 'agent', name: 'Iris' });
+    const g = board.gesture('agent-a', 'build Cover');
+    g.update([
+      { t: 'shape.create', kind: 'frame', id: 'f1', props: { x: 0, y: 0, w: 100, h: 100, fills: [{ type: 'solid', color: '#ffffff' }] } },
+      { t: 'shape.create', kind: 'rect', id: 'cover', parent: 'f1', props: { x: 0, y: 0, w: 50, h: 50, fills: [{ type: 'solid', color: '#f5efe0', opacity: 1 }] } },
+    ]);
+    g.commit();
+    const r = board.exec({ actor: 'agent-a', opId: 'p1', commands: [{ t: 'shape.update', ids: ['cover'], patch: { fills: [{ type: 'solid', color: '#a855f7' }] } }] });
+    expect(inspectTx(board.doc, r.tx!)!.diff).toEqual({ kind: 'color', from: '#f5efe0', to: '#a855f7' });
+  });
+});
+
+describe('colour swatch ignores the text colour of a rect', () => {
+  it('a rect carrying a default black text colour does not show black as its old fill', () => {
+    const board = createBoard({ me: 'human-1' });
+    const c = board.exec({ actor: 'agent-a', opId: 'o1', commands: [{ t: 'shape.create', kind: 'rect', props: { x: 0, y: 0, w: 10, h: 10, color: '#000000', fills: [{ type: 'solid', color: '#f4f2ec' }] } }] });
+    const id = (c.results[0] as { id: string }).id;
+    board.exec({ actor: 'agent-a', opId: 'o2', commands: [{ t: 'shape.update', ids: [id], patch: { fills: [] } }] });
+    const r = board.exec({ actor: 'agent-a', opId: 'o3', commands: [{ t: 'shape.update', ids: [id], patch: { fills: [{ type: 'solid', color: '#a855f7' }] } }] });
+    expect(inspectTx(board.doc, r.tx!)!.diff).toEqual({ kind: 'color', to: '#a855f7' });
+  });
+});
+
 describe('actionInfo', () => {
   it('words an edit and lists layers', () => {
     expect(actionInfo('Iris: fill is now purple', [{ t: 'shape.update', ids: ['s1'], patch: {} }], [{ ok: true }])).toEqual({ summary: 'Changed fill to purple', layers: ['s1'] });

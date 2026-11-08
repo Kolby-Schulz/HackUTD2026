@@ -1,31 +1,49 @@
-// Other actors' selections (thin outline) and the shapes they are editing (thick outline + name tag),
-// in each actor's colour. Screen space: boxes follow the paint frame and labels keep a constant size.
+// Other actors' selections (thin outline), and per agent ONE thick "editing" outline (the locked shape under its
+// cursor, else its newest lock) plus a thin outline on the frame being built, in each actor's colour. Screen space: boxes follow the paint frame and labels keep a constant size.
 // "Editing" comes from the soft locks (they carry no subscription, so a short interval re-reads them).
 // Also draws the pulse ring that PresenceList asks for when you jump to an actor.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { absRect } from '../../core/tree';
-import type { ActorId, ShapeId } from '../../core/types';
+import { absRect, ancestors } from '../../core/tree';
+import type { ActorId, LockRecord, ShapeId } from '../../core/types';
 import type { BoardKit } from '../../core/commands';
 import { useBoardEnv, usePainter } from '../board/context';
 import { w2v } from '../board/state';
 import '../../styles/presence.css';
 
-export interface RemoteOutline { key: string; actor: ActorId; shapeId: ShapeId; editing: boolean }
+export interface RemoteOutline { key: string; actor: ActorId; shapeId: ShapeId; editing: boolean; frame?: boolean }
 
 const MAX_OUTLINES = 200;
 const LOCK_POLL_MS = 250;
 const PULSE_MS = 1100;
+export const EDIT_MIN_ZOOM = 0.4; // below this only thin frame-level outlines are drawn
 
 /** Pure: who else is selecting or editing what. A held lock wins over a plain selection of the same shape. */
-export function remoteOutlines(board: Pick<BoardKit, 'actors' | 'selection' | 'locks' | 'me'>): RemoteOutline[] {
+export function remoteOutlines(board: Pick<BoardKit, 'actors' | 'selection' | 'locks' | 'me' | 'doc' | 'presence'>): RemoteOutline[] {
   const out = new Map<string, RemoteOutline>();
   for (const a of board.actors.list()) {
     if (a.id === board.me) continue;
     for (const id of board.selection.get(a.id).ids) out.set(`${a.id}:${id}`, { key: `${a.id}:${id}`, actor: a.id, shapeId: id, editing: false });
   }
+  const st = board.doc.getState();
+  const byHolder = new Map<ActorId, LockRecord[]>();
   for (const l of board.locks.list()) {
     if (l.holder === board.me) continue;
-    out.set(`${l.holder}:${l.shapeId}`, { key: `${l.holder}:${l.shapeId}`, actor: l.holder, shapeId: l.shapeId, editing: true });
+    byHolder.set(l.holder, [...(byHolder.get(l.holder) ?? []), l]);
+  }
+  for (const [holder, ls] of byHolder) {
+    const pr = board.presence.get(holder);
+    const depth = (id: ShapeId) => ancestors(st, id).length;
+    const under = pr?.x === undefined || pr.y === undefined ? [] : ls.filter((l) => {
+      const s = st.shapes.get(l.shapeId);
+      const r = s && !s.deleted ? absRect(st, l.shapeId) : null;
+      return !!r && pr.x! >= r.x && pr.x! <= r.x + r.w && pr.y! >= r.y && pr.y! <= r.y + r.h;
+    });
+    const pick = under.length
+      ? under.reduce((a, b) => (depth(b.shapeId) > depth(a.shapeId) ? b : a))
+      : ls.reduce((a, b) => (b.since > a.since ? b : a));
+    const root = ancestors(st, pick.shapeId).slice(-1)[0];
+    if (root) out.set(`${holder}:frame:${root}`, { key: `${holder}:frame:${root}`, actor: holder, shapeId: root, editing: false, frame: true });
+    out.set(`${holder}:${pick.shapeId}`, { key: `${holder}:${pick.shapeId}`, actor: holder, shapeId: pick.shapeId, editing: true });
   }
   return [...out.values()].slice(0, MAX_OUTLINES);
 }
@@ -73,7 +91,7 @@ export function RemoteSelections() {
       const o = list.find((x) => x.key === key);
       const s = o && st.shapes.get(o.shapeId);
       const r = o && s && !s.deleted ? absRect(st, o.shapeId) : null;
-      if (!r) { el.style.display = 'none'; continue; }
+      if (!r || (o!.editing && cam.z < EDIT_MIN_ZOOM)) { el.style.display = 'none'; continue; }
       const p = w2v(cam, r);
       el.style.display = '';
       el.style.transform = `translate(${p.x}px, ${p.y}px)`;
@@ -95,9 +113,7 @@ export function RemoteSelections() {
         const a = board.actors.get(o.actor);
         return (
           <div key={o.key} className={'pg-rsel' + (o.editing ? ' editing' : '')} style={{ ['--c' as string]: a?.color, display: 'none' }}
-            ref={(el) => { if (el) els.current.set(o.key, el); else els.current.delete(o.key); }}>
-            {o.editing && <span className="pg-rtag">{a?.name ?? o.actor}</span>}
-          </div>
+            ref={(el) => { if (el) els.current.set(o.key, el); else els.current.delete(o.key); }} />
         );
       })}
       {ringed.map((id) => (
