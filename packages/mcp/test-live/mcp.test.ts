@@ -181,7 +181,11 @@ describe('contract mcp over stdio', () => {
 
     // Assert
     expect(r.isError).toBe(false);
-    expect(r.json().instructions.map((i: { text: string }) => i.text)).toEqual([`${DATE} already does this; reuse it.`]);
+    // formatDate came from the mapper (pre-existing code, no creating agent), so Rule 2 sends a
+    // reuse hint rather than opening a duplicate conflict (server checkDuplicates, PR #12).
+    expect(r.json().instructions.map((i: { text: string }) => i.text)).toEqual([
+      `${DATE} may already do this (same normalized name 'formatdate'); reuse it if it fits instead of writing src/checkout/receipt.ts#format_date.`,
+    ]);
     const plan = rows(admin.db.plan.iter()).find((p) => p.agentId === id('agent-b') && p.active);
     expect(plan?.taskId).toBe(2n);
     // Delivered once: acked, so get_instructions doesn't repeat it.
