@@ -12,6 +12,22 @@ export type Msg = ChatMsg;
 
 export type Thread = { id: string; name: string; color: string; status: string; live: boolean };
 
+/** Messages addressed to the viewer: an @you mention or a routing card sent to them (COMMENT-6). */
+const MENTION = /(^|\s)@(you|me)\b/i;
+export function isMention(m: Msg): boolean {
+  if (m.from === 'you') return false;
+  if (m.routedBy?.to === 'you') return true;
+  return m.body.kind === 'text' && MENTION.test(m.body.text);
+}
+/** How many of a thread's `unread` newest counted messages mention the viewer. Status, routing and own lines never count. */
+export function mentionCount(msgs: readonly Msg[], thread: string, unread: number): number {
+  const loud = msgs.filter((m) => m.thread === thread && m.from !== 'you' && ['text', 'action', 'conflict', 'error'].includes(m.body.kind));
+  return loud.slice(Math.max(0, loud.length - unread)).filter(isMention).length;
+}
+
+/** Marks the thread read once it has been visible for 500 ms in a focused window; unmarks when it hides or the window blurs. */
+const READ_DELAY_MS = 500;
+
 export function ChatPanel(p: {
   threads: Thread[];
   active: string;
@@ -36,7 +52,26 @@ export function ChatPanel(p: {
   const thread = p.threads.find((t) => t.id === p.active) ?? p.threads[0];
   const msgs = useMemo(() => p.messages.filter((m) => m.thread === thread.id), [p.messages, thread.id]);
 
-  useEffect(() => { p.onActive(thread.id); return () => p.onActive(null); }, [thread.id]);
+  const [focused, setFocused] = useState(() => typeof document === 'undefined' || document.hasFocus());
+  useEffect(() => {
+    const f = () => setFocused(document.hasFocus() && document.visibilityState !== 'hidden');
+    window.addEventListener('focus', f); window.addEventListener('blur', f); document.addEventListener('visibilitychange', f);
+    return () => { window.removeEventListener('focus', f); window.removeEventListener('blur', f); document.removeEventListener('visibilitychange', f); };
+  }, []);
+  useEffect(() => {
+    if (!focused) { p.onActive(null); return; }
+    const t = setTimeout(() => p.onActive(thread.id), READ_DELAY_MS);
+    return () => { clearTimeout(t); p.onActive(null); };
+  }, [thread.id, focused]);
+
+  // total badge in the browser tab title: "(2) Playground"
+  const total = Object.values(p.unread).reduce((a, b) => a + b, 0);
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const base = document.title.replace(/^\(\d+\)\s/, '');
+    document.title = total > 0 ? `(${total}) ${base}` : base;
+    return () => { document.title = base; };
+  }, [total]);
 
   // stick to the bottom as messages arrive, unless the user scrolled up to read
   useEffect(() => {
@@ -69,12 +104,16 @@ export function ChatPanel(p: {
       <div className="pg-threads">
         {p.threads.map((t) => {
           const unread = p.unread[t.id] ?? 0;
+          const mentions = unread > 0 ? mentionCount(p.messages, t.id, unread) : 0;
           return (
             <button key={t.id} className={'pg-thread' + (t.id === thread.id ? ' on' : '') + (p.flash === t.id ? ' flash' : '') + (t.live ? '' : ' gone')}
               style={{ ['--c' as string]: t.color }} onClick={() => p.onPick(t.id)}>
               {t.id === 'general' ? <span className="hash">#</span> : <i />}
               {t.name}
-              {unread > 0 && t.id !== thread.id && <em>{unread}</em>}
+              {unread > 0 && (t.id !== thread.id || !focused) && (
+                <em className={mentions > 0 ? 'mention' : undefined} style={mentions > 0 ? { background: 'var(--pg-danger)' } : undefined}
+                  title={mentions > 0 ? `${unread} unread, ${mentions} for you` : `${unread} unread`}>{unread}</em>
+              )}
             </button>
           );
         })}
