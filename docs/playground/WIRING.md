@@ -129,6 +129,29 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - todo (WP-77): `core/commands.ts` `BoardKit.reapply(by, txId)` (gate check, `undoManager.reapply`, `afterUndo`), and
   `actions/edit.ts` skips "Nothing to undo" when `undoManager.last()?.outcome.skipped.length` (fields were superseded).
 - WP-65, WP-69, WP-75: no seam.
+- todo (WP-80): `styles/comments.css`: `.pg-pin.hot span{transform:scale(1.15)}`, `.pg-pin-card` (hover card),
+  `.pg-cl-filters button[aria-pressed=true]`, `.pg-cl-row.resolved{opacity:.5}`, `.pg-cl-row.hot` (tokens only).
+- todo (WP-82): `actions/help.ts`: `import { toggleHelp } from '../ui/HelpOverlay'; export const actions: Action[] = [{ id:
+  'help.shortcuts', title: 'Keyboard shortcuts', group: 'Help', keys: { all: ['Shift+Slash'] }, contexts: ['canvas',
+  'panel','dialog'], run: toggleHelp }];` (remove any private `?` listener).
+- todo (WP-81): `ui/shell/ContextMenu.tsx` `MENU_IDS.layer`: add `'layers.rename'` before `'layers.lock'`.
+- todo (WP-76): `ui/board/TextView.tsx`: `overflow:hidden` on fixed-size boxes, a red bracket when `isOverflowing(shape)`
+  and selected (from `render/measure`), and re-render on `onFontsLoaded`.
+- todo (WP-83): `agents/runtime.ts` (~line 114): replace `throw new Error('only the scripted driver exists yet')` with
+  `return createLlmDriver({ bridgeUrl: localStorage.getItem('pg.llmBridge') ?? '' })` (try/catch around storage).
+- todo (WP-83): `ui/presence/PresenceList` row chip `formatChip(usageStore.get(id))` from `agents/usage`.
+- todo (WP-84): TopBar "Present" button calls `startPresent()` from `actions/present`.
+- WP-67, WP-72, WP-78, WP-79: no seam.
+
+## Assignment for the Waves 2-3 wiring agents (file-disjoint)
+- W-board: WP-53, WP-60 (resize/text gestures), WP-73, WP-74, WP-54, WP-76, WP-81. Files: `ui/Cursors.tsx`,
+  `presence/cursors.ts`, `styles/cursors.css`, `ui/gestures/*`, `core/snap/move.ts`, `ui/layers/*`, `ui/board/*`,
+  `ui/shell/ContextMenu.tsx`.
+- W-core: WP-68, WP-77, WP-70, WP-82, WP-83 runtime, WP-60 agent host. Files: `ui/useBoot.ts`, `ui/kit.ts`,
+  `core/commands.ts`, `core/undo.ts`, `actions/edit.ts`, `actions/view.ts`, `actions/help.ts`, `ui/Minimap*`,
+  `agents/runtime.ts`, `agents/scripted.ts`.
+- W-chrome: WP-71, WP-84 button, WP-62/44 title, WP-60 inspector, WP-80 CSS, WP-83 chip. Files: `ui/shell/TopBar.tsx`,
+  `ui/inspector/*`, `styles/comments.css`, `ui/presence/*`, `ui/chat/*` (title/unread only), `actions/file.ts`.
 
 ## Owner requests
 - done: cursor tags show only the action, with the state dots after it; hovering an agent's arrow shows the name and
