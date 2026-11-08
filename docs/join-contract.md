@@ -16,7 +16,8 @@ cd ../my-checkout && claude
 `join` writes into `--dir` (default: the target repo, see "Your own repo" in the README):
 - `.mcp.json`: the `contract` MCP server (declare_plan, claim_symbol, report_change, get_instructions …)
 - `.claude/settings.local.json`: approves that server and adds the hooks: the **claim guard**
-  (blocks edits to code another agent has claimed, and every edit **while you're paused**),
+  (blocks edits to code another agent has claimed, every edit **while you're paused**, and, until
+  you've called `declare_plan` and `claim_symbol`, edits to mapped code; `CONTRACT_PROTOCOL=off` relaxes that),
   plus **change reporting** (diffs to the dashboard, signature changes for Rule 1)
 - `CLAUDE.local.md`: the Contract workflow rules
 
