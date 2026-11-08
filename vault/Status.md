@@ -22,8 +22,9 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
     agents, toasts above toolbar, copy-link fallback, playground class names scoped from dashboard CSS.
   - feat/dashboard-playground fast-forwarded to 17f0ad3 (= playground/wiring), 638 tests, build green. Not pushed.
   - Known: 60 fps unproven in the app's throttled pane; "Restart all" only when all agents are stopped.
-  - Next (owner to choose): remaining Wave 2/3, or the vault session's roadmap (vault/Scopes/board-roadmap.md:
-    freeze features, WP-NET-0, board on SpacetimeDB, Nemotron agents).
+  - Owner chose: finish Waves 2-3 (roadmap's networking work deferred). Features branch re-baselined at 3fecb40.
+  - Running: Wave 2 remainder WP-53, 54, 57, 59, 60, 62 (worktrees .worktrees/wp-NN). Then Wave 3 (20 WPs; 65/81 wait
+    on 54, 67 on 66, 76 on 60), then wiring ledger, browser pass, fast-forward.
     feat/dashboard-playground to playground/wiring. Then remaining Wave 2/3 and WP-NET-0.
 
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
