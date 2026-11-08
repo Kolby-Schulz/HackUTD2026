@@ -12,7 +12,7 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
 - MVP, two-laptop shared Maincloud DB, any-agent join, replay, benchmark, Nemotron coordinator (#43), coordinator duplicate reuse (#44). 25 PRs merged.
 
 ## In flight (local, not on GitHub)
-- Playground design board (`#/playground`, branch `feat/dashboard-playground`): board + agents committed (6ecef41), chat + comment tool uncommitted. Full plan in [[playground-plan]]: 411 features, 84 work packages. Wave 0 progress on `feat/dashboard-playground` (merge only in `.worktrees/integration`): WP-01 to WP-11 merged and reviewed (222 tests); engine.ts gone, page runs on the new core. Running: WP-12 shell carve-out. Store fix bcc1458 folds per-frame gesture sets. Queued after WP-12: Wave 1 packages, WP-NET-0. Note: another session works in the main checkout on `feat/variants` (it contains the WP-11 commits by accident; harmless).
+- Playground design board (`#/playground`, branch `feat/dashboard-playground`): board + agents committed (6ecef41), chat + comment tool uncommitted. Full plan in [[playground-plan]]: 411 features, 84 work packages. Wave 0 DONE on `feat/dashboard-playground` (merge only in `.worktrees/integration`; 238 tests). Wave 1 batch 1 running (WP-13, 14, 15, 18, 23, 34, 36, 39, 41, 42); batch 2 next (WP-17, 19, 20, 24, 25, 37, 38, 40, 43, 44), checked file-disjoint. Unverified so far: comment flow and narrow layout after WP-12 (needs a visible browser pane). Queued: WP-NET-0. Another session works in the main checkout on `feat/variants`.
 
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
 - #26: submission package (README, diagram, demo video, Devpost)
