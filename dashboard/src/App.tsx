@@ -14,6 +14,7 @@ import { DockArea, useDock, type ViewId } from './Dock.tsx';
 import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
 import { ChatView } from './Chat.tsx';
 import { ChangesView } from './Changes.tsx';
+import { CommandCenter } from './CommandCenter.tsx';
 import { Boundary } from './ui.tsx';
 import { ControlTab, useControlInfo } from './ControlTab.tsx';
 
@@ -65,16 +66,8 @@ export function App() {
           <button type="button" className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><LanesMark size={24} /></button>
           {APP_NAME}
         </div>
-        <div className="cmd">
-          <label>
-            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-            <span>{repoLabel ?? 'demo-repo'}</span>
-            <select aria-label="Run" value={runPick} onChange={(e) => { setRunPick(e.target.value); setPicked(undefined); }}>
-              <option value="latest">{run ? `latest · run ${run.id} · ${modeName(run.mode)}` : 'no runs yet'}</option>
-              {runs.map((r) => <option key={String(r.id)} value={String(r.id)}>run {String(r.id)} · {modeName(r.mode)} · seed {r.seed}{r.endedAt ? '' : ' · live'}</option>)}
-            </select>
-          </label>
-        </div>
+        <CommandCenter repoLabel={repoLabel} runs={runs} run={run} runPick={runPick} openRun={openRun} modeName={modeName}
+          onPickRun={(v) => { setRunPick(v); setPicked(undefined); }} />
         <div className="tb-right">
           <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" title="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
           <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" title="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>

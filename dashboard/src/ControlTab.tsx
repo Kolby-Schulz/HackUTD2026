@@ -27,7 +27,7 @@ interface Status {
   processes: Proc[];
 }
 
-async function post(path: string, body: unknown) {
+export async function post(path: string, body: unknown) {
   const res = await fetch(`${CONTROL_URL}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-contract-control': '1' },
@@ -61,7 +61,7 @@ export function useControlRepo(): string | undefined {
   return useControlInfo().repoLabel;
 }
 
-function useControl() {
+export function useControl() {
   const [status, setStatus] = useState<Status>();
   const [down, setDown] = useState(false);
   const [tick, setTick] = useState(0);
@@ -238,7 +238,7 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
  * Which repository the agents work on. Applies to every process this laptop starts. On the demo
  * the link field is always open, so using your own repo is one paste and Enter.
  */
-function RepoPicker({ status, openRun, locked, busy, onSet }: {
+export function RepoPicker({ status, openRun, locked, busy, onSet }: {
   status?: Status; openRun?: R.Run; locked: boolean; busy: boolean; onSet: (repo: string) => Promise<boolean>;
 }) {
   const [text, setText] = useState('');
