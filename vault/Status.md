@@ -17,9 +17,13 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
     `.worktrees/wiring`), `feat/dashboard-playground` (fast-forwards to wiring after checks + visual pass).
   - Wave 0 done; Wave 1 done (all 39 WPs; features e4da972, 612 tests). Wave 2 started early (WP-52, 55, 56, 58, 61, 63,
     64 merged) before the owner asked to finish phases in order; no more Wave 2 until wiring + visual pass are done.
-  - Wiring DONE on playground/wiring (2dfbb64, 631 tests, build green; WIRING.md has 0 todo, 1 dropped with reason).
-  - Visual pass pending: needs the browser pane visible (hidden pane = no rAF = cursors, overlays, bench don't run).
-  - Next: visual pass of the demo checklist on port 5174 (wp-review serves the wiring worktree), then fast-forward
+  - Wiring done; visual pass done 2026-11-08 (every MVP button clicked in the browser; findings fixed and rechecked):
+    activity-based locks + one focus outline per agent, humans-win independent of lock timing, Restart for stopped
+    agents, toasts above toolbar, copy-link fallback, playground class names scoped from dashboard CSS.
+  - feat/dashboard-playground fast-forwarded to 17f0ad3 (= playground/wiring), 638 tests, build green. Not pushed.
+  - Known: 60 fps unproven in the app's throttled pane; "Restart all" only when all agents are stopped.
+  - Next (owner to choose): remaining Wave 2/3, or the vault session's roadmap (vault/Scopes/board-roadmap.md:
+    freeze features, WP-NET-0, board on SpacetimeDB, Nemotron agents).
     feat/dashboard-playground to playground/wiring. Then remaining Wave 2/3 and WP-NET-0.
 
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
