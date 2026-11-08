@@ -19,6 +19,7 @@ import { connectBoard } from '../src/playground/net/session';
 import type { LocalActor } from '../src/playground/net/session';
 import { connectSpacetime } from '../src/playground/net/spacetime';
 import type { BoardMessageRow } from '../src/playground/net/types';
+import { frameTarget } from '../src/playground/net/designClaims';
 
 const BOARD = 'playground';
 const TEAM_SIZE = 10;
@@ -26,6 +27,9 @@ const TEAM_SIZE = 10;
 const DESIGN_MODEL = process.env.BOARD_DESIGN_MODEL || 'claude-sonnet-5-5';
 /** A designer's model call is stopped after this long, so one slow call never holds up the rest. */
 const DESIGN_TIMEOUT_MS = 180_000;
+/** A designer holds its frame with a design claim while it works, renewed well before it lapses. */
+const CLAIM_TTL_SECS = 60;
+const CLAIM_RENEW_MS = 20_000;
 const host = process.env.SPACETIME_HOST;
 const database = process.env.SPACETIME_DB_NAME;
 if (!host || !database) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (.env)');
@@ -174,16 +178,35 @@ function reserveRow(n: number): { x: number; y: number }[] {
   return Array.from({ length: n }, (_, i) => ({ x: x0 + i * 480, y }));
 }
 
-async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, index: string) {
+/** Recent designed frame sizes, for the placeholder's size (the median of the last few, a phone screen at first). */
+const recentSizes: { w: number; h: number }[] = [];
+function placeholderSize(): { w: number; h: number } {
+  if (!recentSizes.length) return { w: 390, h: 844 };
+  const mid = (xs: number[]) => xs.sort((p, q) => p - q)[Math.floor(xs.length / 2)];
+  return { w: mid(recentSizes.map((r) => r.w)), h: mid(recentSizes.map((r) => r.h)) };
+}
+
+/** The empty frame a designer shows at once, while its model call runs. Returns the frame id. */
+async function placeholder(a: LocalActor, title: string, at: { x: number; y: number }, index: string): Promise<ShapeId> {
   const frameId = newId('s');
-  const fw = clamp(d.frame.w, 200, 1600), fh = clamp(d.frame.h, 200, 1600);
-  status(a, 'drawing', `frame ${d.frame.name}`.slice(0, 40));
+  const { w, h } = placeholderSize();
   await glide(a, at.x, at.y, 200);
   put(a, 'Draw frame', [{ t: 'create', shape: {
-    id: frameId, kind: 'frame', name: d.frame.name, x: at.x, y: at.y, w: 1, h: 1, clip: true,
-    fills: [{ type: 'solid', color: d.frame.fill || '#ffffff' }], parent: null, index, createdBy: a.id, author: a.id,
+    id: frameId, kind: 'frame', name: title, x: at.x, y: at.y, w: 1, h: 1, clip: true,
+    fills: [{ type: 'solid', color: '#ffffff' }], parent: null, index, createdBy: a.id, author: a.id,
   } }]);
-  await grow(a, frameId, at.x, at.y, fw, fh, 6);
+  await grow(a, frameId, at.x, at.y, w, h, 6);
+  await glide(a, at.x + w / 2, at.y + h / 3, 200);
+  return frameId;
+}
+
+/** Fill the placeholder frame with the design: its real name, fill and size, then every layer. */
+async function draw(a: LocalActor, d: Design, frameId: ShapeId, at: { x: number; y: number }) {
+  const fw = clamp(d.frame.w, 200, 1600), fh = clamp(d.frame.h, 200, 1600);
+  recentSizes.push({ w: fw, h: fh });
+  if (recentSizes.length > 9) recentSizes.shift();
+  status(a, 'drawing', `frame ${d.frame.name}`.slice(0, 40));
+  put(a, 'Resize frame', [{ t: 'set', id: frameId, patch: { name: d.frame.name, w: fw, h: fh, fills: [{ type: 'solid', color: d.frame.fill || '#ffffff' }] } }]);
   const keys = keysBetween(d.elements.length);
   for (const [i, el] of d.elements.entries()) {
     const x = clamp(el.x, 0, fw - 1), y = clamp(el.y, 0, fh - 1);
@@ -264,19 +287,29 @@ async function handle(m: BoardMessageRow) {
   const ctx = context();
   await Promise.all(briefs.map(async (b, i) => {
     const a = TEAM[i];
-    status(a, 'thinking', `designing ${b.title}`.slice(0, 40));
-    await glide(a, spots[i].x + 180, spots[i].y + 200, 300);
+    // the frame shows up at once, held by a design claim (the board shows "<name> is designing…") until it is filled
+    status(a, 'drawing', `frame ${b.title}`.slice(0, 40));
+    const frameId = await placeholder(a, b.title, spots[i], indexes[i]);
+    const target = frameTarget(BOARD, frameId);
+    await net.claimDesign({ target, scope: BOARD, ttlSecs: CLAIM_TTL_SECS, actor: a.id, agentId: a.agentId })
+      .catch((e: unknown) => console.error(`[board-agent] ${a.name} claim`, e));
+    const renew = setInterval(() => { net.renewDesignClaim(target, CLAIM_TTL_SECS).catch(() => { /* the claim expires on its own */ }); }, CLAIM_RENEW_MS);
+    status(a, 'thinking', `designing ${b.title}…`.slice(0, 40));
     try {
       const t0 = Date.now();
       const output = await design(a, `${ctx}\n\nYour brief: ${b.title}. ${b.brief}`);
       console.log(`[board-agent] ${a.name} designed "${output.frame.name}" (${output.elements.length} layers) in ${Math.round((Date.now() - t0) / 1000)} s`);
       const t1 = Date.now();
-      await draw(a, output, spots[i], indexes[i]);
+      await draw(a, output, frameId, spots[i]);
       console.log(`[board-agent] ${a.name} drew it in ${Math.round((Date.now() - t1) / 1000)} s`);
       remember(a.name, `designed "${output.frame.name}"`);
     } catch (e) {
+      put(a, 'Remove frame', [{ t: 'remove', id: frameId }]);   // no empty frame left behind
       status(a, 'idle');
       await post(a, m, `I couldn't finish "${b.title}": ${e instanceof Error ? e.message : String(e)}`.slice(0, 300));
+    } finally {
+      clearInterval(renew);
+      await net.releaseDesignClaim(target).catch(() => { /* already expired */ });
     }
   }));
   await post(ORCH, m, `Done: ${briefs.map((b) => b.title).join(', ')}.`);

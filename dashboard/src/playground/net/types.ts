@@ -29,6 +29,9 @@ export interface MessageArgs {
   id: string; boardId: string; threadId: string; kind: 'chat' | 'comment'; author: ActorId;
   toActor?: ActorId; body: string; anchor?: string;
 }
+/** A lease on a board frame while an agent designs it (shared design_claim table). */
+export interface DesignClaimRow { target: string; kind: string; scope: string; holder: string; expiresAt: { microsSinceUnixEpoch: bigint } }
+export interface ClaimArgs { target: string; scope: string; ttlSecs: number; actor: ActorId; agentId?: string }
 export interface TokenArgs { agentId: string; promptTokens: number; completionTokens: number; costUsd: number }
 
 /** One op as push_ops takes it. `body` is the encoded envelope (see opcodec). */
@@ -63,6 +66,9 @@ export interface BoardTransport {
   releaseService(name: string, holder: string): Promise<void>;
   joinBoard(a: JoinArgs): Promise<void>;
   postMessage(a: MessageArgs): Promise<void>;
+  claimDesign(a: ClaimArgs): Promise<void>;
+  renewDesignClaim(target: string, ttlSecs: number): Promise<void>;
+  releaseDesignClaim(target: string): Promise<void>;
   /** Token usage for a board agent's model call (purpose `design`). */
   logTokens(a: TokenArgs): Promise<void>;
   leaveBoard(boardId: string, actor: ActorId): Promise<void>;
@@ -79,4 +85,6 @@ export interface BoardTransport {
   onPresence(cb: (c: RowChange<BoardPresenceRow>) => void): () => void;
   onCursor(cb: (e: BoardCursorEvent) => void): () => void;
   onMessages(cb: (c: RowChange<BoardMessageRow>) => void): () => void;
+  /** This board's design claims (keys of removed rows are targets). */
+  onClaims(cb: (c: RowChange<DesignClaimRow>) => void): () => void;
 }

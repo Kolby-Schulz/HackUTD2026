@@ -26,6 +26,7 @@ import { DEMO, HOST_AGENTS, LIVE, viewCenter } from './kit';
 import { connectBoard } from '../net/session';
 import { connectSpacetime } from '../net/spacetime';
 import { MAX_MESSAGE_CHARS } from '../net/types';
+import { designClaims } from '../net/designClaims';
 import type { BoardTransport } from '../net/types';
 import { SPACETIME_DB_NAME, SPACETIME_HOST } from '../../data';
 import type { ChatSink } from './kit';
@@ -112,6 +113,8 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
         sink.chat.post({ thread: 'general', from: m.author, name: a?.name ?? CLAUDE.name, color: a?.color ?? CLAUDE.color, body: { kind: 'text', text: m.body } });
       }
     }) : () => {};
+    // design claims on this board feed the "is designing…" overlay
+    const offClaims = net ? net.onClaims((c) => designClaims.apply(c)) : () => {};
     sink.remote = net ? (text, thread) => {
       const id = newId('m');
       seenMsgs.add(id);
@@ -135,7 +138,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       press: (id, down) => choreo(id).press(down),
     });
     return () => {
-      offMsgs(); sink.remote = null;
+      offMsgs(); offClaims(); designClaims.clear(); sink.remote = null;
       session?.dispose();
       persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
       sink.persistence = null; sink.ui.set({ persistence: null });
