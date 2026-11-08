@@ -24,7 +24,7 @@ export function BenchTable() {
       </div>
       {o.costSaving !== undefined && (
         <div style={{ fontSize: 15, margin: '6px 0 12px' }}>
-          Contract saved <b style={{ color: 'var(--ok)' }}>{pct(o.costSaving)}</b> of the cost ({pct(o.tokenSaving)} of tokens);
+          InSync saved <b style={{ color: 'var(--ok)' }}>{pct(o.costSaving)}</b> of the cost ({pct(o.tokenSaving)} of tokens);
           broken merges <b>{o.brokenWith}/{o.runsWith}</b> with vs <b>{o.brokenWithout}/{o.runsWithout}</b> without.
         </div>
       )}

@@ -1,7 +1,8 @@
 // Dashboard (spec section 13). Owner: dashboard + demo.
 // Tabs from the storyboard: Live (row G), Activity (G6), Tokens (F4), Scoreboard (F5).
 // The agents column stays on every tab. Everything comes from live subscriptions.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
 import { agentCards, cases, codeMap, coordinator, edits, feed, fmtClock, latestRun, modeSummary, people, runWindow, tokenStats } from './model.ts';
 import { AgentsPanel } from './AgentsPanel.tsx';
@@ -11,6 +12,7 @@ import { TokensTab } from './TokensTab.tsx';
 import { ScoreboardTab } from './ScoreboardTab.tsx';
 import { CodeTab } from './CodeTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
+import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
 
 type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard' | 'replay';
 const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard'], ['replay', 'Replay']];
@@ -32,6 +34,8 @@ function useHashTab(): Tab {
 export function App() {
   const live = useLive();
   const tab = useHashTab();
+  const [intro, setIntro] = useState(shouldPlayIntro);
+  const endIntro = useCallback(() => setIntro(false), []);
   const [runPick, setRunPick] = useState<string>('latest');
   const run = runPick === 'latest' ? latestRun(live.runs) : live.runs.find((r) => String(r.id) === runPick);
   const { now } = live;
@@ -60,8 +64,12 @@ export function App() {
 
   return (
     <div className={'app' + (tab === 'live' ? ' fit' : '')}>
+      <AnimatePresence>{intro && <Intro key="intro" onDone={endIntro} />}</AnimatePresence>
       <header className="topnav">
-        <div className="brand"><span className="logo" aria-hidden="true">C</span>Contract</div>
+        <div className="brand">
+          <button className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><LanesMark /></button>
+          {APP_NAME}
+        </div>
         <span className="vsep" />
         <label className="runsel">
           <span>demo-repo</span><span className="muted">·</span>

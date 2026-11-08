@@ -21,7 +21,7 @@ export function ScoreboardTab({ without, withC }: { without?: ModeSummary; withC
     { label: 'Total tokens', wo: tok(without, 'total'), wi: tok(withC, 'total'), win: lower(withC?.total, without?.total) },
     { label: 'Wasted tokens', wo: tok(without, 'wasted'), wi: tok(withC, 'wasted'), win: lower(withC?.wasted, without?.wasted) },
     { label: 'Merge-fix tokens', wo: tok(without, 'mergeFix'), wi: tok(withC, 'mergeFix'), win: lower(withC?.mergeFix, without?.mergeFix) },
-    { label: 'Coordinator tokens (Contract’s own)', wo: tok(without, 'coordination'), wi: tok(withC, 'coordination'), win: false },
+    { label: 'Coordinator tokens (InSync’s own)', wo: tok(without, 'coordination'), wi: tok(withC, 'coordination'), win: false },
     { label: 'Cost', wo: without ? fmtUsd(without.cost) : '—', wi: withC ? fmtUsd(withC.cost) : '—', win: lower(withC?.cost, without?.cost) },
     { label: 'Conflicts caught while coding', wo: one(without, 'conflictsCaught'), wi: one(withC, 'conflictsCaught'), win: false },
     { label: 'Agents that needed a merge fix', wo: one(without, 'mergeFixAgents'), wi: one(withC, 'mergeFixAgents'), win: lower(withC?.mergeFixAgents, without?.mergeFixAgents) },
@@ -41,7 +41,7 @@ export function ScoreboardTab({ without, withC }: { without?: ModeSummary; withC
           {pct !== undefined ? (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 56, fontWeight: 600, letterSpacing: '-0.02em', color: pct >= 0 ? 'var(--accent)' : 'var(--danger)', lineHeight: 1 }}>{Math.abs(pct)}%</span>
-              <span style={{ fontSize: 22, fontWeight: 600 }}>{pct >= 0 ? 'fewer' : 'more'} tokens with Contract</span>
+              <span style={{ fontSize: 22, fontWeight: 600 }}>{pct >= 0 ? 'fewer' : 'more'} tokens with InSync</span>
             </div>
           ) : (
             <div style={{ fontSize: 32, fontWeight: 600, lineHeight: 1.2 }}>{!without && !withC ? 'No runs yet' : !final ? 'Waiting for both modes to finish' : 'Not enough data'}</div>
@@ -58,11 +58,11 @@ export function ScoreboardTab({ without, withC }: { without?: ModeSummary; withC
         </div>
       </section>
 
-      <section className="card" style={{ padding: '20px 28px' }} aria-label="Without vs with Contract">
+      <section className="card" style={{ padding: '20px 28px' }} aria-label="Without vs with InSync">
         <div className="score-grid" style={{ fontSize: 13, fontWeight: 600, paddingTop: 0 }}>
           <span className="muted">Measured</span>
-          <span style={{ textAlign: 'right' }}>Without Contract<span className="muted" style={{ display: 'block', fontWeight: 400, fontSize: 12 }}>{sub(without)}</span></span>
-          <span style={{ textAlign: 'right', color: 'var(--accent)' }}>With Contract<span className="muted" style={{ display: 'block', fontWeight: 400, fontSize: 12 }}>{sub(withC)}</span></span>
+          <span style={{ textAlign: 'right' }}>Without InSync<span className="muted" style={{ display: 'block', fontWeight: 400, fontSize: 12 }}>{sub(without)}</span></span>
+          <span style={{ textAlign: 'right', color: 'var(--accent)' }}>With InSync<span className="muted" style={{ display: 'block', fontWeight: 400, fontSize: 12 }}>{sub(withC)}</span></span>
         </div>
         {bars.map((b) => {
           const max = Math.max(1, b.wo, b.wi);
@@ -91,7 +91,7 @@ export function ScoreboardTab({ without, withC }: { without?: ModeSummary; withC
       <section className="card notes3" aria-label="How to read this">
         <div><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>What counts</div><div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>Only finished, measured runs. Each mode should be run at least three times and averaged, because model output varies.</div></div>
         <div><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>What is estimated</div><div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>Per-feature savings on the Tokens tab are labeled estimates and never feed the headline number.</div></div>
-        <div><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Contract’s own cost</div><div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>Coordinator tokens are shown separately and are included in the with-Contract total.</div></div>
+        <div><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>InSync’s own cost</div><div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>Coordinator tokens are shown separately and are included in the with-InSync total.</div></div>
       </section>
     </>
   );
