@@ -13,7 +13,7 @@ import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
 import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
 import { ChatView } from './Chat.tsx';
 import { Boundary } from './ui.tsx';
-import { ControlTab, useControlRepo } from './ControlTab.tsx';
+import { ControlTab, useControlInfo } from './ControlTab.tsx';
 
 const modeName = (m: string) => (m === 'with_contract' ? `with ${APP_NAME}` : m === 'without_contract' ? `without ${APP_NAME}` : m);
 
@@ -29,7 +29,7 @@ export function App() {
   const [picked, setPicked] = useState<string>();
   const [panelTab, setPanelTab] = useState<'savings' | 'problems'>('savings');
   const [editorTab, setEditorTab] = useState<'map' | 'control'>('map');
-  const repoLabel = useControlRepo();
+  const { repoLabel, machine } = useControlInfo();
 
   const view = useMemo(() => ({
     agents: agentCards(live, run, now),
@@ -145,7 +145,7 @@ export function App() {
             <aside className="pane chat" style={{ width: size.chat }} aria-label="Chat">
               <PaneHead title="Chat" onClose={() => toggle('chat', false)}><span className="muted" style={{ fontSize: 12 }}>{run ? `run #${run.id}` : ''}</span></PaneHead>
               <Boundary name="Chat">
-                <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} runStart={w.start} />
+                <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
               </Boundary>
             </aside>
           </>

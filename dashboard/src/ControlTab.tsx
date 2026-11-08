@@ -37,22 +37,28 @@ async function post(path: string, body: unknown) {
   if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
 }
 
-/** This laptop's target repo label from the control server, or undefined if it isn't running. */
-export function useControlRepo(): string | undefined {
-  const [label, setLabel] = useState<string>();
+/** This laptop's control server facts: its target repo label and its machine name. Both are
+ *  undefined while the server isn't running (most viewers never run one). */
+export function useControlInfo(): { repoLabel?: string; machine?: string } {
+  const [info, setInfo] = useState<{ repoLabel?: string; machine?: string }>({});
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
-    // 10 s while it answers; 30 s while it's down (most viewers never run one)
+    // 10 s while it answers; 30 s while it's down
     const load = () =>
       fetch(`${CONTROL_URL}/status?tail=0`)
         .then((r) => r.json() as Promise<Status>)
-        .then((s) => { if (alive) { setLabel(s.repoLabel ?? 'demo-repo'); timer = setTimeout(load, 10_000); } })
-        .catch(() => { if (alive) { setLabel(undefined); timer = setTimeout(load, 30_000); } });
+        .then((s) => { if (alive) { setInfo((p) => (p.repoLabel === (s.repoLabel ?? 'demo-repo') && p.machine === s.machine ? p : { repoLabel: s.repoLabel ?? 'demo-repo', machine: s.machine })); timer = setTimeout(load, 10_000); } })
+        .catch(() => { if (alive) { setInfo((p) => (p.repoLabel || p.machine ? {} : p)); timer = setTimeout(load, 30_000); } });
     load();
     return () => { alive = false; clearTimeout(timer); };
   }, []);
-  return label;
+  return info;
+}
+
+/** This laptop's target repo label from the control server, or undefined if it isn't running. */
+export function useControlRepo(): string | undefined {
+  return useControlInfo().repoLabel;
 }
 
 function useControl() {

@@ -1,9 +1,10 @@
 // Chat: the run as one conversation (plans, changes, conflicts, rulings, instructions), oldest
 // first, plus a composer. With this laptop's control server running (npm run control), "@InSync"
 // talks to the assistant (scripts/assistant.ts), which starts the coordinator, a session and
-// workers from a plain request; its replies interleave with the run's events. "All agents", or a
-// working agent, is steered through send_instruction (issue #11); an idle agent in an open run
-// gets a new task through create_task.
+// workers from a plain request; its replies interleave with the run's events. A working agent is
+// steered through send_instruction (issue #11); an idle agent in an open run gets a new task through
+// create_task. "Every running agent" ('*') reaches teammates' agents too, so the picker groups agents
+// by laptop and names everyone a message will reach.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useReducer } from 'spacetimedb/react';
 import { reducers } from '@bindings/index.ts';
@@ -48,7 +49,7 @@ function AssistantMessage({ m, start }: { m: ChatMessage; start: number }) {
   );
 }
 
-export function ChatView({ events, agents, openRun, connected, runStart }: { events: FeedEvent[]; agents: AgentCard[]; openRun?: R.Run; connected: boolean; runStart: number }) {
+export function ChatView({ events, agents, openRun, connected, runStart, machine }: { events: FeedEvent[]; agents: AgentCard[]; openRun?: R.Run; connected: boolean; runStart: number; machine?: string }) {
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const assistant = useAssistant();
@@ -70,33 +71,47 @@ export function ChatView({ events, agents, openRun, connected, runStart }: { eve
         {ordered.map((x) => (x.t === 'e' ? <Message key={x.e.key} e={x.e} /> : <AssistantMessage key={'a' + x.m.id} m={x.m} start={runStart} />))}
         {assistant.busy && <div className="cmsg"><div className="bubble assistant typing" aria-label="InSync is thinking"><span /><span /><span /></div></div>}
       </div>
-      <Composer agents={agents.filter((a) => !a.offline)} openRun={openRun} connected={connected} assistant={assistant} empty={ordered.length === 0} />
+      <Composer agents={agents} openRun={openRun} connected={connected} assistant={assistant} empty={ordered.length === 0} machine={machine} />
     </>
   );
 }
 
-function Composer({ agents, openRun, connected, assistant, empty }: {
-  agents: AgentCard[]; openRun?: R.Run; connected: boolean; assistant: ReturnType<typeof useAssistant>; empty: boolean;
+function Composer({ agents, openRun, connected, assistant, empty, machine }: {
+  agents: AgentCard[]; openRun?: R.Run; connected: boolean; assistant: ReturnType<typeof useAssistant>; empty: boolean; machine?: string;
 }) {
   const send = useReducer(reducers.sendInstruction);
   const createTask = useReducer(reducers.createTask);
-  const [to, setTo] = useState(assistant.up ? 'insync' : 'all');
-  // the assistant becomes the default once this laptop's control server answers
-  const seen = useRef(false);
-  useEffect(() => { if (assistant.up && !seen.current) { seen.current = true; setTo('insync'); } }, [assistant.up]);
-  useEffect(() => { if (!assistant.up && to === 'insync') setTo('all'); }, [assistant.up, to]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; bad?: boolean }>();
+
+  // Who can be reached. '*' (send_instruction) reaches every working or paused agent in the shared
+  // database, which includes teammates' agents on other laptops, so it is never the default and
+  // the line under the picker names exactly who it reaches.
+  const online = agents.filter((a) => !a.offline);
+  const mine = (a: AgentCard) => !!machine && a.machine === machine;
+  const here = agents.filter(mine), elsewhere = agents.filter((a) => !mine(a));
+  const running = agents.filter((a) => a.status === 'Working' || a.status === 'Paused');
+  const fallback = assistant.up ? 'insync' : (online.find(mine) ?? online[0])?.id ?? '';
+  const [picked, setPicked] = useState<string>();
+  const valid = (k?: string) => !!k && (k === 'insync' ? assistant.up : k === 'all' ? running.length > 0 : online.some((a) => a.id === k));
+  const to = valid(picked) ? picked! : fallback;
+
   const toAssistant = to === 'insync';
-  const target = to === 'all' || toAssistant ? undefined : agents.find((a) => a.id === to);
-  useEffect(() => { if (to !== 'all' && to !== 'insync' && !target) setTo('all'); }, [to, target]);
+  const target = online.find((a) => a.id === to);
   const asTask = !!target && !!openRun && (target.status === 'Idle' || target.status === 'Done');
-  const what = toAssistant ? 'Tell InSync what to build' : to === 'all' ? 'Message every running agent' : asTask ? `New task for ${target!.person.name}` : `Message ${target?.person.name ?? 'agent'}`;
+  const where = (a: AgentCard) => [a.ownerDev, a.machine].filter(Boolean).join(' · ') || 'unknown laptop';
+  const laptops = new Set(running.map((a) => a.machine || a.ownerDev)).size;
+  const others = running.filter((a) => !mine(a)).length;
+  const what = toAssistant ? 'Tell InSync what to build' : to === 'all' ? `Message ${running.length} running agents` : asTask ? `New task for ${target!.person.name}` : target ? `Message ${target.person.name}` : 'No agent to message';
+  const reach = toAssistant ? 'The assistant on this laptop starts and coordinates agents for you.'
+    : to === 'all' ? `Reaches ${running.map((a) => `${a.person.name} (${where(a)})`).join(', ')}${machine && others ? ` · ${others} on other laptops` : laptops > 1 ? ` · ${laptops} laptops` : ''}.`
+    : target ? `${where(target)} · ${target.status}${asTask ? ' · becomes a new task' : ''}`
+    : 'No agent is online. Start one from the Control tab, or run a worker on a laptop.';
 
   async function submit() {
     const body = text.trim();
-    if (!body || busy || (toAssistant && assistant.busy)) return;
+    if (!body || busy || !to || (toAssistant && assistant.busy)) return;
     setBusy(true);
     setNote(undefined);
     try {
@@ -107,8 +122,8 @@ function Composer({ agents, openRun, connected, assistant, empty }: {
         await createTask({ title, description: body, agentId: target!.id, runId: openRun!.id });
         setNote({ text: `New task assigned to ${target!.person.name}.` });
       } else {
-        await send({ agentId: target?.id ?? '*', text: body });
-        setNote({ text: to === 'all' ? 'Sent to every running agent.' : `Sent to ${target!.person.name}.` });
+        await send({ agentId: to === 'all' ? '*' : target!.id, text: body });
+        setNote({ text: to === 'all' ? `Sent to ${running.length} running agents.` : `Sent to ${target!.person.name}.` });
       }
       setText('');
     } catch (err) {
@@ -118,31 +133,44 @@ function Composer({ agents, openRun, connected, assistant, empty }: {
     }
   }
 
+  const option = (a: AgentCard) => (
+    <option key={a.id} value={a.id} disabled={a.offline}>
+      {a.person.name} · {a.offline ? 'offline' : a.status}{mine(a) ? '' : ` · ${where(a)}`}
+    </option>
+  );
+
   return (
     <form className="composer" onSubmit={(e) => { e.preventDefault(); void submit(); }} aria-label="Prompt your agents">
       <div className="cbox">
         {toAssistant && empty && (
           <div className="chips">{EXAMPLES.map((e) => <button key={e} type="button" className="example" onClick={() => setText(e)}>{e}</button>)}</div>
         )}
-        <div className="targets" role="group" aria-label="Send to">
-          {assistant.up && <button type="button" className="target" aria-pressed={toAssistant} onClick={() => setTo('insync')} title="The assistant on this laptop (npm run control)">@ InSync</button>}
-          <button type="button" className="target" aria-pressed={to === 'all'} onClick={() => setTo('all')}>@ All agents</button>
-          {agents.map((a) => (
-            <button key={a.id} type="button" className="target" aria-pressed={to === a.id} onClick={() => setTo(a.id)}>
-              <span className="dot" style={{ background: to === a.id ? '#fff' : a.person.color }} />{a.person.name}
-            </button>
-          ))}
+        <div className="to-row">
+          <label htmlFor="chat-to" className="muted">To</label>
+          {target && <span className="dot" style={{ background: target.person.color }} />}
+          <select id="chat-to" className="to-select" value={to} onChange={(e) => { setPicked(e.target.value); setNote(undefined); }}>
+            {!to && <option value="">No one available</option>}
+            {assistant.up && <option value="insync">InSync assistant</option>}
+            {machine && here.length > 0 ? (
+              <>
+                <optgroup label={`On this laptop (${machine})`}>{here.map(option)}</optgroup>
+                {elsewhere.length > 0 && <optgroup label="On other laptops">{elsewhere.map(option)}</optgroup>}
+              </>
+            ) : agents.length > 0 && <optgroup label="Agents">{agents.map(option)}</optgroup>}
+            <option value="all" disabled={running.length === 0}>Every running agent ({running.length})</option>
+          </select>
         </div>
+        <div className={'reach' + (to === 'all' && (others > 0 || laptops > 1) ? ' wide' : '')}>{reach}</div>
         <label htmlFor="chat-prompt" className="sr-only">{what}</label>
-        <textarea id="chat-prompt" rows={3} maxLength={toAssistant ? 4000 : 2000} value={text} disabled={!connected && !toAssistant}
-          placeholder={connected || toAssistant ? `${what}…` : 'Offline: reconnect to send'}
+        <textarea id="chat-prompt" rows={3} maxLength={toAssistant ? 4000 : 2000} value={text} disabled={!to || (!connected && !toAssistant)}
+          placeholder={!to ? 'No one to send to yet' : connected || toAssistant ? `${what}…` : 'Offline: reconnect to send'}
           onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); } }} />
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(); } }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="grow" style={{ fontSize: 11.5, color: note?.bad ? 'var(--danger)' : 'var(--text2)' }}>
-            {note?.text ?? (toAssistant ? (assistant.busy ? 'InSync is working on it…' : 'InSync starts and coordinates the agents for you.') : asTask ? 'Becomes a new task. InSync checks its plan like any other.' : 'Enter to send · Shift+Enter for a new line')}
+            {note?.text ?? (toAssistant && assistant.busy ? 'InSync is working on it…' : 'Enter to send · Shift+Enter for a new line')}
           </span>
-          <button type="submit" className="send" aria-label="Send" disabled={(!connected && !toAssistant) || busy || (toAssistant && assistant.busy) || !text.trim()}>
+          <button type="submit" className="send" aria-label="Send" disabled={!to || (!connected && !toAssistant) || busy || (toAssistant && assistant.busy) || !text.trim()}>
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
         </div>
