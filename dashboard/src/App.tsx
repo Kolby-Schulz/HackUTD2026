@@ -104,8 +104,6 @@ export function App() {
             <ActivityButton label="Changes" on={dock.isOpen('changes')} onClick={() => flip('changes')} badge={view.edits.length} badgeTitle="edits this run">{ICON.changes}</ActivityButton>
             <ActivityButton label="Control" on={dock.isOpen('control')} onClick={() => flip('control')}>{ICON.control}</ActivityButton>
             <ActivityButton label="Chat" on={dock.isOpen('chat')} onClick={() => flip('chat')}>{ICON.chat}</ActivityButton>
-          </div>
-          <div className="ab-group">
             <ActivityButton label="Savings panel" on={open.panel} onClick={() => toggle('panel')} badge={openCount} badgeTitle="open conflicts" alert>{ICON.panel}</ActivityButton>
           </div>
         </nav>
