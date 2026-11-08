@@ -1,0 +1,72 @@
+/* ---------- toasts ---------- */
+.toast { width: 340px; display: grid; grid-template-columns: 26px 1fr; gap: 10px; padding: 11px 13px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--pop); position: relative; overflow: hidden; font-size: 12.5px; line-height: 1.4; animation: toastIn 0.35s cubic-bezier(.2,.9,.3,1.2); }
+.toastAlarm { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.toastGood { opacity: 0.92; }
+.toastIcon { width: 24px; height: 24px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; color: #fff; }
+.toastAlarm .toastIcon { background: var(--danger); box-shadow: 0 0 0 0 var(--danger-soft); animation: ring 1.6s ease-out infinite; }
+.toastGood .toastIcon { background: var(--ok); }
+.toastBody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.toastBody b { font-size: 13px; }
+.toastMeta { color: var(--warn); font-weight: 600; font-size: 12px; }
+.toastTimer { position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: var(--danger); transform-origin: left; animation: timer 6s linear infinite; }
+.dots::after { content: '…'; }
+@keyframes toastIn { from { transform: translateY(-8px) scale(0.97); opacity: 0; } }
+@keyframes timer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+@keyframes ring { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+
+/* ---------- agents ---------- */
+.runHead { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px 6px; font-size: 12px; }
+.card { margin: 6px 10px; padding: 10px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); display: flex; flex-direction: column; gap: 5px; border-left: 3px solid var(--agent, var(--border)); }
+.cardPaused { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 6%, var(--surface)); animation: pausedGlow 2.4s ease-in-out infinite; }
+@keyframes pausedGlow { 50% { box-shadow: 0 0 0 4px var(--warn-soft); } }
+.cardTop { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; }
+.cardTop b { flex: 1; min-width: 0; }
+.status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+.stWorking { color: var(--accent); background: var(--accent-soft); }
+.stPaused { color: var(--warn); background: var(--warn-soft); }
+.stDone { color: var(--done); background: var(--done-soft); }
+.stIdle { color: var(--text2); background: var(--soft); }
+.pulseDot { width: 6px; height: 6px; border-radius: 3px; background: currentColor; animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 50% { opacity: 0.25; } }
+.task { font-size: 12.5px; font-weight: 600; }
+.doing { font-size: 12px; color: var(--text2); }
+.banner { font-size: 12px; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 5px; padding: 4px 8px; }
+.meter { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; font-size: 11px; }
+.track { height: 5px; border-radius: 3px; background: var(--soft); overflow: hidden; display: block; }
+.track > span { display: block; height: 100%; border-radius: 3px; }
+.coord { --agent: #64748b; }
+.quiet { margin: 4px 12px 12px; border: none; background: none; color: var(--text2); font-size: 12px; padding: 0; text-align: left; }
+
+/* ---------- code map ---------- */
+.legend { display: inline-flex; align-items: center; gap: 4px; margin-left: 7px; font-size: 11px; }
+.swatch { width: 14px; height: 10px; border-radius: 3px; border-width: 2px; background: var(--surface); }
+.map :global(.node .nn) { font-size: 13.5px; }
+.map :global(.node .nf) { font-size: 11px; }
+.map :global(.node.conflict) { animation: conflictRing 1.6s ease-out infinite; }
+.map :global(.node.changed) { animation: changedRing 2s ease-out infinite; }
+@keyframes conflictRing { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 50%, transparent); } 100% { box-shadow: 0 0 0 14px transparent; } }
+@keyframes changedRing { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 45%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
+
+/* ---------- savings hero ---------- */
+.panel { height: 300px; display: flex; flex-direction: column; }
+.hero { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 16px; }
+.heroCard { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; text-align: left; color: inherit; transition: border-color 0.15s, box-shadow 0.15s; }
+.heroCard:hover { border-color: var(--accent); box-shadow: 0 4px 16px var(--lift); }
+.big { font-size: 52px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.bigRow { display: flex; align-items: baseline; gap: 10px; }
+.bump { font-size: 12px; font-weight: 700; color: var(--danger); background: var(--danger-soft); border-radius: 10px; padding: 2px 8px; animation: bump 0.6s cubic-bezier(.2,.9,.3,1.4); }
+@keyframes bump { from { transform: translateY(6px) scale(0.8); opacity: 0; } }
+.bars, .timing { display: flex; flex-direction: column; gap: 6px; }
+.barRow { display: grid; grid-template-columns: 52px 1fr 48px; align-items: center; gap: 8px; font-size: 11.5px; }
+.barRow > :last-child { text-align: right; }
+.chips { display: flex; gap: 6px; }
+.chipOk, .chipBad { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; border-radius: 10px; padding: 3px 10px; }
+.chipOk { color: var(--ok); background: var(--ok-soft); }
+.chipBad { color: var(--danger); background: var(--danger-soft); }
+.cta { margin-top: auto; font-size: 12px; font-weight: 600; color: var(--accent); }
+
+/* ---------- status bar + chat ---------- */
+.status2 { display: flex; align-items: center; gap: 14px; padding: 0 12px; background: var(--chrome); border-top: 1px solid var(--line); color: var(--text); font-size: 12px; white-space: nowrap; }
+.live { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--accent); }
+.liveDot { width: 7px; height: 7px; border-radius: 4px; background: var(--accent); animation: blink 1.6s ease-in-out infinite; }
+.noAgent { flex: none !important; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); font-size: 12.5px; }
