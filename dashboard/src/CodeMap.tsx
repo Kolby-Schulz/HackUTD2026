@@ -11,7 +11,7 @@ import '@xyflow/react/dist/style.css';
 import type { MapEdge, MapNode, NodeState } from './model.ts';
 import { H, inPlay, langOf, layoutMap, W, type MapItem } from './mapLayout.ts';
 
-const TAG: Record<string, [string, string]> = { conflict: ['Conflict', 'var(--danger)'], changed: ['Changed', 'var(--warn)'] };
+const TAG: Record<string, [string, string]> = { conflict: ['Conflict', 'var(--danger)'], removed: ['Removed', 'var(--danger)'], changed: ['Changed', 'var(--warn)'] };
 
 export interface CoordMark { symbolId: string; conflict: string; resolving: boolean }
 
@@ -19,12 +19,12 @@ type SymNode = Node<{ n: MapNode; selected: boolean; faded: boolean; dim: boolea
 
 function SymbolNode({ data }: NodeProps<SymNode>) {
   const { n, selected, faded, dim, spot, coord } = data;
-  const holder = !n.ghost && n.owner && n.state !== 'conflict' && n.state !== 'changed' ? n.owner.color : undefined;
-  const cls = ['node', n.ghost && 'ghost', selected && 'selected', n.state === 'conflict' && 'conflict', n.state === 'changed' && 'changed',
+  const holder = !n.ghost && n.owner && n.state !== 'conflict' && n.state !== 'changed' && n.state !== 'removed' ? n.owner.color : undefined;
+  const cls = ['node', n.ghost && 'ghost', selected && 'selected', n.state === 'conflict' && 'conflict', n.state === 'changed' && 'changed', n.removed && 'removed',
     (n.fading || faded) && 'fading', dim && 'dim', spot && 'spot'].filter(Boolean).join(' ');
   const lang = langOf(n.file);
   return (
-    <div className={cls} style={holder ? { borderColor: holder, boxShadow: `0 0 0 4px color-mix(in srgb, ${holder} 14%, transparent)` } : undefined} title={faded ? `${n.id} (calls a function an agent is working on)` : n.id}>
+    <div className={cls} style={holder ? { borderColor: holder, boxShadow: `0 0 0 4px color-mix(in srgb, ${holder} 14%, transparent)` } : undefined} title={n.removed ? `${n.id} (removed)` : faded ? `${n.id} (calls a function an agent is working on)` : n.id}>
       <Handle type="target" position={Position.Left} style={{ opacity: 0, pointerEvents: 'none' }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0, pointerEvents: 'none' }} />
       {TAG[n.state] && <span className="ntag" style={{ background: TAG[n.state][1] }}>{TAG[n.state][0]}{coord?.symbolId === n.id ? ` #${coord.conflict}` : ''}</span>}
@@ -241,7 +241,7 @@ const FIT = { padding: 0.14, maxZoom: 1.1 };
 /** Below this zoom node text gets hard to read, so the camera never frames the map smaller. */
 const READABLE = 0.8;
 const GLIDE_MS = 400;
-const RANK: Record<NodeState, number> = { conflict: 0, changed: 1, claimed: 2, planned: 3, idle: 4 };
+const RANK: Record<NodeState, number> = { conflict: 0, removed: 1, changed: 1, claimed: 2, planned: 3, idle: 4 };
 
 interface Box { x: number; y: number; width: number; height: number }
 
