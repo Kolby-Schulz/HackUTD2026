@@ -1,7 +1,7 @@
 // Unit tests for the table -> panel derivations, using the demo story from spec section 3.
 import { describe, expect, it } from 'vitest';
 import type { Tables } from '../src/model.ts';
-import { agentCards, cases, codeMap, coordinator, feed, modeSummary, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
+import { agentCards, cases, codeMap, coordinator, edits, feed, modeSummary, runWindow, timeline, tokensOf, tokenStats } from '../src/model.ts';
 
 const T0 = 1_800_000_000_000;
 const ts = (sec: number) => ({ toMillis: () => BigInt(T0 + Math.round(sec * 1000)) });
@@ -170,7 +170,7 @@ describe('operator messages (issue #11)', () => {
       { id: 4n, agentId: 'agent-a', conflictId: undefined, text: 'Operator: use cents everywhere', acknowledged: true, createdAt: ts(20) },
       { id: 5n, agentId: 'agent-a', conflictId: undefined, text: 'Operator: skip the tests', acknowledged: false, createdAt: ts(25) },
       { id: 6n, agentId: 'agent-a', conflictId: undefined, text: 'src/x.ts#f may already do this; reuse it', acknowledged: false, createdAt: ts(26) },
-    ];
+    ] as unknown as Tables['instructions'];
     return t;
   };
   it('lists them on the agent card with read state, without rule hints', () => {
@@ -184,5 +184,28 @@ describe('operator messages (issue #11)', () => {
     expect(op).toMatchObject({ actor: { id: 'operator', name: 'Operator' }, verb: 'messaged Agent A · delivered', sub: 'skip the tests' });
     expect(ev.find((e) => e.key === 'push4')!.verb).toBe('messaged Agent A · read');
     expect(ev.find((e) => e.key === 'push6')!.actor.id).toBe('coordinator');
+  });
+});
+
+describe('live code (issue #24)', () => {
+  const withEdits = () => {
+    const t = story();
+    t.fileEdits = [
+      { id: 1n, agentId: 'agent-a', file: 'src/billing/fees.ts', diff: '--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n-  floor\n+  round\n+  // half-up', symbolIds: [FEES], createdAt: ts(27) },
+      { id: 2n, agentId: 'agent-b', file: 'src/checkout/checkout.ts', diff: '+x', symbolIds: [TOTAL], createdAt: ts(29) },
+      { id: 3n, agentId: 'agent-a', file: 'src/old.ts', diff: '+x', symbolIds: [], createdAt: ts(-300) }, // earlier run
+    ] as unknown as Tables['fileEdits'];
+    return t;
+  };
+  it('lists edits in the run, newest first, filtered by symbol', () => {
+    const t = withEdits();
+    const w = runWindow(t.runs[1], NOW);
+    expect(edits(t, w).map((e) => e.id)).toEqual(['2', '1']);
+    expect(edits(t, w, FEES)).toMatchObject([{ id: '1', stat: '+2 −1', symbols: ['calculateFee'], agent: { id: 'agent-a' } }]);
+  });
+  it('puts edit rows in the feed', () => {
+    const t = withEdits();
+    const ev = feed(t, runWindow(t.runs[1], NOW)).find((e) => e.key === 'edit1')!;
+    expect(ev).toMatchObject({ kind: 'edit', verb: 'edited fees.ts (calculateFee)', sub: '+2 −1' });
   });
 });

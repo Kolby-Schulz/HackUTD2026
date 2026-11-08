@@ -561,3 +561,45 @@ export function mapFile(path: string, opts: { repoDir?: string; edges?: boolean 
   const sf = project.addSourceFileAtPath(abs);
   return { file, symbols: collectDecls(sf, file).map((d) => d.symbol), edges: [] };
 }
+
+/** A mapped symbol's line span (1-based, inclusive). Classes exclude nothing; see symbolsTouched. */
+export interface SymbolRange {
+  id: string;
+  kind: SymbolKind;
+  startLine: number;
+  endLine: number;
+}
+
+/**
+ * Line spans of every mapped symbol in `text` (the contents of repo file `file`), parsed in
+ * memory so callers can ask about unsaved content too (the claim guard checks an edit before
+ * it lands). Spans include leading JSDoc.
+ */
+export function symbolRanges(file: string, text: string): SymbolRange[] {
+  if (!isMappable(file)) return [];
+  const project = new Project({ useInMemoryFileSystem: true, skipLoadingLibFiles: true, compilerOptions: { noEmit: true } });
+  const sf = project.createSourceFile('/' + file, text);
+  return collectDecls(sf, file).map((d) => {
+    const nodes = [...d.declNodes, ...d.bodies];
+    return {
+      id: d.symbol.id,
+      kind: d.symbol.kind,
+      startLine: Math.min(...nodes.map((n) => n.getStartLineNumber(true))),
+      endLine: Math.max(...nodes.map((n) => n.getEndLineNumber())),
+    };
+  });
+}
+
+/**
+ * Ids of the symbols whose spans contain any of `lines` (1-based). A line inside a method
+ * counts for the method only, not its class.
+ */
+export function symbolsTouched(ranges: SymbolRange[], lines: Iterable<number>): string[] {
+  const hit = new Set<string>();
+  for (const line of lines) {
+    const inside = ranges.filter((r) => line >= r.startLine && line <= r.endLine);
+    const specific = inside.filter((r) => r.kind !== 'class');
+    for (const r of specific.length ? specific : inside) hit.add(r.id);
+  }
+  return ranges.filter((r) => hit.has(r.id)).map((r) => r.id);
+}

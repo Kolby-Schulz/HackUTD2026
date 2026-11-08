@@ -175,3 +175,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .msgbox .msg-state { font-size: 11px; color: var(--text2); border: 1px solid var(--border); border-radius: 999px; padding: 0 6px; }
 .msgbox .msg-state.read { color: var(--ok); border-color: var(--ok); }
 .msgbox .msg-error { color: var(--danger); }
+
+/* Live code (issue #24) */
+.code-grid { display: grid; gap: 16px; align-items: start; }
+.code-col { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.edit-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; min-width: 0; }
+.edit-head { display: flex; align-items: center; gap: 8px; font-size: 12px; min-width: 0; }
+.diff { margin: 4px 0 0; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11.5px; line-height: 1.45; overflow-x: auto; background: var(--bg); border-radius: 6px; padding: 6px 0; }
+.diff > div { padding: 0 8px; white-space: pre; }
+.diff .add { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--text); }
+.diff .del { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--text); }
+.diff .hunk { color: var(--text2); }

@@ -10,6 +10,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CONTRACT_REPO/node_modules/.bin/tsx\" \"$CONTRACT_REPO/agents/worker/src/claim-guard.ts\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "PostToolUse": [
