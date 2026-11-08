@@ -5,7 +5,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 
 ## Decisions needed first (whole team, before milestone 1 closes)
 
-- [ ] **Identity across processes.** Each worker is 3 processes (worker script, Contract MCP server, `contract-hook`) acting as one agent. `register_agent` rejects an id "already linked to another identity". Proposal: the worker passes its SpacetimeDB token to the other two via `CONTRACT_TOKEN` (already wired in `agents/worker`). Confirm BE checks identity by token, not by connection.
+- [ ] **Identity across processes.** Each worker is 3 processes (worker script, Contract MCP server, `contract-hook`) acting as one agent. `register_agent` rejects an id "already linked to another identity". Proposal: the worker passes its SpacetimeDB token to the other two via `CONTRACT_TOKEN` (already wired in `agents/worker`). Confirm BE checks identity by token, not by connection. **BE: confirmed** — reducers check `ctx.sender`, which is the token's identity; a live test reuses the worker token from a second connection.
 - [ ] **`contract-hook` vs `report_change` rejection.** Section 7 says `report_change` rejects "`modify` on a symbol the agent hasn't claimed", but `kind` has no `modify` value. If it means "rejects unclaimed symbols", the hook's auto-detected signature changes are silently dropped exactly when the agent forgot to claim, which is the case the hook exists for. Proposal: accept unclaimed reports (they still run Rule 1), or open a `claim_contention` conflict instead of rejecting.
 - [ ] **Hook must not overwrite the shared code map.** Section 11 says the hook "re-maps that file". From a worktree that must only compare `signature_hash` against the shared `symbol` row, never call `upsert_symbols`, or the code map flips between agents' versions.
 - [ ] **Hook config location.** Spec puts it in each worktree's `.claude/settings.json`, which gets committed to the agent's branch and merged. Framework passes it with `--settings agents/worker/hook-settings.json` instead (nothing to commit). Confirm.
@@ -20,14 +20,14 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] `packages/client`: `ContractClient` API frozen as TypeScript types (section 10) + `noopClient` for `without_contract`
 - [x] Workspaces for `packages/mcp` and `agents/triage` (stubs)
 - [ ] **Everyone:** install the SpacetimeDB CLI; `claude` logged in on each laptop (`claude -p "hi"` works)
-- [ ] **BE:** `spacetime init` the module in `server/`; all section 6 tables (+ indexes) as real `table(...)`/`t.*`
-- [ ] **BE:** publish locally; generate bindings into `packages/client/src/bindings`; commit them
+- [x] **BE:** `spacetime init` the module in `server/`; all section 6 tables (+ indexes) as real `table(...)`/`t.*`
+- [x] **BE:** publish locally; generate bindings into `packages/client/src/bindings`; commit them (`npm run generate -w @contract/server`; client columns are camelCase, e.g. `symbolId`)
 - [ ] **AG:** swap the hand-written row types in `packages/client` for the generated ones
 
 ## Milestone 2: Skeletons talk
 
-- [ ] **BE:** reducers `register_agent` (stores identity), `heartbeat`, `start_run`/`end_run`, `create_task`/`set_task_status`, `publish_plan`, `claim_symbol`, `release_claim`, `log_tokens`
-- [ ] **BE:** scheduled `expire_claims` every 30 s (check schedule-table vs `onSchedule` syntax)
+- [x] **BE:** reducers `register_agent` (stores identity), `heartbeat`, `start_run`/`end_run`, `create_task`/`set_task_status`, `publish_plan`, `claim_symbol`, `release_claim`, `log_tokens`
+- [x] **BE:** scheduled `expire_claims` every 30 s (`onSchedule` schedule table; verified on a live server)
 - [ ] **AG:** `connect()`: register, 15 s heartbeat, subscribe to own `instruction`/`agent`/`conflict`/`decision` rows; implement every `ContractClient` method
 - [ ] **AG:** `packages/mcp`: MCP server exposing `declare_plan`, `claim_symbol`, `release_claim`, `report_change`, `get_context`, `find_existing`, `get_instructions`; connects with `CONTRACT_AGENT_ID` + `CONTRACT_TOKEN`
 - [x] **AG:** worker script skeleton: worktree + branch, mode switch, MCP config, rules prompt, hook settings, token logging, pause → abort → wait for instruction → resume loop, commit
@@ -40,8 +40,8 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 
 ## Milestone 3: Rule 1 end to end
 
-- [ ] **BE:** `report_change` with Rule 1 (depend items + `symbol_edge` callers), pause affected agents, insert instructions; dedupe open conflicts
-- [ ] **BE:** `resolve_conflict` / `dismiss_conflict` (coordinator only), `acknowledge_instruction`
+- [x] **BE:** `report_change` with Rule 1 (depend items + `symbol_edge` callers), pause affected agents, insert instructions; dedupe open conflicts
+- [x] **BE:** `resolve_conflict` / `dismiss_conflict` (coordinator only), `acknowledge_instruction`
 - [x] **CM:** coordinator decision logic: section 12 prompt, JSON schema, validation, retry once, claimed-first fallback (`agents/coordinator/src/decide.ts`). `npm run coordinator -- --demo` verified: owner agent-a, B told not to round again.
 - [ ] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens
 - [ ] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0
@@ -55,7 +55,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 
 ## Milestone 5: Without/with runs
 
-- [ ] **BE:** `mark_attempt_wasted`, `log_saving`, `cache_summary`/`record_cache_hit`
+- [x] **BE:** `mark_attempt_wasted`, `log_saving`, `cache_summary`/`record_cache_hit`
 - [ ] **DD:** `scripts/run-demo.ts --mode … --seed 7`: run both workers, merge branches, run tests + check-dupes, `merge_fix` pass
 - [ ] **DD:** `scripts/reset.ts`: restore demo-repo, remove `.worktrees/`, clear run data
 - [ ] **DD:** Token meter, Savings ticker, Scoreboard panels
