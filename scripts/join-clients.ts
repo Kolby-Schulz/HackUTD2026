@@ -38,10 +38,13 @@ export function upsertBlock(current: string | undefined, body: string): string {
   return current.replace(/\n*$/, '\n\n') + block;
 }
 
+/** Editors start this with no shell, so it's node + tsx's entry: node_modules/.bin/tsx is tsx.cmd on
+ *  Windows, which can't be started that way. The absolute node path also works for editors opened
+ *  from the dock, which may not have node on PATH. */
 export function mcpServer(info: JoinInfo) {
   return {
-    command: join(info.monorepo, 'node_modules/.bin/tsx'),
-    args: [join(info.monorepo, 'packages/mcp/src/index.ts')],
+    command: process.execPath,
+    args: [join(info.monorepo, 'node_modules/tsx/dist/cli.mjs'), join(info.monorepo, 'packages/mcp/src/index.ts')],
     env: {
       CONTRACT_AGENT_ID: info.agentId,
       CONTRACT_TASK_ID: String(info.taskId),
