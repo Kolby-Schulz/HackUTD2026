@@ -100,6 +100,72 @@ export const Instruction = __t.object("Instruction", {
 });
 export type Instruction = __Infer<typeof Instruction>;
 
+export const Machine = __t.object("Machine", {
+  id: __t.string(),
+  identity: __t.identity(),
+  repo: __t.string(),
+  repoLabel: __t.string(),
+  infoJson: __t.string(),
+  needsSession: __t.bool(),
+  chatBusy: __t.bool(),
+  startedAt: __t.timestamp(),
+  heartbeatAt: __t.timestamp(),
+});
+export type Machine = __Infer<typeof Machine>;
+
+export const MachineAccess = __t.object("MachineAccess", {
+  id: __t.u64(),
+  machineId: __t.string(),
+  identity: __t.identity(),
+  label: __t.string(),
+  addedAt: __t.timestamp(),
+});
+export type MachineAccess = __Infer<typeof MachineAccess>;
+
+export const MachineChat = __t.object("MachineChat", {
+  id: __t.u64(),
+  machineId: __t.string(),
+  role: __t.string(),
+  text: __t.string(),
+  atMs: __t.f64(),
+});
+export type MachineChat = __Infer<typeof MachineChat>;
+
+export const MachineCommand = __t.object("MachineCommand", {
+  id: __t.u64(),
+  machineId: __t.string(),
+  sender: __t.identity(),
+  action: __t.string(),
+  argsJson: __t.string(),
+  status: __t.string(),
+  error: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type MachineCommand = __Infer<typeof MachineCommand>;
+
+export const MachinePairRequest = __t.object("MachinePairRequest", {
+  id: __t.u64(),
+  machineId: __t.string(),
+  identity: __t.identity(),
+  proof: __t.string(),
+  createdAt: __t.timestamp(),
+});
+export type MachinePairRequest = __Infer<typeof MachinePairRequest>;
+
+export const MachineProcess = __t.object("MachineProcess", {
+  key: __t.string(),
+  machineId: __t.string(),
+  procKey: __t.string(),
+  label: __t.string(),
+  long: __t.bool(),
+  status: __t.string(),
+  code: __t.option(__t.i32()),
+  startedAtMs: __t.f64(),
+  endedAtMs: __t.option(__t.f64()),
+  log: __t.string(),
+});
+export type MachineProcess = __Infer<typeof MachineProcess>;
+
 export const Plan = __t.object("Plan", {
   id: __t.u64(),
   agentId: __t.string(),

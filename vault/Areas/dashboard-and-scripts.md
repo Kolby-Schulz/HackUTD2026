@@ -2,7 +2,7 @@
 title: Dashboard and scripts
 area: dashboard
 sources: [dashboard/, scripts/]
-verified: 87debe9
+verified: feat/control-daemon
 ---
 Summary: The dashboard is a React 19 + Vite single page that reads 15 SpacetimeDB tables through live `useTable` subscriptions and only writes via reducers (create task, send instruction). `scripts/` holds the demo, reset, session, join, judge and bench entry points, all run with `tsx` from the root `package.json`. Unit tests exist for both but were not run here (no `node_modules` at the root).
 
@@ -22,7 +22,7 @@ Summary: The dashboard is a React 19 + Vite single page that reads 15 SpacetimeD
 All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `npx tsx scripts/<file>.ts`.
 
 - `seed.ts`: opens a run (ends any open run) and creates the two demo tasks. `npm run seed -- [--mode with_contract|without_contract] [--seed 7]`. `run-demo.ts` calls `seed()` directly.
-- `control.ts` (`npm run control`, 127.0.0.1:5199) + `assistant.ts`: local process server and chat behind the dashboard's Chat tab. Holds the target repo (`POST /repo`; owner/name, GitHub URL or path; saved in `.contract/control.json`), passes it to every child as `CONTRACT_TARGET`, clones/pulls it, and reports languages, installs, checks and missing tools (`missingTools`). `GET /` redirects to the dashboard.
+- `control.ts` + `daemon.ts` + `assistant.ts` (`npm run control [-- --machine id] [--pair <identity hex>]`): the laptop daemon behind the Control tab and chat. No HTTP: it connects out to SpacetimeDB as a `machine` row (id = hostname, token saved under `machine:<id>` in `.contract/identities.json`), runs `machine_command` rows from paired dashboards through `Registry` + `toCommand`, and mirrors processes/logs (`machine_process`) and chat (`machine_chat`) back every 1 s. Commands older than 60 s are failed, not run. Holds the target repo (`repo` command; saved in `.contract/control.json`), passes it to every child as `CONTRACT_TARGET`. Pairing: the daemon prints `<CONTRACT_DASHBOARD_URL>/#/pair?machine=…&code=…` (one-time code, 10 min, 20 wrong tries; Enter prints a new one); the browser sends `sha256("<CODE>:<identity hex>")` via `request_machine_pairing` (plain-JS hash in `dashboard/src/sha256.ts`, because `crypto.subtle` is missing on http LAN pages) and the daemon answers with `resolve_machine_pairing`. Dashboard side: `dashboard/src/machine.tsx` (`MachineProvider`/`useMachine`); `send()` waits for the daemon to mark the command done/failed, so the dashboard must subscribe to `machine_command`.
 - `reset.ts`: removes the run's worktrees (`.worktrees/<id>`, or `.worktrees/<repoKey>/<id>` for other repos) and `agent/*`, `demo/*` branches, restores the target to HEAD, ends the run and clears server state. `npm run reset -- [--force] [--offline] [--repo <path|url>]`. Keeps `.contract/`.
 - `run-demo.ts`: one measured run (seed, both workers, merge, checks, merge-fix, end). `npm run demo -- --mode without_contract|with_contract [--seed 7] [--runs 1] [--timeout-min 20] [--no-fix] [--scenario planted]` (`:31-35`).
 - `session.ts`: the two-laptop live flow. `npm run session -- start [--no-map] [--tasks f.json]`, then `npm run session -- merge [--agents a,b] [--integration] [--no-fix] [--fixer id] [--push]` (dispatch at `:49-50`).
