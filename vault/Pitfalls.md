@@ -18,3 +18,4 @@ Summary: Traps found while surveying the repo, and the rule each implies. Area n
 - **Bench defaults to `--runs 1`**; spec §15 wants 3+ for reported numbers. [[dashboard-and-scripts]]
 - **Generated bindings** in packages/client can drift from `server/src`; regenerate with `npm run generate -w @contract/server` after any schema change. [[agents-and-packages]]
 - **Flaky live tests** have bitten before (MCP Rule 1, PR #42). Re-run once before debugging. [[history]]
+- **Running Contract on itself** (`--repo .`): agents must stay out of `server/`. A schema change needs `npm run generate -w @contract/server` plus a publish, and publishing to the database the running coordinator uses breaks the run. Use a separate `SPACETIME_DB_NAME` for self-runs; `npm run reset -- --repo .` would `git clean` the monorepo. [[coordinator-and-mapper]]

@@ -11,7 +11,8 @@
 //   this monorepo). Workers get a git worktree of that repo and work in the same folder.
 // - A git URL is cloned once into .contract/repos/<name> and fetched on later runs.
 // - Optional <target>/contract.json: { "checks": { "unit tests": "npm test", ... },
-//   "base": "origin/main", "install": "make deps" | false }. Checks are the commands the
+//   "base": "origin/main", "install": "make deps" | false,
+//   "map": { "include": ["scripts"], "exclude": ["demo-repo"] } }. Checks are the commands the
 //   merge runs and the commands workers may run without asking. CONTRACT_TEST_CMD overrides
 //   a single test command. Without contract.json, checks and the dependency install are
 //   detected from the repo's files (package.json, pyproject.toml, go.mod, Cargo.toml, ...).
@@ -118,6 +119,8 @@ interface TargetConfig {
   base?: string;
   /** Shell command that installs dependencies, or false for none (default: detected). */
   install?: string | false;
+  /** Code-map folders: read by the mapper (mapper/src/map.ts MapPolicy), not here. */
+  map?: { include?: string[]; exclude?: string[] };
 }
 
 function readConfig(dir: string): TargetConfig {

@@ -149,7 +149,8 @@ export function hookAgent(): { agentId: string; token: string; host: string; dbN
 export async function reportFile(o: { agentId: string; token: string; host: string; dbName: string; repoDir: string; rel: string; sessionKey: string; log?: (m: string) => void }) {
   const { agentId, repoDir, rel } = o;
   const say = o.log ?? ((m: string) => console.error(`contract-hook: ${m}`));
-  const { mapFileAsync, symbolRangesAsync, symbolsTouched } = await import('@contract/mapper');
+  const { mapFileAsync, symbolRangesAsync, symbolsTouched, useMapPolicy } = await import('@contract/mapper');
+  useMapPolicy(repoDir); // the target's contract.json "map" (e.g. a repo whose code lives in scripts/)
   const { symbols } = await mapFileAsync(resolve(repoDir, rel), { repoDir, edges: false });
   const diff = fileDiff(repoDir, rel);
   let touched: string[] = [];

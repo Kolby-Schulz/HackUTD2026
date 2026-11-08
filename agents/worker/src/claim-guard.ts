@@ -133,7 +133,8 @@ async function main(): Promise<number> {
 
   let touched: string[] = [];
   if (existsSync(resolve(repoDir, rel))) { // new files have no claims
-    const { symbolRangesAsync, symbolsTouched } = await import('@contract/mapper');
+    const { symbolRangesAsync, symbolsTouched, useMapPolicy } = await import('@contract/mapper');
+    useMapPolicy(repoDir); // the target's contract.json "map"
     const current = readFileSync(resolve(repoDir, rel), 'utf8');
     const ranges: SymbolRange[] = await symbolRangesAsync(rel, current);
     touched = symbolsTouched(ranges, pendingLines(input, current));

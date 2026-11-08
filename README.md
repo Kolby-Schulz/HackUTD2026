@@ -155,6 +155,12 @@ npm run reset -- --repo ../my-app
   `.worktrees/<name>-<hash>/<id>`, so switching repos never reuses a folder.
 - **Push access.** The repo needs an `origin` you can push to for the two-laptop flow
   (workers push `agent/<id>` there); a local-only repo works on one laptop.
+- **Code map folders.** Tests and tooling folders (`test/`, `tests/`, `__tests__/`, `scripts/`)
+  are left out of the code map. If your app's code lives in one, or a folder should never be
+  mapped, say so in `contract.json`: `"map": { "include": ["scripts"], "exclude": ["demo-repo"] }`.
+  This monorepo's own `contract.json` does exactly that, so Contract can run on itself
+  (`--repo .`); keep agents out of `server/` there, since a schema change needs
+  `npm run generate -w @contract/server` and a publish, which no agent should do.
 - **Languages.** The code map reads TypeScript and JavaScript (ES modules), plus Python, Go,
   Java, Rust, Ruby, PHP, C# and C/C++ through tree-sitter. For those, call edges are matched by
   name, so they're approximate.
