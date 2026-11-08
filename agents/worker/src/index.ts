@@ -12,6 +12,10 @@
 // Any repo (issue #18): --repo <path|git URL> or CONTRACT_TARGET picks the target repository
 //   (default: the monorepo's demo-repo/). See packages/client/src/target.ts.
 //
+// Guard rails (issue #29, judge-typed tasks): --max-minutes <n> and --max-output-tokens <n>
+//   stop the run and discard the task when exceeded; --allow-paths src/,tests/ makes the
+//   PreToolUse guard refuse edits anywhere else. scripts/judge.ts sets all three.
+//
 // Runs one Claude Code session headless in its own git worktree. In with_contract
 // mode it joins Contract (MCP server + rules + edit hook), stops on pause and resumes
 // with the coordinator's decision. In without_contract mode every coordination call
@@ -47,6 +51,9 @@ const { values } = parseArgs({
     base: { type: 'string' },
     'no-push': { type: 'boolean', default: false },
     repo: { type: 'string' },
+    'max-minutes': { type: 'string' },
+    'max-output-tokens': { type: 'string' },
+    'allow-paths': { type: 'string' },
     mode: { type: 'string', default: 'with_contract' },
     owner: { type: 'string', default: process.env.USER ?? 'dev' },
     machine: { type: 'string', default: process.env.CONTRACT_MACHINE || process.env.HOSTNAME || hostname().replace(/\.local$/, '') },
@@ -138,6 +145,7 @@ const logTokens: ContractClient['logTokens'] =
 
 // 3. Claude Code wiring for with_contract mode: MCP server, rules, edit hook.
 const env: Record<string, string> = {
+  ...(values['allow-paths'] ? { CONTRACT_ALLOWED_PATHS: values['allow-paths'] } : {}),
   CONTRACT_AGENT_ID: agentId,
   CONTRACT_TOKEN: contract.token,
   CONTRACT_TASK_ID: String(taskId),
@@ -176,6 +184,30 @@ contract.onStatusChange((status) => {
   if (status === 'paused') controller.abort();
 });
 
+// 4a. Guard rails: a wall-clock limit and an output-token budget across the whole task.
+const maxMs = values['max-minutes'] ? Number(values['max-minutes']) * 60_000 : undefined;
+const maxOut = values['max-output-tokens'] ? Number(values['max-output-tokens']) : undefined;
+let stopReason: string | undefined;
+let stopNow = () => {};
+const stopped = new Promise<void>((r) => (stopNow = r));
+const outByMessage = new Map<string, number>();
+const stopFor = (why: string) => {
+  if (stopReason) return;
+  stopReason = why;
+  console.warn(`[${agentId}] guard rail: ${why}; stopping`);
+  controller.abort();
+  stopNow(); // also ends a wait for the coordinator
+};
+if (maxMs) setTimeout(() => stopFor(`time limit of ${values['max-minutes']} min reached`), maxMs).unref();
+const onEvent = (ev: { type: string; [k: string]: unknown }) => {
+  if (!maxOut || ev.type !== 'assistant') return;
+  const msg = ev.message as { id?: string; usage?: { output_tokens?: number } } | undefined;
+  if (!msg?.id || !msg.usage) return;
+  outByMessage.set(msg.id, msg.usage.output_tokens ?? 0);
+  const total = [...outByMessage.values()].reduce((a, b) => a + b, 0);
+  if (total > maxOut) stopFor(`output-token budget of ${maxOut} exceeded (${total})`);
+};
+
 // 4b. Operator messages (issue #11, send_instruction from the dashboard): interrupt the
 // current turn and resume the same session with the message. Kept here, not read back from
 // pendingInstructions(), because the agent's own get_instructions MCP call may ack it first.
@@ -211,6 +243,7 @@ for (;;) {
         interruptForOperator();
       },
       onUsage,
+      onEvent,
       // After the spread, so contractOpts.allowedTools can't drop the test commands.
       allowedTools: [...checkTools(target), ...(contractOpts.allowedTools ?? [])],
     });
@@ -219,6 +252,7 @@ for (;;) {
   } catch (e) {
     running = false;
     if (!(e instanceof LLMAbortError)) throw e;
+    if (stopReason) break; // guard rail: give up on this task (handled below)
     sessionId = e.sessionId ?? sessionId;
     if (!sessionId) throw new Error(`[${agentId}] stopped before Claude Code reported a session id; cannot resume`);
     if (contract.status() !== 'paused' && operatorMsgs.length) {
@@ -238,7 +272,8 @@ for (;;) {
       .catch((err: unknown) => console.warn(`[${agentId}] logSaving failed: ${String(err)}`));
 
     // Wait for the coordinator: resolve/dismiss unpauses us after inserting its instruction.
-    await waitUntilUnpaused(contract);
+    await Promise.race([waitUntilUnpaused(contract), stopped]);
+    if (stopReason) break;
     const instrs = resumeInstructions(contract.pendingInstructions());
     for (const i of contract.pendingInstructions()) await contract.ack(i.id);
     operatorMsgs.length = 0; // delivered with the decision below (resumeInstructions keeps them)
@@ -250,6 +285,16 @@ for (;;) {
 }
 
 // 6. Commit to the agent's branch, release claims, mark the task done.
+if (stopReason) {
+  // Guard rail hit: drop the half-done work and mark the task discarded, not done.
+  execFileSync('git', ['checkout', '--', '.'], { cwd: worktree });
+  execFileSync('git', ['clean', '-fd'], { cwd: worktree });
+  for (const symbolId of contract.myClaims()) await contract.release(symbolId).catch(() => undefined);
+  await contract.setTaskStatus(taskId, 'discarded').catch((e: unknown) => console.warn(`[${agentId}] set_task_status: ${String(e)}`));
+  await contract.disconnect();
+  console.log(`[${agentId}] task ${taskId} discarded (${stopReason})`);
+  process.exit(3);
+}
 execFileSync('git', ['add', '-A'], { cwd: worktree });
 execFileSync('git', ['commit', '-m', `${agentId}: ${task.slice(0, 60)}`, '--allow-empty'], { cwd: worktree, stdio: 'inherit' });
 for (const symbolId of contract.myClaims()) {

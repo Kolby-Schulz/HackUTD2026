@@ -4,6 +4,7 @@ import type { AgentCard, CoordView } from './model.ts';
 import { fmtK } from './model.ts';
 import { NewTaskForm } from './NewTaskForm.tsx';
 import { MessageBox } from './MessageBox.tsx';
+import { JudgeBox, JUDGE_ID } from './JudgeBox.tsx';
 import { Avatar, Empty } from './ui.tsx';
 
 const GROUPS: [string, string][] = [['Paused', 'var(--warn)'], ['Working', 'var(--ok)'], ['Idle', 'var(--text2)'], ['Done', 'var(--done)']];
@@ -15,6 +16,7 @@ export function AgentsPanel({ agents, coord, openRun, tasks, onlineIds }: { agen
         <h2 style={{ fontSize: 16 }}>Agents</h2>
         <span className="muted" style={{ fontSize: 12 }}>{agents.length + 1} connected</span>
       </div>
+      <JudgeBox openRun={openRun} tasks={tasks} online={onlineIds.has(JUDGE_ID)} />
       {agents.length === 0 && <Empty>No worker agents yet. They appear here when a worker calls register_agent.</Empty>}
       {GROUPS.map(([label, color]) => {
         const items = agents.filter((a) => a.status === label);
@@ -32,7 +34,7 @@ export function AgentsPanel({ agents, coord, openRun, tasks, onlineIds }: { agen
           <MessageBox agentId="*" label="Tell every running agent…" />
         </section>
       )}
-      <NewTaskForm agents={agents.filter((a) => onlineIds.has(a.id))} openRun={openRun} tasks={tasks} />
+      <NewTaskForm agents={agents.filter((a) => onlineIds.has(a.id) && a.id !== JUDGE_ID)} openRun={openRun} tasks={tasks} />
       <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div className="cap muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="dot" style={{ width: 6, height: 6, background: coord.status === 'Working' ? 'var(--ok)' : 'var(--text2)' }} />Coordinator · {coord.status}

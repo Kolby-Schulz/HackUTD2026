@@ -21,6 +21,10 @@ Run this top to bottom before the demo, then twice more. Everything should take 
 - [ ] Try a message from the dashboard to the **other** laptop's agent (message box on its card). It shows **Read** once delivered.
 - [ ] When both are done: `npm run session -- merge` on either laptop (it fetches both `agent/<id>` branches from origin).
 
+## Judge task (optional, issue #29)
+- [ ] On one laptop: `npm run judge` (agent `agent-judge`; defaults: 6 min, 20k output tokens, edits only in `src/` and `tests/`).
+- [ ] A **"Your turn: give a third agent a task"** box appears on the dashboard. A judge types a task; Contract coordinates it with the running agents. A task over a limit is discarded and its changes dropped.
+
 ## If the network drops
 - Workers reconnect on their own (same identity, resubscribed). The dashboard shows **Laptop offline** on an agent card after 45 s without a heartbeat; it clears once the laptop is back.
 - Venue Wi-Fi down: phone hotspot on both laptops; Maincloud is the same database, nothing to change.
