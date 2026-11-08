@@ -499,6 +499,26 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   };
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
+
+  // One daemon per machine. A second `npm run control` on this laptop registers as the same
+  // machine with the same saved identity, and the server accepts it: both would then answer every
+  // pairing (the wrong one rejects the code) and run every command twice. register_machine
+  // stamps started_at, so when the row's started_at moves past ours, a newer daemon took over
+  // and this one stops.
+  let registeredAt = conn.db.machine.id.find(id)?.startedAt.microsSinceUnixEpoch;
+  let takenOver = false;
+  conn.db.machine.onUpdate((_ctx, _old, row) => {
+    if (row.id !== id || takenOver) return;
+    const at = row.startedAt.microsSinceUnixEpoch;
+    if (registeredAt === undefined || at <= registeredAt) {
+      registeredAt ??= at;
+      return;
+    }
+    takenOver = true;
+    console.error(`[control] another npm run control just registered as machine "${id}"; stopping this one so only one answers the dashboard. If you meant this one, stop the other and start this again.`);
+    setTimeout(() => process.exit(1), 2000).unref();
+    daemon.shutdown().catch(() => undefined).finally(() => process.exit(1));
+  });
 }
 
 /** The chat's real dependencies: one SpacetimeDB connection (opened on first use) and the model. */
