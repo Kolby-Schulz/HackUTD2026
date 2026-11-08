@@ -5,8 +5,6 @@ import type { DocStore, Op, Shape } from '../core/types';
 import { createPresenceBus } from '../presence/bus';
 import type { MemoryPresenceBus } from '../presence/bus';
 import { connectBoard, CURSOR_MS } from './session';
-import { electHost, RENEW_MS } from './host';
-import type { HostTimers } from './host';
 import type { BoardSession, LocalActor, NetError, Timers } from './session';
 import { MAX_OPS_PER_PUSH, MAX_OP_BODY_BYTES } from './types';
 import type {
@@ -77,6 +75,9 @@ class FakeClient implements BoardTransport {
     this.server.agents.set(a.id, this.hex);
   }
   async heartbeat() { this.live(); }
+  async postMessage() { this.live(); }
+  async logTokens() { this.live(); }
+  onMessages() { return () => {}; }
   async claimService(name: string, holder: string) {
     this.live();
     const row = this.server.services.get(name);
@@ -382,35 +383,8 @@ describe('presence', () => {
   });
 });
 
-describe('agent host', () => {
-  class Intervals implements HostTimers {
-    fns = new Map<number, () => void>(); n = 0;
-    setInterval(f: () => void) { const id = ++this.n; this.fns.set(id, f); return id; }
-    clearInterval(h: unknown) { this.fns.delete(h as number); }
-    tick() { [...this.fns.values()].forEach((f) => f()); }
-  }
-
-  it('exactly one tab becomes host, and another takes over once the host is gone', async () => {
-    const a = new FakeClient(server, 'aa'); const b = new FakeClient(server, 'bb');
-    a.connect(); b.connect();
-    const ta = new Intervals(); const tb = new Intervals();
-    const roles: Record<string, boolean> = {};
-    const ea = electHost(a, 'tab-a', (h) => { roles.a = h; }, ta);
-    await settle();
-    const eb = electHost(b, 'tab-b', (h) => { roles.b = h; }, tb);
-    await settle();
-    expect([ea.isHost(), eb.isHost()]).toEqual([true, false]);
-    a.disconnect();                     // the host tab drops without releasing
-    expect(ea.isHost()).toBe(false);
-    server.now += 10; tb.tick(); await settle();
-    expect(eb.isHost()).toBe(false);    // the lock is not stale yet
-    server.now += 25; tb.tick(); await settle();
-    expect(eb.isHost()).toBe(true);
-    expect(RENEW_MS).toBeLessThan(30_000);
-    ea.dispose(); eb.dispose();
-  });
-
-  it('an agent on the host tab registers, joins and its edits reach a viewer', async () => {
+describe('agents', () => {
+  it('an agent registers, joins and its edits reach a viewer', async () => {
     const host = peer(server, 'hh', [human('human-h')]);
     const viewer = peer(server, 'vv', [human('human-v')]);
     host.client.connect(); viewer.client.connect(); await settle();

@@ -100,6 +100,13 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
   useEffect(() => commentThreads.onHumanMessage((t, m) => forwardRef.current(t, m)), []);
 
   const send = useCallback((text: string, opts: SendOpts = {}) => {
+    // Live board: the agents run in the agent process; the message goes to them through SpacetimeDB.
+    if (sink.remote) {
+      postText({ thread: 'general', from: YOU, name: 'You', color: YOU_COLOR, text });
+      sink.remote(text, opts.thread ?? 'general');
+      openThread('general');
+      return;
+    }
     const r = rtRef.current;
     const st = board.doc.getState();
     const found = opts.shapeId ? st.shapes.get(opts.shapeId) : undefined;
@@ -156,7 +163,7 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       void deliverChat(x.decision.to, x.text);
     }
     openThread(first);
-  }, [board, rtRef, post, postText, note, nameOf, deliverChat, openThread]);
+  }, [board, sink, rtRef, post, postText, note, nameOf, deliverChat, openThread]);
 
   const threads: Thread[] = useMemo(() => {
     const list: Thread[] = [{ id: 'general', name: 'General', color: CLAUDE.color, status: 'everyone', live: true }];

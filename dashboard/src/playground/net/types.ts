@@ -20,6 +20,17 @@ export interface BoardPresenceRow {
 export interface BoardSnapshotRow { boardId: string; uptoSeq: bigint; doc: string }
 export interface BoardCursorEvent { boardId: string; actor: string; x: number; y: number; tx: number; ty: number; moveMs: number; down: boolean }
 
+export const MAX_MESSAGE_CHARS = 4000;
+export interface BoardMessageRow {
+  id: string; boardId: string; threadId: string; kind: string; author: string; toActor?: string;
+  body: string; anchor?: string; resolved: boolean;
+}
+export interface MessageArgs {
+  id: string; boardId: string; threadId: string; kind: 'chat' | 'comment'; author: ActorId;
+  toActor?: ActorId; body: string; anchor?: string;
+}
+export interface TokenArgs { agentId: string; promptTokens: number; completionTokens: number; costUsd: number }
+
 /** One op as push_ops takes it. `body` is the encoded envelope (see opcodec). */
 export interface PushOp { opId: string; tx: string; body: string }
 
@@ -51,6 +62,9 @@ export interface BoardTransport {
   claimService(name: string, holder: string): Promise<void>;
   releaseService(name: string, holder: string): Promise<void>;
   joinBoard(a: JoinArgs): Promise<void>;
+  postMessage(a: MessageArgs): Promise<void>;
+  /** Token usage for a board agent's model call (purpose `design`). */
+  logTokens(a: TokenArgs): Promise<void>;
   leaveBoard(boardId: string, actor: ActorId): Promise<void>;
   pushOps(boardId: string, ops: readonly PushOp[]): Promise<void>;
   setPresence(a: PresenceArgs): Promise<void>;
@@ -64,4 +78,5 @@ export interface BoardTransport {
   onActors(cb: (c: RowChange<BoardActorRow>) => void): () => void;
   onPresence(cb: (c: RowChange<BoardPresenceRow>) => void): () => void;
   onCursor(cb: (e: BoardCursorEvent) => void): () => void;
+  onMessages(cb: (c: RowChange<BoardMessageRow>) => void): () => void;
 }

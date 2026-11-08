@@ -25,7 +25,8 @@ export function humanId(): ActorId {
 /** Live board through SpacetimeDB unless the page asks for the offline board (`?board=local`). */
 export const LIVE = typeof location !== 'undefined' && !/[?&]board=local\b/.test(location.search + location.hash);
 
-/** Only the offline board runs agents in the page; on the live board a tab is a viewer and never hosts agents. */
+/** Only the offline board runs agents in the page. On the live board the agents run in the agent process
+ *  (dashboard/agent), and every tab is a viewer that talks to them through SpacetimeDB. */
 export const HOST_AGENTS = !LIVE;
 
 /**
@@ -33,7 +34,11 @@ export const HOST_AGENTS = !LIVE;
  * (`persistence`) in its effect, because global registrations must not happen here: StrictMode runs this kit
  * factory twice and keeps one result.
  */
-export type ChatSink = { say: ((actor: ActorId, text: string) => void) | null; chat: ChatStore; ui: UiStore; persistence: Persistence | null };
+export type ChatSink = {
+  say: ((actor: ActorId, text: string) => void) | null; chat: ChatStore; ui: UiStore; persistence: Persistence | null;
+  /** Live board: send a chat message to the board's agents through SpacetimeDB (they run in the agent process). */
+  remote: ((text: string, thread: string) => void) | null;
+};
 
 /** True when the page was opened for the stage: start from the seed, never load or overwrite the saved board. */
 export const DEMO = typeof location !== 'undefined' && /[?&]demo=1\b/.test(location.search + location.hash);
@@ -41,7 +46,7 @@ export const DEMO = typeof location !== 'undefined' && /[?&]demo=1\b/.test(locat
 export function createKit() {
   const chat = createChatStore();
   const ui = createUiStore();
-  const sink: ChatSink = { say: null, chat, ui, persistence: null };
+  const sink: ChatSink = { say: null, chat, ui, persistence: null, remote: null };
   // `chat.say` board commands (console, future bridge) post to the chat store and emit `message.created`
   let say: ReturnType<typeof chatSayHandler> | null = null;
   const board: BoardKit = createBoard({ me: humanId(), extra: (actor, cmd) => say?.(actor, cmd) });

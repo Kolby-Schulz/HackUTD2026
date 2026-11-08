@@ -10,6 +10,7 @@ import type { AgentRuntime } from '../agents/runtime';
 import { startCoordinator } from '../agents/coordinator';
 import { writeMeasuredSize } from './text/autosize';
 import { newId } from '../core/ids';
+import { CLAUDE } from './constants';
 import type { BoardKit } from '../core/commands';
 import { installDevtools } from '../core/devtools';
 import { camera } from '../core/camera';
@@ -24,7 +25,7 @@ import { applyViewFromUrl } from '../actions/share';
 import { DEMO, HOST_AGENTS, LIVE, viewCenter } from './kit';
 import { connectBoard } from '../net/session';
 import { connectSpacetime } from '../net/spacetime';
-import { electHost, RENEW_MS } from '../net/host';
+import { MAX_MESSAGE_CHARS } from '../net/types';
 import type { BoardTransport } from '../net/types';
 import { SPACETIME_DB_NAME, SPACETIME_HOST } from '../../data';
 import type { ChatSink } from './kit';
@@ -34,23 +35,18 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
   const [rt, setRt] = useState<AgentRuntime | null>(null);
   const teardown = useRef(onTeardown);
   teardown.current = onTeardown;
-  // Live board: one connection for the page, and the host election that decides whether this tab runs the agents.
+  // Live board: one SpacetimeDB connection for the page.
   const [net, setNet] = useState<(BoardTransport & { close(): void }) | null>(null);
-  const [hosting, setHosting] = useState(false);
   useEffect(() => {
     if (!LIVE) return;
     const t = connectSpacetime({ uri: SPACETIME_HOST, database: SPACETIME_DB_NAME, boardId: 'playground', boardName: 'Design board' });
     setNet(t);
-    const election = electHost(t, board.me, (h) => {
-      setHosting(h);
-      if (h) toast('Agents are running in this tab', { key: 'net.host', ttlMs: 6000 });
-    });
-    return () => { election.dispose(); t.close(); setNet(null); setHosting(false); };
+    return () => { t.close(); setNet(null); };
   }, [board]);
 
   useEffect(() => {
     if (LIVE && !net) return;
-    const hostAgents = HOST_AGENTS || hosting;
+    const hostAgents = HOST_AGENTS;
     // core/keys install() types its target with `(e: never)` listeners, which Window does not satisfy
     const offKeys = installKeys(window as unknown as Parameters<typeof installKeys>[0]);
     const offView = registerViewFallbacks();
@@ -104,18 +100,23 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     // a restored board: agents build in cells that saved work does not touch
     if (restored) r.occupy(board.doc.getState());
     if (hostAgents) for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
-    // On the live board the host tab's agents are SpacetimeDB actors: each one registers as an `agent` row and
-    // joins the board, and its edits, cursor and presence go through the same session as a person's.
-    const joinAgents = () => {
-      if (!session) return;
-      for (const id of r.agentIds()) {
-        const a = board.actors.get(id);
-        if (a) session.join({ id, kind: 'agent', name: a.name, color: a.color, agentId: id });
+    // Live chat: messages go to the agents through board_message, and everyone's messages come back from it.
+    const seenMsgs = new Set<string>();
+    const offMsgs = net ? net.onMessages((c) => {
+      for (const m of c.added) {
+        if (m.kind !== 'chat' || seenMsgs.has(m.id)) continue;
+        seenMsgs.add(m.id);
+        if (m.author === board.me) continue;              // already shown when it was sent
+        const a = board.actors.get(m.author);
+        sink.chat.post({ thread: 'general', from: m.author, name: a?.name ?? CLAUDE.name, color: a?.color ?? CLAUDE.color, body: { kind: 'text', text: m.body } });
       }
-    };
-    joinAgents();
-    const offAgents = session ? board.actors.subscribe(joinAgents) : () => {};
-    const beat = net && hostAgents ? setInterval(() => { for (const id of r.agentIds()) net.heartbeat(id).catch(() => {}); }, RENEW_MS) : null;
+    }) : () => {};
+    sink.remote = net ? (text, thread) => {
+      const id = newId('m');
+      seenMsgs.add(id);
+      net.postMessage({ id, boardId: 'playground', threadId: thread, kind: 'chat', author: board.me, body: text.slice(0, MAX_MESSAGE_CHARS) })
+        .catch(() => toast('Could not send that to the agents', { key: 'net.chat' }));
+    } : null;
     // a shared link (#/playground?x=&y=&z=&sel=) moves the camera there and selects the ids that exist
     const offUrl = applyViewFromUrl(board, camera);
 
@@ -133,7 +134,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       press: (id, down) => choreo(id).press(down),
     });
     return () => {
-      offAgents(); if (beat) clearInterval(beat);
+      offMsgs(); sink.remote = null;
       session?.dispose();
       persistence.dispose(); offExtras.forEach((f) => f()); bindSnapSource(null);
       sink.persistence = null; sink.ui.set({ persistence: null });
@@ -143,7 +144,7 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       rtRef.current = null;
       teardown.current();
     };
-  }, [board, sink, rtRef, net, hosting]);
+  }, [board, sink, rtRef, net]);
 
   return rt;
 }

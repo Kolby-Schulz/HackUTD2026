@@ -3,7 +3,7 @@
 import { DbConnection } from '@bindings/index.ts';
 import type { Identity } from 'spacetimedb';
 import type {
-  BoardActorRow, BoardCursorEvent, BoardOpRow, BoardPresenceRow, BoardSnapshotRow, BoardTransport, NetStatus, RowChange,
+  BoardActorRow, BoardCursorEvent, BoardMessageRow, BoardOpRow, BoardPresenceRow, BoardSnapshotRow, BoardTransport, NetStatus, RowChange,
 } from './types';
 
 export interface SpacetimeOpts { uri: string; database: string; token?: string; boardId: string; boardName: string; onToken?: (t: string) => void }
@@ -19,7 +19,7 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
     status: new Set() as Listener<NetStatus>, synced: new Set() as Listener<void>,
     ops: new Set() as Listener<RowChange<BoardOpRow>>, snap: new Set() as Listener<RowChange<BoardSnapshotRow>>,
     actors: new Set() as Listener<RowChange<BoardActorRow>>, presence: new Set() as Listener<RowChange<BoardPresenceRow>>,
-    cursor: new Set() as Listener<BoardCursorEvent>,
+    cursor: new Set() as Listener<BoardCursorEvent>, msgs: new Set() as Listener<RowChange<BoardMessageRow>>,
   };
   const fire = <T>(set: Listener<T>, v: T) => set.forEach((f) => f(v));
   const setStatus = (s: NetStatus) => { if (status !== s) { status = s; fire(L.status, s); } };
@@ -38,6 +38,7 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
         fire(L.actors, { added: [...conn.db.boardActor.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
         fire(L.ops, { added: [...conn.db.boardOp.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
         fire(L.presence, { added: [...conn.db.boardPresence.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
+        fire(L.msgs, { added: [...conn.db.boardMessage.iter()].filter((r) => r.boardId === o.boardId), removed: [] });
         synced = true;
         fire(L.synced, undefined);
       })
@@ -47,6 +48,7 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
         `SELECT * FROM board_presence WHERE board_id = ${b}`,
         `SELECT * FROM board_snapshot WHERE board_id = ${b}`,
         `SELECT * FROM board_cursor WHERE board_id = ${b}`,
+        `SELECT * FROM board_message WHERE board_id = ${b}`,
       ]);
     setStatus('live');
   }
@@ -71,6 +73,7 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
   conn.db.boardPresence.onInsert((_c, r) => { if (r.boardId === o.boardId) fire(L.presence, one(r)); });
   conn.db.boardPresence.onUpdate((_c, _old, r) => { if (r.boardId === o.boardId) fire(L.presence, one(r)); });
   conn.db.boardPresence.onDelete((_c, r) => { if (r.boardId === o.boardId) fire(L.presence, gone<BoardPresenceRow>(r.presenceId)); });
+  conn.db.boardMessage.onInsert((_c, r) => { if (r.boardId === o.boardId) fire(L.msgs, one(r)); });
   conn.db.boardCursor.onInsert((_c, e) => { if (e.boardId === o.boardId) fire(L.cursor, e); });
 
   const sub = <T>(set: Listener<T>, cb: (v: T) => void) => { set.add(cb); return () => { set.delete(cb); }; };
@@ -90,10 +93,13 @@ export function connectSpacetime(o: SpacetimeOpts): BoardTransport & { close(): 
     onActors: (cb) => subRows(L.actors, cb, () => conn.db.boardActor.iter()),
     onPresence: (cb) => subRows(L.presence, cb, () => conn.db.boardPresence.iter()),
     onCursor: (cb) => sub(L.cursor, cb),
+    onMessages: (cb) => subRows(L.msgs, cb, () => conn.db.boardMessage.iter()),
     registerAgent: (a) => conn.reducers.registerAgent({ id: a.id, name: a.name, ownerDev: '', machine: 'design-board', model: 'scripted', tokenBudget: 0n }),
     heartbeat: (agentId) => conn.reducers.heartbeat({ agentId }),
     claimService: (name, holder) => conn.reducers.claimService({ name, machine: 'browser', holder }),
     releaseService: (name, holder) => conn.reducers.releaseService({ name, holder }),
+    postMessage: (a) => conn.reducers.postBoardMessage({ id: a.id, boardId: a.boardId, threadId: a.threadId, kind: a.kind, author: a.author, toActor: a.toActor, body: a.body, anchor: a.anchor }),
+    logTokens: (a) => conn.reducers.logTokens({ runId: 0n, agentId: a.agentId, taskId: 0n, attempt: 0, purpose: 'design', promptTokens: a.promptTokens, completionTokens: a.completionTokens, cacheReadTokens: 0, costUsd: a.costUsd }),
     joinBoard: (a) => conn.reducers.joinBoard({ boardId: a.boardId, actor: a.actor, kind: a.kind, name: a.name, color: a.color, agentId: a.agentId }),
     leaveBoard: (boardId, actor) => conn.reducers.leaveBoard({ boardId, actor }),
     pushOps: (boardId, ops) => conn.reducers.pushOps({ boardId, ops: [...ops] }),
