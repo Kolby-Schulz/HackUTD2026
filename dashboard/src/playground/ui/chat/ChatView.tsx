@@ -5,6 +5,8 @@ import { useShape } from '../../core/react';
 import { absRect } from '../../core/tree';
 import { selectIds } from '../board/state';
 import { useSelection, useUi } from '../hooks';
+import type { Result } from '../../core/types';
+import { YOU_COLOR } from '../constants';
 import { ctxLabel, routeFor } from '../comments/route';
 import { pickTool } from '../shell/Toolbar';
 import type { SlotProps } from '../slotProps';
@@ -39,9 +41,15 @@ export function ChatView({ board, ui, rt, chat }: SlotProps & { chat: Chat }) {
       const s = board.doc.getState().shapes.get(id);
       return s && !s.deleted ? s.name : undefined;
     },
-    onUndo: (m) => {
-      if (m.body.kind !== 'action') return;
-      if (board.revert(board.me, m.body.tx).ok) chat.store.update(m.id, { body: { ...m.body, undone: true } });
+    doc: board.doc,
+    undo: (m): Result => {
+      if (m.body.kind !== 'action') return { ok: false, error: 'invalid', message: 'Not an action card' } as Result;
+      const r = board.revert(board.me, m.body.tx);
+      if (r.ok) {
+        chat.store.update(m.id, { body: { ...m.body, undone: true } });
+        chat.store.post({ thread: m.thread, from: 'you', name: 'You', color: YOU_COLOR, body: { kind: 'system', text: `You undid: ${m.body.summary}` } });
+      }
+      return r;
     },
   }), [board, chat]);
   return (

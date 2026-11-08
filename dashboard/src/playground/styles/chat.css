@@ -65,3 +65,17 @@
 .pg-msg.action .foot button { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 6px; padding: 1px 8px; font-size: 11.5px; color: var(--pg-ink); }
 .pg-msg.action .foot button:hover { border-color: var(--pg-line-hover); background: var(--pg-hover); }
 .pg-msg.agent b small { font-weight: 400; color: var(--pg-muted); }
+
+/* thinking placeholder pulses until the reply or action card replaces it */
+@keyframes pg-think { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+.pg-msg.thinking { animation: pg-think 1.2s ease-in-out infinite; }
+.pg-msg.thinking i { animation: pg-think 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .pg-msg.thinking, .pg-msg.thinking i { animation: none; } }
+
+/* @mention autocomplete above the composer (also used in the comment popover) */
+.pg-compose { position: relative; }
+.pg-mention { position: absolute; left: 0; right: 0; bottom: 100%; margin: 0 0 4px; padding: 4px; list-style: none; z-index: 5;
+  background: var(--pg-panel); border: 1px solid var(--pg-line); border-radius: 10px; box-shadow: var(--pg-shadow-pop); max-height: 180px; overflow: auto; }
+.pg-mention li { display: flex; gap: 8px; align-items: baseline; padding: 5px 8px; border-radius: 7px; font-size: 13px; cursor: pointer; color: var(--pg-ink); }
+.pg-mention li.on, .pg-mention li:hover { background: var(--pg-line); }
+.pg-mention small { color: var(--pg-muted); font-size: 11px; }

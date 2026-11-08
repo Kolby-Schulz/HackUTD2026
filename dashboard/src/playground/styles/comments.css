@@ -22,3 +22,13 @@
 .pg-thread-actions button:hover { color: var(--pg-accent); }
 .pg-thread-msgs { max-height: 180px; overflow: auto; margin: 6px 0; font-size: 12px; }
 .pg-thread-msgs p { margin: 0 0 4px; }
+
+/* orphan comments (their layer was deleted), listed in the right panel */
+.pg-orphans { padding: 8px 12px; border-top: 1px solid var(--pg-line); font-size: 12px; color: var(--pg-ink); }
+.pg-orphans h4 { margin: 0 0 6px; font-size: 11px; font-weight: 600; color: var(--pg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.pg-orphans ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.pg-orphans li { display: flex; align-items: center; gap: 8px; }
+.pg-orphans .n { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: var(--pg-white); font-size: 10px; font-weight: 700; flex-shrink: 0; }
+.pg-orphans .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-orphans button { border: 1px solid var(--pg-line); background: var(--pg-panel); color: var(--pg-ink); border-radius: 6px; padding: 2px 8px; font-size: 11px; }
+.pg-pop .pg-mention { bottom: auto; top: 100%; margin: 4px 0 0; }
