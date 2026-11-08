@@ -1,4 +1,4 @@
-# Contract
+# InSync
 
 Live coordination for AI coding agents. A shared SpacetimeDB server lets a team's
 coding agents see each other's plans as they work, so conflicting changes are caught
@@ -7,11 +7,11 @@ conflicts and a live dashboard shows everything. Every model call goes through o
 provider switch: workers run on Claude Code, and the coordinator runs on NVIDIA Nemotron
 or Claude (`COORDINATOR_PROVIDER`).
 
-> Contract isn't another coding agent. It's what lets your team's coding agents work like a team.
+> InSync isn't another coding agent. It's what lets your team's coding agents work like a team.
 
 Built at HackUTD 2026. Full spec: [docs/SPEC.md](docs/SPEC.md).
 
-![Contract dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
+![InSync dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
 
 ## 60-second quickstart
 
@@ -40,7 +40,7 @@ In the dashboard's **Chat** tab, type what you want built, the way you'd prompt 
 
 > Add late fees to invoices, and have another agent format receipt dates.
 
-Contract plans it, starts a coordinator and a session, puts one agent on each independent
+InSync plans it, starts a coordinator and a session, puts one agent on each independent
 piece, catches the conflicts between them while they type, and merges and runs the checks when
 they finish. A second laptop joins the same run with `npm run control` and the same `.env`.
 
@@ -54,12 +54,12 @@ coordinator, the dashboard) gets the result pushed to it through a subscription.
 flowchart LR
     subgraph L1[Laptop 1]
         A[Agent A<br/>Claude Code in a worktree]
-        MA[Contract MCP server<br/>+ edit hooks]
+        MA[InSync MCP server<br/>+ edit hooks]
         A <--> MA
     end
     subgraph L2[Laptop 2]
         B[Agent B<br/>Claude Code in a worktree]
-        MB[Contract MCP server<br/>+ edit hooks]
+        MB[InSync MCP server<br/>+ edit hooks]
         B <--> MB
     end
     subgraph DB[SpacetimeDB module · server/]
@@ -86,7 +86,7 @@ flowchart LR
   coordinator, mapper) is a Node process that connects as a client.
 - **Detection is free and instant.** The three rules below run inside `publish_plan`,
   `claim_symbol` and `report_change`. The coordinator model is only called after a rule fires,
-  and its tokens are logged against Contract on the scoreboard.
+  and its tokens are logged against InSync on the scoreboard.
 - **Every panel is a subscription.** The dashboard writes nothing except new tasks and
   operator messages; two laptops and a hosted dashboard all see the same rows.
 
@@ -122,7 +122,7 @@ mapped symbol without a claim.
 
 ```text
 server/              SpacetimeDB module: tables, reducers, conflict checks
-packages/client/     Contract client library + generated SpacetimeDB bindings
+packages/client/     InSync client library + generated SpacetimeDB bindings
 packages/llm/        Shared model wrapper (Claude Code today): calls, token + cost logging
 agents/worker/       Worker agent loop and its tools
 agents/coordinator/  Coordinator agent loop and prompts
@@ -198,7 +198,7 @@ Keep live tests local (they wipe their database); they default to `ws://localhos
 
 The easiest way: open the dashboard's **Chat** tab and say what you want, the way you'd prompt a
 coding agent ("Add late fees to invoices, and have another agent format receipt dates").
-Contract plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
+InSync plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
 session if they aren't running, puts one agent on each independent piece, and merges and runs
 the checks when they all finish. While agents work, follow-ups ("make it round half up") go to
 them as messages. It needs one daemon running on the laptop
@@ -253,7 +253,7 @@ To join from your own Claude Code, Cursor or Codex session instead of our worker
 
 ## Your own repo
 
-Contract works on any git repository, not only `demo-repo/` (issue #18). The easiest way:
+InSync works on any git repository, not only `demo-repo/` (issue #18). The easiest way:
 run `npm run control`, open the dashboard's **Chat** tab and paste a GitHub link
 (`owner/name` works too) into **Repository**. From the command line, pick it with
 `--repo <path|git URL>` or `CONTRACT_TARGET` in `.env`; a folder inside a repo works too.
@@ -285,7 +285,7 @@ npm run reset -- --repo ../my-app
 - **Code map folders.** Tests and tooling folders (`test/`, `tests/`, `__tests__/`, `scripts/`)
   are left out of the code map. If your app's code lives in one, or a folder should never be
   mapped, say so in `contract.json`: `"map": { "include": ["scripts"], "exclude": ["demo-repo"] }`.
-  This monorepo's own `contract.json` does exactly that, so Contract can run on itself
+  This monorepo's own `contract.json` does exactly that, so InSync can run on itself
   (`--repo .`); keep agents out of `server/` there, since a schema change needs
   `npm run generate -w @contract/server` and a publish, which no agent should do.
 - **Languages.** The code map reads TypeScript and JavaScript (ES modules), plus Python, Go,
@@ -304,7 +304,7 @@ The table below is a first, small sample (1 run per mode, 2 scenarios, generated
 (`npm run bench -- --runs 3`) before quoting a number.
 
 <!-- bench:begin -->
-Across 2 scenario(s) and 4 runs, Contract saved **26%** of the cost (0% of tokens) and left 0/2 merges broken vs 1/2 without it.
+Across 2 scenario(s) and 4 runs, InSync saved **26%** of the cost (0% of tokens) and left 0/2 merges broken vs 1/2 without it.
 
 | Scenario | Runs (without / with) | Cost without | Cost with | Saved | Tokens without | Tokens with | Wasted without | Broken merges without | Broken merges with |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

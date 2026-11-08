@@ -107,10 +107,25 @@ export async function endOpenRuns(conn: DbConnection): Promise<bigint[]> {
  * instructions; see reset_demo_state) so nothing from the last run leaks into the next.
  * `conn` must subscribe to the run table.
  */
-export async function resetServerState(conn: DbConnection): Promise<bigint[]> {
+/**
+ * Ends open runs and clears the demo state. reset_demo_state refuses while a worker's heartbeat is
+ * under 60 s old; with waitSecs > 0 (back-to-back benchmark runs, whose workers just exited) it
+ * retries until those heartbeats age out instead of failing.
+ */
+export async function resetServerState(conn: DbConnection, waitSecs = 0): Promise<bigint[]> {
   const ended = await endOpenRuns(conn);
-  await conn.reducers.resetDemoState({});
-  return ended;
+  const deadline = Date.now() + waitSecs * 1000;
+  for (let said = false; ; said = true) {
+    try {
+      await conn.reducers.resetDemoState({});
+      return ended;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/still running/.test(msg) || Date.now() > deadline) throw e;
+      if (!said) log('reset', `${msg}; waiting up to ${waitSecs} s for those heartbeats to expire`);
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
 }
 
 /** Waits until `check()` is true after reducer results reach the local cache. */

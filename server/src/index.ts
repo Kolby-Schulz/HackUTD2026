@@ -1066,7 +1066,9 @@ export const report_change = spacetimedb.reducer(
       const details = `${agent_id} reported a ${kind} change to ${symbol_id} (${description}); ${other} is affected because ${why}.`;
       const c = openConflict(ctx, 'broken_dependency', symbol_id, agent_id, other, details);
       if (!c) continue; // already an open conflict for this pair
-      setAgentStatus(ctx, other, 'paused');
+      // A finished agent can't pause: it keeps 'done' (the conflict still
+      // opens and the coordinator still rules) instead of looking live to reset_demo_state.
+      if (ctx.db.agent.id.find(other)?.status !== 'done') setAgentStatus(ctx, other, 'paused');
       sendInstruction(ctx, other, `${symbol_id} was changed by ${agent_id}. Pause and wait for the coordinator.`, c.id);
     }
   },
