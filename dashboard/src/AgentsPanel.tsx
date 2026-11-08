@@ -52,6 +52,9 @@ function AgentItem({ a }: { a: AgentCard }) {
         <span style={{ fontSize: 14, fontWeight: 600, flex: 1 }}>{a.person.name}</span>
         <span className="muted ellipsis" style={{ fontSize: 12 }}>{[a.ownerDev, a.machine].filter(Boolean).join(' · ')}</span>
       </div>
+      {a.offline && (a.status === 'Working' || paused) && (
+        <div className="offline" role="status">Laptop offline · last seen {ago(Date.now() - a.lastSeen)} ago</div>
+      )}
       {paused && <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--warn)' }}>{a.waitingOn ? `Waiting on conflict #${a.waitingOn}` : 'Waiting on the coordinator'}</div>}
       {a.note && (paused || a.status === 'Done') && <div className="muted" style={{ fontSize: 12, lineHeight: 1.4 }}>{a.note}</div>}
       <div style={{ fontSize: 13, lineHeight: 1.4 }}>
@@ -72,7 +75,15 @@ function AgentItem({ a }: { a: AgentCard }) {
           <span className="waste-stripe" style={{ width: `${a.wastePct}%` }} />
         </div>
       </div>
+      {a.lastEdit && (a.status === 'Working' || paused) && (
+        <div className="muted" style={{ fontSize: 12 }}>Last edit <a href="#/code" className="mono">{a.lastEdit.file}</a> · {ago(a.lastEdit.ago)} ago</div>
+      )}
       {(a.status === 'Working' || paused) && <MessageBox agentId={a.id} label={`Message ${a.person.name}…`} messages={a.messages} />}
     </div>
   );
+}
+
+function ago(msAgo: number): string {
+  const s = Math.round(msAgo / 1000);
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`;
 }

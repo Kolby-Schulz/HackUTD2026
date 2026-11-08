@@ -24,6 +24,7 @@ import { duplicateReason, nameOf } from './rules';
 
 const COORDINATOR_ID = 'coordinator';
 const FILE_EDITS_PER_AGENT = 50;
+const SERVICE_TIMEOUT_SECS = 30;
 const MAX_DIFF_CHARS = 20_000;
 /** Marks instruction rows written by send_instruction (an operator on the dashboard). */
 const OPERATOR_PREFIX = 'Operator: ';
@@ -225,6 +226,20 @@ const fileEdit = table(
   },
 );
 
+// One mapper and one coordinator per database (issue #19): the process holding a service
+// row re-claims it every few seconds; another laptop can take it once the heartbeat is stale.
+const service = table(
+  { name: 'service', public: true },
+  {
+    name: t.string().primaryKey(), // 'coordinator' | 'mapper'
+    identity: t.identity(),
+    machine: t.string(),
+    started_at: t.timestamp(),
+    heartbeat_at: t.timestamp(),
+    holder: t.string().default(''), // per-process id, so two processes sharing one identity still exclude each other
+  },
+);
+
 // Token accounting
 const run = table(
   { name: 'run', public: true },
@@ -298,6 +313,7 @@ const spacetimedb = schema({
   tokenSaving,
   expireClaimsSchedule,
   fileEdit,
+  service,
 });
 export default spacetimedb;
 
@@ -960,6 +976,42 @@ export const acknowledge_instruction = spacetimedb.reducer(
     if (!row.acknowledged) ctx.db.instruction.id.update({ ...row, acknowledged: true });
   },
 );
+
+/**
+ * Takes or renews the lock on a singleton service (issue #19). `holder` is a per-process
+ * id: the same holder renews (the heartbeat), anyone else is refused until the heartbeat is
+ * older than SERVICE_TIMEOUT_SECS. Call it again every few seconds.
+ */
+export const claim_service = spacetimedb.reducer(
+  { name: t.string(), machine: t.string(), holder: t.string() },
+  (ctx, { name, machine, holder }) => {
+    if (!name || !holder) throw new SenderError('service name and holder are required');
+    const row = ctx.db.service.name.find(name);
+    if (!row) {
+      ctx.db.service.insert({ name, identity: ctx.sender, machine, holder, started_at: ctx.timestamp, heartbeat_at: ctx.timestamp });
+      return;
+    }
+    const mine = row.holder === holder && row.identity.equals(ctx.sender);
+    const stale = micros(ctx.timestamp) - micros(row.heartbeat_at) > BigInt(SERVICE_TIMEOUT_SECS) * 1_000_000n;
+    if (!mine && !stale) {
+      throw new SenderError(`${name} is already running on ${row.machine}; stop it there first (or wait ${SERVICE_TIMEOUT_SECS} s after it crashed)`);
+    }
+    ctx.db.service.name.update({
+      ...row,
+      identity: ctx.sender,
+      machine,
+      holder,
+      started_at: mine ? row.started_at : ctx.timestamp,
+      heartbeat_at: ctx.timestamp,
+    });
+  },
+);
+
+/** Releases a service lock the caller holds (no-op otherwise). */
+export const release_service = spacetimedb.reducer({ name: t.string(), holder: t.string() }, (ctx, { name, holder }) => {
+  const row = ctx.db.service.name.find(name);
+  if (row && row.holder === holder && row.identity.equals(ctx.sender)) ctx.db.service.name.delete(name);
+});
 
 /**
  * Live diff stream (spec-additions part A): contract-hook reports each edit with its diff

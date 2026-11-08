@@ -49,7 +49,7 @@ const { values } = parseArgs({
     repo: { type: 'string' },
     mode: { type: 'string', default: 'with_contract' },
     owner: { type: 'string', default: process.env.USER ?? 'dev' },
-    machine: { type: 'string', default: process.env.HOSTNAME ?? hostname().replace(/\.local$/, '') },
+    machine: { type: 'string', default: process.env.CONTRACT_MACHINE || process.env.HOSTNAME || hostname().replace(/\.local$/, '') },
   },
 });
 const agentId = values.id ?? die('--id is required');

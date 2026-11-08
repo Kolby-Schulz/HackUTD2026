@@ -36,6 +36,7 @@ import {
 // Import all reducer arg schemas
 import AcknowledgeInstructionReducer from "./acknowledge_instruction_reducer";
 import CacheSummaryReducer from "./cache_summary_reducer";
+import ClaimServiceReducer from "./claim_service_reducer";
 import ClaimSymbolReducer from "./claim_symbol_reducer";
 import CreateTaskReducer from "./create_task_reducer";
 import DismissConflictReducer from "./dismiss_conflict_reducer";
@@ -49,6 +50,7 @@ import PublishPlanReducer from "./publish_plan_reducer";
 import RecordCacheHitReducer from "./record_cache_hit_reducer";
 import RegisterAgentReducer from "./register_agent_reducer";
 import ReleaseClaimReducer from "./release_claim_reducer";
+import ReleaseServiceReducer from "./release_service_reducer";
 import ReportChangeReducer from "./report_change_reducer";
 import ReportEditReducer from "./report_edit_reducer";
 import ResetDemoStateReducer from "./reset_demo_state_reducer";
@@ -71,6 +73,7 @@ import InstructionRow from "./instruction_table";
 import PlanRow from "./plan_table";
 import PlanItemRow from "./plan_item_table";
 import RunRow from "./run_table";
+import ServiceRow from "./service_table";
 import SummaryCacheRow from "./summary_cache_table";
 import SymbolRow from "./symbol_table";
 import SymbolEdgeRow from "./symbol_edge_table";
@@ -213,6 +216,17 @@ const tablesSchema = __schema({
       { name: 'run_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, RunRow),
+  service: __table({
+    name: 'service',
+    indexes: [
+      { accessor: 'name', name: 'service_name_idx_btree', algorithm: 'btree', columns: [
+        'name',
+      ] },
+    ],
+    constraints: [
+      { name: 'service_name_key', constraint: 'unique', columns: ['name'] },
+    ],
+  }, ServiceRow),
   summaryCache: __table({
     name: 'summary_cache',
     indexes: [
@@ -297,6 +311,7 @@ const tablesSchema = __schema({
 const reducersSchema = __reducers(
   __reducerSchema("acknowledge_instruction", AcknowledgeInstructionReducer),
   __reducerSchema("cache_summary", CacheSummaryReducer),
+  __reducerSchema("claim_service", ClaimServiceReducer),
   __reducerSchema("claim_symbol", ClaimSymbolReducer),
   __reducerSchema("create_task", CreateTaskReducer),
   __reducerSchema("dismiss_conflict", DismissConflictReducer),
@@ -310,6 +325,7 @@ const reducersSchema = __reducers(
   __reducerSchema("record_cache_hit", RecordCacheHitReducer),
   __reducerSchema("register_agent", RegisterAgentReducer),
   __reducerSchema("release_claim", ReleaseClaimReducer),
+  __reducerSchema("release_service", ReleaseServiceReducer),
   __reducerSchema("report_change", ReportChangeReducer),
   __reducerSchema("report_edit", ReportEditReducer),
   __reducerSchema("reset_demo_state", ResetDemoStateReducer),
