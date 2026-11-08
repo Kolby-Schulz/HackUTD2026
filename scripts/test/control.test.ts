@@ -11,6 +11,8 @@ describe('toCommand', () => {
     expect(toCommand({ action: 'coordinator' })).toMatchObject({ key: 'coordinator', args: ['agents/coordinator/src/index.ts'], long: true });
     expect(toCommand({ action: 'session-start' }).args).toEqual(['scripts/session.ts', 'start']);
     expect(toCommand({ action: 'session-merge', integration: true }).args).toEqual(['scripts/session.ts', 'merge', '--integration']);
+    expect(toCommand({ action: 'session-merge', land: true }).args).toEqual(['scripts/session.ts', 'merge', '--land']);
+    expect(toCommand({ action: 'session-merge', land: 'yes' }).args).toEqual(['scripts/session.ts', 'merge']);
     expect(toCommand({ action: 'reset' })).toMatchObject({ long: false });
   });
   it('starts a worker with --wait, or with the prompt as one argv entry', () => {

@@ -55,6 +55,8 @@ interface Props {
   onSelect: (id: string | undefined) => void;
   /** The details widget for the selected node; positioned next to it on screen. */
   widget?: ReactNode;
+  /** Bump to glide the camera to the selected node (the Savings numbers use it to show a conflict). */
+  reveal?: number;
 }
 
 export function CodeMap(props: Props) {
@@ -69,7 +71,7 @@ const MOVE_MS = 520;
 const SPOT_MS = 1700;
 const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-function CodeMapView({ nodes, edges, selected, coord, onSelect, widget }: Props) {
+function CodeMapView({ nodes, edges, selected, coord, onSelect, widget, reveal }: Props) {
   const rf = useReactFlow();
   // Expanded = the user asked for the whole map while agents work. Reset once work stops, so the
   // next burst of activity is focused again.
@@ -171,15 +173,27 @@ function CodeMapView({ nodes, edges, selected, coord, onSelect, widget }: Props)
     const op = new Map(drawn.map((d) => [d.it.id, d.o]));
     return layout.edges.filter((e) => op.has(e.source) && op.has(e.target)).map((e) => {
       const o = Math.min(op.get(e.source)!, op.get(e.target)!);
-      const color = e.hot ? '#cf222e' : e.via ? '#8c959f' : '#afb8c1';
+      const color = e.hot ? 'var(--danger)' : e.via ? 'var(--text3)' : 'var(--faint)';
       return { id: e.id, source: e.source, target: e.target, type: 'smoothstep', animated: e.hot,
         style: { stroke: color, strokeWidth: e.hot ? 2 : 1.4, opacity: o, ...(e.via ? { strokeDasharray: '5 4' } : {}) },
         markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
         ...(e.via ? { label: '⋯', labelShowBg: true, labelBgPadding: [6, 1] as [number, number], labelBgBorderRadius: 8,
-          labelStyle: { fill: '#59636e', fontSize: 14, fontWeight: 800, letterSpacing: '0.05em' }, labelBgStyle: { fill: '#f6f8fa', stroke: '#d0d7de', opacity: o } } : {}) };
+          labelStyle: { fill: 'var(--text2)', fontSize: 14, fontWeight: 800, letterSpacing: '0.05em' }, labelBgStyle: { fill: 'var(--chrome)', stroke: 'var(--border)', opacity: o } } : {}) };
     });
   }, [drawn, layout]);
   const sel = layout.items.find((it) => it.id === selected);
+  // Reveal: glide to the selected function and stop following activity ("Follow activity" resumes).
+  // If it is folded away in the focused layout, expand first; the next layout brings it here again.
+  const revealed = useRef(0);
+  useEffect(() => {
+    if (!reveal || revealed.current === reveal || !selected) return;
+    if (!sel) { if (!expanded) setExpanded(true); return; }
+    revealed.current = reveal;
+    setFollow(false);
+    // a map that has just opened measures its size a frame late; centre after that
+    // (no cleanup: a re-render after this must not cancel it, and the reveal is already marked done)
+    setTimeout(() => void rf.setCenter(sel.x + sel.w / 2, sel.y + sel.h / 2, { zoom: Math.max(rf.getZoom(), 1), duration: 500 }), 120);
+  }, [reveal, selected, sel, expanded, rf]);
   const all = boundsOf(layout.items);
   const focus = boundsOf(focusItems(layout.items, coord));
 

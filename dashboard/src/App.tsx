@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
-import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
+import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory, tokenStats, type CaseView } from './model.ts';
 import { APP_NAME, Intro, SCurveMark, shouldPlayIntro } from './Intro.tsx';
 import { CodeMap } from './CodeMap.tsx';
 import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
@@ -18,6 +18,7 @@ import { CommandCenter } from './CommandCenter.tsx';
 import { Boundary } from './ui.tsx';
 import { ControlTab, useControlInfo } from './ControlTab.tsx';
 import { useMachine } from './machine.tsx';
+import { useTheme } from './theme.ts';
 
 const modeName = (m: string) => (m === 'with_contract' ? `with ${APP_NAME}` : m === 'without_contract' ? `without ${APP_NAME}` : m);
 
@@ -32,6 +33,7 @@ export function App() {
   const { layout, resize, toggle } = useLayout();
   const [picked, setPicked] = useState<string>();
   const dock = useDock();
+  const [theme, toggleTheme] = useTheme();
   const { repoLabel, machine } = useControlInfo();
   // A pairing link (#/pair?…) opens the Control tab, where its progress shows.
   const machineState = useMachine();
@@ -52,6 +54,7 @@ export function App() {
     edits: edits(live, w),
     map: codeMap(live, w, now),
     savings: savingsNow(live, run, now),
+    tokens: tokenStats(live, run),
     stage: runStage(live, run, w),
     focus: coordFocus(live, w),
     // `now` ticks every second; the tables change only when the server pushes rows
@@ -66,6 +69,14 @@ export function App() {
   const stageAt = STAGES.indexOf(view.stage);
   const { open, size } = layout;
   const flip = (v: ViewId) => (dock.isOpen(v) ? dock.close(v) : dock.open(v));
+  // A Savings number shows its conflict where conflicts live: open the map, select the function
+  // (its popup has the coordinator's decision) and glide the camera to it.
+  const [reveal, setReveal] = useState(0);
+  const showConflict = (c: CaseView) => {
+    if (!dock.isOpen('map')) dock.open('map');
+    setPicked(c.symbolId);
+    setReveal((r) => r + 1);
+  };
 
   // The Savings panel sits under the code map's editor group, only as wide as the map, so the
   // columns beside it (Chat, Changes) run full height; with the code map closed it spans the editor.
@@ -75,7 +86,7 @@ export function App() {
       <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
       <section className="pane" style={{ height: size.panel, flex: 'none', maxHeight: 'calc(100% - 200px)' }} aria-label="Savings">
         <Boundary name="Panel">
-          <BottomPanel savings={view.savings} cases={view.cases} onClose={() => toggle('panel', false)} />
+          <BottomPanel savings={view.savings} tokens={view.tokens} cases={view.cases} onShowConflict={showConflict} onClose={() => toggle('panel', false)} />
         </Boundary>
       </section>
     </>
@@ -105,6 +116,13 @@ export function App() {
             <ActivityButton label="Control" on={dock.isOpen('control')} onClick={() => flip('control')}>{ICON.control}</ActivityButton>
             <ActivityButton label="Chat" on={dock.isOpen('chat')} onClick={() => flip('chat')}>{ICON.chat}</ActivityButton>
             <ActivityButton label="Savings panel" on={open.panel} onClick={() => toggle('panel')} badge={openCount} badgeTitle="open conflicts" alert>{ICON.panel}</ActivityButton>
+          </div>
+          <div className="ab-group">
+            <ActivityButton label={theme === 'dark' ? 'Light theme' : 'Dark theme'} on={false} onClick={toggleTheme}>
+              {theme === 'dark'
+                ? <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" /></g></svg>
+                : <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>}
+            </ActivityButton>
           </div>
         </nav>
         {open.side && (
@@ -141,9 +159,9 @@ export function App() {
                   <div className="editor">
                     <Boundary name="Code map">
                       {live.connected && !live.ready ? <div className="map-empty">Loading the code map…</div> : (
-                        <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked}
+                        <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked} reveal={reveal}
                           widget={node && <SymbolWidget key={node.id} node={node} symbols={live.symbols} edges={live.edges} history={symbolHistory(live, w, node.id)}
-                            openCase={view.cases.find((c) => c.open && c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
+                            conflict={view.cases.find((c) => c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
                       )}
                     </Boundary>
                   </div>

@@ -100,7 +100,7 @@ export function ChangesView({ edits, agents, symbol, symbolName, onPickSymbol, o
                 <svg className={'chev' + (on ? '' : ' closed')} width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
                 <span className="sq" style={{ background: e.agent.color }} title={e.agent.name}>{e.agent.letter}</span>
                 <span className="edit-file"><b className="mono ellipsis">{parts.at(-1)}</b>{parts.length > 1 && <span className="muted mono ellipsis">{parts.slice(0, -1).join('/')}</span>}</span>
-                <span className="edit-meta mono"><span className="stat">{e.stat}</span> <span className="muted">{e.time.slice(0, 5)}</span></span>
+                <span className="edit-meta mono"><span className="edit-stat">{e.stat}</span> <span className="muted">{e.time.slice(0, 5)}</span></span>
               </button>
               {e.symbols.length > 0 && (
                 <div className="edit-syms">
