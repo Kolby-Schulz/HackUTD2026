@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { connect, noopClient, type ContractClient } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
+import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
 import { TASKS } from './tasks.ts';
 
@@ -42,21 +43,46 @@ if (!existsSync(worktree)) {
 const cwd = join(worktree, 'demo-repo');
 
 // 2. Join Contract (or not).
-const localLog = join(REPO, '.worktrees', `${agentId}.tokens.jsonl`);
+// Every run is also logged locally (outside .worktrees/, which reset removes); the
+// baseline lines give the early_stop estimate in later with_contract runs.
+const localLog = join(REPO, '.contract', 'tokens.jsonl');
+mkdirSync(dirname(localLog), { recursive: true });
 const logLocally: ContractClient['logTokens'] = async (t, a, purpose, usage) =>
   appendFileSync(localLog, JSON.stringify({ agentId, mode, task: String(t), attempt: a, purpose, ...usage }) + '\n');
 
-const contract: ContractClient =
-  mode === 'with_contract'
-    ? await connect({
-        host: process.env.SPACETIME_HOST!,
-        dbName: process.env.SPACETIME_DB_NAME!,
-        agent: { id: agentId, name: agentId, ownerDev: values.owner!, machine: values.machine!, model: 'claude-code', tokenBudget: 200_000 },
-      })
-    : noopClient(agentId, logLocally);
+const connectOpts = {
+  host: process.env.SPACETIME_HOST!,
+  dbName: process.env.SPACETIME_DB_NAME!,
+  repoDir: cwd,
+  agent: { id: agentId, name: agentId, ownerDev: values.owner!, machine: values.machine!, model: 'claude-code', tokenBudget: 200_000 },
+};
+let contract: ContractClient;
+if (mode === 'with_contract') {
+  contract = await connect(connectOpts);
+} else {
+  // Baseline: no coordination at all, but tokens still reach token_usage when a server
+  // is up, so the scoreboard can compare the two runs.
+  const server = process.env.SPACETIME_HOST ? await connect(connectOpts).catch(() => undefined) : undefined;
+  if (!server) console.warn(`[${agentId}] no Contract server; baseline tokens logged to ${localLog} only`);
+  contract = noopClient(agentId, async (...a) => {
+    await logLocally(...a);
+    await server?.logTokens(...a);
+  });
+  contract.disconnect = async () => server?.disconnect();
+}
+const logTokens: ContractClient['logTokens'] =
+  mode === 'with_contract' ? async (...a) => (await logLocally(...a), await contract.logTokens(...a)) : contract.logTokens;
 
 // 3. Claude Code wiring for with_contract mode: MCP server, rules, edit hook.
-const env = { CONTRACT_AGENT_ID: agentId, CONTRACT_TOKEN: contract.token, CONTRACT_REPO: REPO };
+const env: Record<string, string> = {
+  CONTRACT_AGENT_ID: agentId,
+  CONTRACT_TOKEN: contract.token,
+  CONTRACT_TASK_ID: String(taskId),
+  CONTRACT_REPO: REPO,
+  CONTRACT_REPO_DIR: cwd,
+  SPACETIME_HOST: process.env.SPACETIME_HOST ?? '',
+  SPACETIME_DB_NAME: process.env.SPACETIME_DB_NAME ?? '',
+};
 const mcpConfig = join(worktree, '.contract-mcp.json');
 if (mode === 'with_contract') {
   writeFileSync(
@@ -73,7 +99,11 @@ const contractOpts =
 
 const llm = createLLM();
 const onUsage = (usage: Usage, purpose: Parameters<ContractClient['logTokens']>[2]) =>
-  contract.logTokens(taskId, attempt, purpose, usage);
+  logTokens(taskId, attempt, purpose, usage).catch((e: unknown) => console.warn(`[${agentId}] logTokens failed: ${String(e)}`));
+
+// The task moves to in_progress (and the agent to working). Seeding creates the task;
+// without it, keep going rather than fail the run.
+await contract.setTaskStatus(taskId, 'in_progress').catch((e: unknown) => console.warn(`[${agentId}] set_task_status: ${String(e)}`));
 
 // 4. Early stop: abort the running Claude Code process when we get paused.
 let controller = new AbortController();
@@ -100,11 +130,21 @@ for (;;) {
     break;
   } catch (e) {
     if (!(e instanceof LLMAbortError)) throw e;
-    // TODO(agents): log an early_stop saving (estimate from the baseline run's average coding step).
-    await contract.logSaving('early_stop', 0, `paused during ${sessionId}`);
-    const instr = await nextInstruction(contract);
-    await contract.ack(instr.id);
-    prompt = `Coordinator decision: ${instr.text}. Continue your task.`;
+    sessionId = e.sessionId ?? sessionId;
+    const est = earlyStopEstimate(readTokenLog(localLog), e.usage?.completion_tokens ?? 0);
+    console.log(`[${agentId}] paused; stopped Claude Code (~${est.tokens} tokens avoided${est.fromBaseline ? '' : ', default estimate'})`);
+    await contract
+      .logSaving('early_stop', est.tokens, `paused during ${sessionId ?? 'run'}${est.fromBaseline ? '' : ' (no baseline yet: default estimate)'}`)
+      .catch((err: unknown) => console.warn(`[${agentId}] logSaving failed: ${String(err)}`));
+    if (!sessionId) throw new Error(`[${agentId}] paused before Claude Code reported a session id; cannot resume`);
+
+    // Wait for the coordinator: resolve/dismiss unpauses us after inserting its instruction.
+    await waitUntilUnpaused(contract);
+    const instrs = resumeInstructions(contract.pendingInstructions());
+    for (const i of contract.pendingInstructions()) await contract.ack(i.id);
+    const text = instrs.map((i) => i.text).join(' ') || 'No change needed.';
+    console.log(`[${agentId}] resuming: ${text}`);
+    prompt = `Coordinator decision: ${text} Continue your task.`;
     controller = new AbortController();
   }
 }
@@ -112,16 +152,21 @@ for (;;) {
 // 6. Commit to the agent's branch, release claims, mark the task done.
 execFileSync('git', ['add', '-A'], { cwd: worktree });
 execFileSync('git', ['commit', '-m', `${agentId}: ${task.slice(0, 60)}`, '--allow-empty'], { cwd: worktree, stdio: 'inherit' });
-// TODO(agents): release claims and call set_task_status(taskId, 'done') once the client has them.
+for (const symbolId of contract.myClaims()) {
+  await contract.release(symbolId).catch((e: unknown) => console.warn(`[${agentId}] release ${symbolId}: ${String(e)}`));
+}
+await contract.setTaskStatus(taskId, 'done').catch((e: unknown) => console.warn(`[${agentId}] set_task_status: ${String(e)}`));
 await contract.disconnect();
+process.exit(0);
 
-function nextInstruction(c: ContractClient) {
-  return new Promise<{ id: bigint; text: string }>((res) => {
-    const pending = c.pendingInstructions()[0];
-    if (pending) return res(pending);
-    const off = c.onInstruction((i) => {
+/** Resolves once this agent's status is no longer 'paused'. */
+function waitUntilUnpaused(c: ContractClient) {
+  return new Promise<void>((res) => {
+    if (c.status() !== 'paused') return res();
+    const off = c.onStatusChange((s) => {
+      if (s === 'paused') return;
       off();
-      res(i);
+      res();
     });
   });
 }
