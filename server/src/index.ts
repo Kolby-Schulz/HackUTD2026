@@ -16,6 +16,7 @@
 
 import { schema, table, t, SenderError, type InferSchema, type ReducerCtx } from 'spacetimedb/server';
 import { ScheduleAt, Timestamp } from 'spacetimedb';
+import { duplicateReason, nameOf } from './rules';
 
 // ---------------------------------------------------------------------------------
 // Constants
@@ -415,6 +416,58 @@ function maybeUnpause(ctx: Ctx, agentId: string, exceptConflictId: bigint): void
 }
 
 /** Rule 3 (claim contention). Returns the holder's id when someone else holds S. */
+/** Who reported creating symbolId (the first agent to do so), if any agent did. */
+function creatorOf(ctx: Ctx, symbolId: string): string | undefined {
+  for (const c of ctx.db.change.iter()) {
+    if (c.symbol_id === symbolId && c.kind === 'created') return c.agent_id;
+  }
+  return undefined;
+}
+
+/**
+ * Rule 2 (duplicate implementation). agentId plans or creates newId (signature optional).
+ * Compares it with existing symbols and with other agents' planned creates. Symbols the
+ * agent created itself never count. An existing match also tells the agent to reuse it.
+ */
+function checkDuplicates(ctx: Ctx, agentId: string, newId: string, newSignature?: string): void {
+  const mine = { name: nameOf(newId), signature: newSignature };
+
+  for (const e of [...ctx.db.symbol.iter()]) {
+    const creator = creatorOf(ctx, e.id);
+    if (creator === agentId) continue;
+    const reason =
+      e.id === newId ? 'it already exists' : duplicateReason(mine, { name: e.name, signature: e.signature });
+    if (!reason) continue;
+    const c = openConflict(
+      ctx,
+      'duplicate',
+      e.id,
+      creator ?? agentId,
+      agentId,
+      `${agentId} plans to create ${newId}, which duplicates existing ${e.id} (${reason}).`,
+    );
+    if (c) sendInstruction(ctx, agentId, `${e.id} already does this; reuse it.`, c.id);
+  }
+
+  for (const item of [...ctx.db.planItem.iter()]) {
+    if (item.intent !== 'create' || item.agent_id === agentId) continue;
+    if (ctx.db.symbol.id.find(item.symbol_id)) continue; // already handled as an existing symbol
+    const p = ctx.db.plan.id.find(item.plan_id);
+    if (!p || !p.active) continue;
+    const reason =
+      item.symbol_id === newId ? 'the same symbol' : duplicateReason(mine, { name: nameOf(item.symbol_id) });
+    if (!reason) continue;
+    openConflict(
+      ctx,
+      'duplicate',
+      item.symbol_id,
+      item.agent_id,
+      agentId,
+      `${agentId} plans to create ${newId}, which duplicates ${item.agent_id}'s planned ${item.symbol_id} (${reason}).`,
+    );
+  }
+}
+
 function checkContention(ctx: Ctx, agentId: string, symbolId: string, action: string): string | undefined {
   const held = liveClaim(ctx, symbolId);
   if (!held || held.agent_id === agentId) return undefined;
@@ -623,7 +676,10 @@ export const publish_plan = spacetimedb.reducer(
     for (const item of items) {
       if (item.intent === 'modify') checkContention(ctx, agent_id, item.symbol_id, 'plan to modify');
     }
-    // Rule 2 (duplicate implementation) lands in milestone 4.
+    // Rule 2: planning to create something that already exists or is planned elsewhere.
+    for (const item of items) {
+      if (item.intent === 'create') checkDuplicates(ctx, agent_id, item.symbol_id);
+    }
   },
 );
 
@@ -702,6 +758,9 @@ export const report_change = spacetimedb.reducer(
           updated_at: ctx.timestamp,
         });
       }
+      // Rule 2 again, now that the real signature is known (catches same-type helpers
+      // whose names differ, e.g. formatDate vs toDisplayDate).
+      checkDuplicates(ctx, agent_id, symbol_id, new_signature);
       return; // nobody can depend on a brand-new symbol yet
     }
     if (sym) {

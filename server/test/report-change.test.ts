@@ -213,9 +213,10 @@ describe('report_change: Rule 1 (broken dependency)', () => {
     // Act
     reportChange(t, 'agent-a', FEES);
 
-    // Assert
-    expect(conflicts(t)).toEqual([expect.objectContaining({ agent_b: 'agent-b', kind: 'broken_dependency' })]);
-    expect(conflicts(t)[0].details).toContain(`changes ${CHECKOUT}, which calls ${FEES}`);
+    // Assert (planning to 'create' an existing symbol also opens a Rule 2 duplicate; ignore it here)
+    const broken = conflicts(t).filter((c) => c.kind === 'broken_dependency');
+    expect(broken).toEqual([expect.objectContaining({ agent_b: 'agent-b' })]);
+    expect(broken[0].details).toContain(`changes ${CHECKOUT}, which calls ${FEES}`);
     expect(status(t, 'agent-b')).toBe('paused');
   });
 

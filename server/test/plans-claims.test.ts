@@ -141,8 +141,8 @@ describe('publish_plan', () => {
       // Act
       plan(t, 'agent-b', [{ symbol_id: FEES, intent }]);
 
-      // Assert
-      expect(conflicts(t)).toHaveLength(0);
+      // Assert (a 'create' of an existing symbol is Rule 2's business, not Rule 3's)
+      expect(conflicts(t).filter((c) => c.kind === 'claim_contention')).toHaveLength(0);
     });
 
     it("does not fire on the agent's own claim", () => {
