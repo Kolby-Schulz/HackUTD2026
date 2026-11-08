@@ -12,6 +12,7 @@ import type * as R from '@bindings/types.ts';
 import type { AgentCard, FeedEvent } from './model.ts';
 import { fmtClock } from './model.ts';
 import { EXAMPLES, useAssistant, type ChatMessage } from './ControlTab.tsx';
+import { useMachine } from './machine.tsx';
 
 function sentence(e: FeedEvent): string {
   const v = e.verb.charAt(0).toUpperCase() + e.verb.slice(1);
@@ -81,6 +82,9 @@ function Composer({ agents, openRun, connected, assistant, empty, machine }: {
 }) {
   const send = useReducer(reducers.sendInstruction);
   const createTask = useReducer(reducers.createTask);
+  // create_task takes operators only (#62): this browser must be paired with a laptop's
+  // `npm run control` daemon (any laptop, online or not). Messages (send_instruction) are open.
+  const paired = useMachine().mine.length > 0;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; bad?: boolean }>();
@@ -106,6 +110,7 @@ function Composer({ agents, openRun, connected, assistant, empty, machine }: {
   const what = toAssistant ? 'Tell InSync what to build' : to === 'all' ? `Message ${running.length} running agents` : asTask ? `New task for ${target!.person.name}` : target ? `Message ${target.person.name}` : 'No agent to message';
   const reach = toAssistant ? 'The assistant on this laptop starts and coordinates agents for you.'
     : to === 'all' ? `Reaches ${running.map((a) => `${a.person.name} (${where(a)})`).join(', ')}${machine && others ? ` · ${others} on other laptops` : laptops > 1 ? ` · ${laptops} laptops` : ''}.`
+    : asTask && !paired ? `${where(target!)} · ${target!.status} · becomes a new task, so pair this browser with a laptop first (Control tab)`
     : target ? `${where(target)} · ${target.status}${asTask ? ' · becomes a new task' : ''}`
     : 'No agent is online. Start one from the Control tab, or run a worker on a laptop.';
 
@@ -118,6 +123,7 @@ function Composer({ agents, openRun, connected, assistant, empty, machine }: {
       if (toAssistant) {
         await assistant.send(body);
       } else if (asTask) {
+        if (!paired) throw new Error('pair this browser with a laptop first (Control tab); only paired dashboards can create tasks');
         const title = body.length > 60 ? `${body.slice(0, 57)}...` : body;
         await createTask({ title, description: body, agentId: target!.id, runId: openRun!.id });
         setNote({ text: `New task assigned to ${target!.person.name}.` });

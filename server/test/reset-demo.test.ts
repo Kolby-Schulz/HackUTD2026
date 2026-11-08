@@ -1,10 +1,10 @@
 // reset_demo_state: per-run working state is cleared between demo runs; history is kept.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, FEES, TOTAL, type Harness } from './helpers';
+import { makeHarness, register, seedCodeMap, plan, claim, reportChange, mod, all, FEES, TOTAL, type Harness, asOperator } from './helpers';
 
-const reset = (t: Harness) => t.as('outsider', (ctx) => mod.reset_demo_state(ctx, {}));
-const startRun = (t: Harness) => t.as('outsider', (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
-const endRun = (t: Harness, id: bigint) => t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: id }));
+const reset = (t: Harness) => asOperator(t, (ctx) => mod.reset_demo_state(ctx, {}));
+const startRun = (t: Harness) => asOperator(t, (ctx) => mod.start_run(ctx, { mode: 'with_contract', seed: 7 }));
+const endRun = (t: Harness, id: bigint) => asOperator(t, (ctx) => mod.end_run(ctx, { run_id: id }));
 
 describe('reset_demo_state', () => {
   let t: Harness;

@@ -1,14 +1,14 @@
 // start_run, end_run, create_task, set_task_status (spec section 7).
 import { describe, it, expect, beforeEach } from 'vitest';
-import { makeHarness, register, mod, all, type Harness } from './helpers';
+import { makeHarness, register, mod, all, type Harness, asOperator } from './helpers';
 
 function startRun(t: Harness, mode = 'with_contract', seed = 7) {
-  t.as('outsider', (ctx) => mod.start_run(ctx, { mode, seed }));
+  asOperator(t, (ctx) => mod.start_run(ctx, { mode, seed }));
   return all(t.db.run.iter()).at(-1)!;
 }
 
 function createTask(t: Harness, runId: bigint, agent_id = 'agent-a') {
-  t.as('outsider', (ctx) =>
+  asOperator(t, (ctx) =>
     mod.create_task(ctx, { title: 'Late fees', description: 'Add late fees', agent_id, run_id: runId }),
   );
   return all(t.db.task.iter()).at(-1)!;
@@ -62,7 +62,7 @@ describe('start_run / end_run', () => {
     t.advance(90);
 
     // Act
-    t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: run.id }));
+    asOperator(t, (ctx) => mod.end_run(ctx, { run_id: run.id }));
     const next = startRun(t, 'without_contract');
 
     // Assert
@@ -73,11 +73,11 @@ describe('start_run / end_run', () => {
   it('rejects ending an unknown or already-ended run', () => {
     // Arrange
     const run = startRun(t);
-    t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: run.id }));
+    asOperator(t, (ctx) => mod.end_run(ctx, { run_id: run.id }));
 
     // Act
-    const endTwice = () => t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: run.id }));
-    const endUnknown = () => t.as('outsider', (ctx) => mod.end_run(ctx, { run_id: 999n }));
+    const endTwice = () => asOperator(t, (ctx) => mod.end_run(ctx, { run_id: run.id }));
+    const endUnknown = () => asOperator(t, (ctx) => mod.end_run(ctx, { run_id: 999n }));
 
     // Assert
     expect(endTwice).toThrow(/already ended/);
