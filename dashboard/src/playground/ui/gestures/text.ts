@@ -5,8 +5,9 @@ import { isHuman } from '../../core/actors';
 import { newId, opId } from '../../core/ids';
 import { frameAt, toLocal } from '../../core/tree';
 import type { Pt, ShapeId, ShapeProps } from '../../core/types';
-import { selectIds } from '../board/state';
+import { selectIds, selectedIds } from '../board/state';
 import type { BoardEnv } from '../board/state';
+import { modeAfterHandleDoubleClick, sizePatch } from '../text/autosize';
 import type { Mode, PointerInfo } from './pipeline';
 
 const BOX_MIN = 3;   // world units: a text-tool drag narrower than this is a click
@@ -72,10 +73,24 @@ export function commitText(env: BoardEnv, id: ShapeId, value: string) {
   }
   const s = board.doc.getState().shapes.get(id);
   if (!s || s.deleted) return;
+  // the fitted w/h rides in the same patch: one undo entry (WP-60)
   // a human changing text an agent wrote pins it: agents may not overwrite it afterwards (TEXT-15)
   const pin = !isHuman(s.createdBy) ? { humanEdited: true } : {};
   const commands = !value.trim()
     ? [{ t: 'shape.delete' as const, ids: [id] }]
-    : value !== s.text ? [{ t: 'shape.update' as const, ids: [id], patch: { text: value, name, ...pin } }] : [];
+    : value !== s.text ? [{ t: 'shape.update' as const, ids: [id], patch: { text: value, name, ...pin, ...(sizePatch({ ...s, text: value }) ?? {}) } }] : [];
   if (commands.length) board.exec({ actor: board.me, opId: opId(board.me), commands, label: 'Edit text' });
+}
+
+/** Double-click on a resize handle of selected text: back to auto width, fitted, in one undo entry (WP-60). */
+export function resetTextHandle(env: BoardEnv) {
+  const { board } = env;
+  const shapes = board.doc.getState().shapes;
+  const commands = selectedIds(board).flatMap((id) => {
+    const s = shapes.get(id);
+    if (!s || s.deleted || s.kind !== 'text') return [];
+    const textMode = modeAfterHandleDoubleClick();
+    return [{ t: 'shape.update' as const, ids: [id], patch: { textMode, ...(sizePatch({ ...s, textMode }) ?? {}) } }];
+  });
+  if (commands.length) board.exec({ actor: board.me, opId: opId(board.me), commands, label: 'Auto width' });
 }

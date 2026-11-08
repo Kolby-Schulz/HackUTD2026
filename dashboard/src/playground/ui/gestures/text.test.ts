@@ -1,5 +1,6 @@
 // Text tool: click = auto-width, drag = fixed-width box, human edits pin agent text.
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setMeasureEnv } from '../../render/measure';
 import { createBoard } from '../../core/commands';
 import { createCameraStore } from '../../core/camera';
 import { opId } from '../../core/ids';
@@ -8,6 +9,9 @@ import { createUiStore } from '../board/state';
 import type { BoardEnv } from '../board/state';
 import type { PointerInfo } from './pipeline';
 import { commitText, startTextTool } from './text';
+
+beforeEach(() => setMeasureEnv({ lineWidth: (l) => l.length * 10, wrap: (t) => [t] }));
+afterEach(() => setMeasureEnv(null));
 
 function makeEnv(): BoardEnv {
   const board = createBoard({ me: 'human-test' });

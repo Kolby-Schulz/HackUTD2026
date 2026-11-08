@@ -16,7 +16,7 @@ export const MENU_IDS: Record<MenuKind, string[]> = {
   layer: [
     'clipboard.cut', 'clipboard.copy', 'clipboard.pasteInPlace', 'edit.duplicate', '-',
     'arrange.front', 'arrange.forward', 'arrange.backward', 'arrange.back', '-',
-    'arrange.group', 'arrange.ungroup', 'layers.lock', 'layers.hide', '-',
+    'arrange.group', 'arrange.ungroup', 'layers.rename', 'layers.lock', 'layers.hide', '-',
     'share.exportPng', '-', 'edit.delete',
   ],
   canvas: ['clipboard.paste', 'edit.selectAll', '-', 'view.zoomFit', 'view.zoomSelection'],

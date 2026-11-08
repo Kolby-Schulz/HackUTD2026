@@ -10,6 +10,7 @@ import { startMarquee } from './marquee';
 import { startMove } from './move';
 import { startPan } from './pan';
 import { startResize } from './resize';
+import { startRotate } from './rotate';
 import { clearPress, finishClick, selectAt } from './select';
 import { commitText, startTextTool } from './text';
 import { selectIds, selectedIds } from '../board/state';
@@ -102,6 +103,7 @@ export function createPipeline(env: BoardEnv) {
     if (tool === 'frame' || tool === 'rect' || tool === 'ellipse') { begin(startCreate(env, p, tool), p); return; }
     if (tool === 'comment') { commentClick(env, p); return; }
     if (tool === 'text') { begin(startTextTool(env, p), p); return; }
+    if (p.handle?.startsWith('rot-')) { const m = startRotate(env, p); if (m) { begin(m, p); return; } }
     if (p.handle) { const m = startResize(env, p); if (m) { begin(m, p); return; } }
     const hit = selectAt(env, p);
     if (hit) { begin(startMove(env, p), p); return; }

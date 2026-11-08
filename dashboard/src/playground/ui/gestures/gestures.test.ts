@@ -1,6 +1,7 @@
 // Gesture modes against a real board (no DOM): every change goes through board.gesture / exec,
 // one drag = one undo entry, Escape restores, frames carry their children.
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { setMeasureEnv } from '../../render/measure';
 import { createBoard } from '../../core/commands';
 import { createCameraStore } from '../../core/camera';
 import { opId } from '../../core/ids';
@@ -15,6 +16,9 @@ import { createPipeline } from './pipeline';
 import type { PointerInfo } from './pipeline';
 import { commitText, placeText } from './text';
 import { commentClick } from './comment';
+
+beforeEach(() => setMeasureEnv({ lineWidth: (l) => l.length * 10, wrap: (t) => [t] }));
+afterEach(() => setMeasureEnv(null));
 
 function makeEnv(): BoardEnv {
   const board = createBoard({ me: 'human-test' });

@@ -40,6 +40,10 @@ export interface LayerRowProps {
   onToggle: (id: ShapeId, deep: boolean) => void;
   /** Double-click on the row (not the name, which renames): centre the camera on the layer. */
   onJump?: (id: ShapeId) => void;
+  /** Pointer entered (id) or left (null) the row: the panel shows a hover outline on the canvas. */
+  onHover?: (id: ShapeId | null) => void;
+  /** Briefly highlight the row (it was just revealed by a canvas selection). */
+  flash?: boolean;
 }
 
 const noop = () => () => {};
@@ -67,7 +71,7 @@ function RenameInput({ id, initial }: { id: ShapeId; initial: string }) {
   );
 }
 
-export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, lockColors, belowColors, getSelection, onPick, onToggle, onJump }: LayerRowProps) {
+export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, lockColors, belowColors, getSelection, onPick, onToggle, onJump, onHover, flash }: LayerRowProps) {
   const env = activeBoard();
   // Per-row subscription to its own shape, so flags and author show without the panel passing them down.
   const shape = useSyncExternalStore(
@@ -76,6 +80,11 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
   );
   const editing = useSyncExternalStore(subscribeRenaming, () => getRenaming() === row.id);
   const [hover, setHover] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (flash) rowRef.current?.animate?.([{ boxShadow: 'inset 0 0 0 2px var(--pg-sel)' }, { boxShadow: 'inset 0 0 0 2px transparent' }], { duration: 700, easing: 'ease-out' });
+  }, [flash]);
+  useEffect(() => () => onHover?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps
   const drop = useRowDropState(row.id);
   const [dropMode, dropDepth] = drop.split(':');
   const locked = !!shape?.locked, hidden = !!shape?.hidden;
@@ -95,8 +104,8 @@ export const LayerRow = memo(function LayerRow({ row, selected, hiddenSelected, 
     beginRowDrag(e, row.id, { selection, onExpand: (id) => onToggle(id, false) });
   };
   return (
-    <div className={cls} style={{ height: ROW_HEIGHT, position: 'relative', paddingLeft: 6 + Math.min(row.depth, MAX_INDENT_DEPTH) * 16, opacity: drop === 'drag' ? 0.4 : hidden ? 0.5 : undefined, boxShadow: dropMode === 'into' ? 'inset 0 0 0 2px var(--pg-sel)' : undefined }}
-      data-layer={row.id} data-expanded={row.expanded} data-haschildren={row.hasChildren} onPointerDown={onPointerDown} onClick={() => onPick(row.id)} onDoubleClick={() => onJump?.(row.id)} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+    <div ref={rowRef} className={cls} style={{ height: ROW_HEIGHT, position: 'relative', paddingLeft: 6 + Math.min(row.depth, MAX_INDENT_DEPTH) * 16, opacity: drop === 'drag' ? 0.4 : hidden ? 0.5 : undefined, boxShadow: dropMode === 'into' ? 'inset 0 0 0 2px var(--pg-sel)' : undefined }}
+      data-layer={row.id} data-expanded={row.expanded} data-haschildren={row.hasChildren} onPointerDown={onPointerDown} onClick={() => onPick(row.id)} onDoubleClick={() => onJump?.(row.id)} onMouseEnter={() => { setHover(true); onHover?.(row.id); }} onMouseLeave={() => { setHover(false); onHover?.(null); }}>
       <span className="chev" onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => { if (!row.hasChildren) return; e.stopPropagation(); onToggle(row.id, e.altKey); }}>
         {row.hasChildren && (
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ transform: row.expanded ? 'rotate(90deg)' : undefined }}>

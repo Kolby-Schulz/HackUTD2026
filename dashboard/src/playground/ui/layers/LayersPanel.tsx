@@ -1,5 +1,5 @@
 // The layer tree: nested rows in z-order (top first), expand/collapse, kind icons, click to select.
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { goToShape } from '../../core/goto';
 import { useDoc } from '../../core/react';
 import type { ShapeId } from '../../core/types';
@@ -17,7 +17,7 @@ import '../../styles/layers.css';
 // Expand/collapse choices live for the browser session (per viewer, not synced).
 let overrides: ExpandedMap = new Map();
 
-export function LayersPanel({ board, cursors }: SlotProps) {
+export function LayersPanel({ board, ui, cursors }: SlotProps) {
   const st = useDoc(board.doc);
   const selected = useSelection(board);
   const [exp, setExp] = useState<ExpandedMap>(overrides);
@@ -44,8 +44,25 @@ export function LayersPanel({ board, cursors }: SlotProps) {
     overrides = next;
     setExp(next);
   }, []);
+  // Flash the revealed row when the canvas (not a click in this panel) changed the selection.
+  const fromPanel = useRef(false);
+  const [flashId, setFlashId] = useState<ShapeId | null>(null);
+  useEffect(() => {
+    if (fromPanel.current) { fromPanel.current = false; return; }
+    const id = selected[selected.length - 1] ?? null;
+    setFlashId(id);
+    if (!id) return;
+    const t = setTimeout(() => setFlashId(null), 800);
+    return () => clearTimeout(t);
+  }, [selected]);
+  // Hover a row: outline that layer on the canvas through ui.hover (the comment tool keeps its own use of it).
+  const onHover = useCallback((id: ShapeId | null) => {
+    if (ui.get().tool === 'comment') return;
+    if (ui.get().hover !== id) ui.set({ hover: id });
+  }, [ui]);
   const { onPick, onClickCapture, onBackgroundClick, onKeyDown } =
     useLayerSelection({ board, rows, selected, shapes: st.shapes, listRef, expand });
+  const pickFromPanel = useCallback((id: ShapeId) => { fromPanel.current = true; setTimeout(() => { fromPanel.current = false; }, 300); onPick(id); }, [onPick]);
   const onJump = useCallback((id: ShapeId) => { goToShape(board.doc.getState(), id); }, [board]);
   const onToggle = useCallback((id: ShapeId, deep: boolean) => {
     const s = st.shapes.get(id);
@@ -90,7 +107,7 @@ export function LayersPanel({ board, cursors }: SlotProps) {
         renderRow={(row) => (
           <LayerRow row={row} selected={selSet.has(row.id)} hiddenSelected={hidden.has(row.id)}
             lockColors={activity.own.get(row.id)} belowColors={activity.below.get(row.id)}
-            onPick={onPick} onToggle={onToggle} onJump={onJump} />
+            onPick={pickFromPanel} onToggle={onToggle} onJump={onJump} onHover={onHover} flash={flashId === row.id} />
         )} />
       <LayerFooter total={total} selected={selected.length} matches={filtered ? filtered.matches : null} />
     </div>
