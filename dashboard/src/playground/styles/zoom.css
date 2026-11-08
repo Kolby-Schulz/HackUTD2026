@@ -1,0 +1,2 @@
+/* Zoom button / menu in the top bar. */
+.pg-zoom { border: 1px solid var(--pg-line); background: var(--pg-panel); border-radius: 6px; padding: 3px 8px; min-width: 52px; font-variant-numeric: tabular-nums; }

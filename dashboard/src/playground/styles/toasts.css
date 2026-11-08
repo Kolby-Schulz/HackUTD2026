@@ -1,0 +1,5 @@
+/* Toast stack, top centre of the board. */
+.pg-toasts { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; z-index: 5; pointer-events: none; }
+.pg-toast { background: var(--pg-ink); color: var(--pg-white); padding: 6px 14px; border-radius: 999px; font-size: 12px; }
+.pg-toast.success { background: var(--pg-success); }
+.pg-toast.error { background: var(--pg-danger); }

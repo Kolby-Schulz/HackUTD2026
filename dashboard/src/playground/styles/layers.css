@@ -1,0 +1,11 @@
+/* Layers panel. */
+.pg-layers { flex: 1; overflow: auto; padding: 0 6px 12px; }
+.pg-left .pg-layers { padding-top: 8px; }
+.pg-layer { display: flex; align-items: center; gap: 8px; padding: 4px 8px 4px 22px; border-radius: 6px; cursor: default; white-space: nowrap; }
+.pg-layer.frame { padding-left: 8px; font-weight: 500; margin-top: 2px; }
+.pg-layer:hover { background: var(--pg-hover-soft); }
+.pg-layer.on { background: var(--pg-sel-bg); }
+.pg-layer .ic { width: 12px; color: var(--pg-muted); font-size: 11px; text-align: center; }
+.pg-layer .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.pg-layer .dot { width: 7px; height: 7px; border-radius: 50%; }
+.pg-empty { color: var(--pg-muted); padding: 8px; }
