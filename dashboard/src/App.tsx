@@ -1,121 +1,154 @@
 // Dashboard (spec section 13). Owner: dashboard + demo.
-// Tabs from the storyboard: Live (row G), Activity (G6), Tokens (F4), Scoreboard (F5).
-// The agents column stays on every tab. Everything comes from live subscriptions.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// One screen, laid out like an editor workbench (storyboard "Frame 1 as an editor workbench"):
+// Agents side bar, Code map editor, Savings / Problems panel, Chat, status bar. No tabs.
+// Everything comes from live subscriptions. ReplayTab.tsx stays in the repo but is not mounted.
+import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
-import { agentCards, cases, codeMap, coordinator, edits, feed, fmtClock, latestRun, modeSummary, people, runWindow, tokenStats } from './model.ts';
-import { AgentsPanel } from './AgentsPanel.tsx';
-import { LiveTab } from './LiveTab.tsx';
-import { ActivityTab } from './ActivityTab.tsx';
-import { TokensTab } from './TokensTab.tsx';
-import { ScoreboardTab } from './ScoreboardTab.tsx';
-import { CodeTab } from './CodeTab.tsx';
-import { ReplayTab } from './ReplayTab.tsx';
+import { agentCards, cases, codeMap, coordFocus, coordinator, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
 import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
+import { CodeMap } from './CodeMap.tsx';
+import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
+import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
+import { ChatView } from './Chat.tsx';
+import { Boundary } from './ui.tsx';
 
-type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard' | 'replay';
-const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard'], ['replay', 'Replay']];
-
-function useHashTab(): Tab {
-  const read = (): Tab => {
-    const h = location.hash.replace(/^#\/?/, '').split('/')[0];
-    return (TABS.find(([k]) => k === h)?.[0]) ?? 'live';
-  };
-  const [tab, setTab] = useState<Tab>(read);
-  useEffect(() => {
-    const on = () => setTab(read());
-    window.addEventListener('hashchange', on);
-    return () => window.removeEventListener('hashchange', on);
-  }, []);
-  return tab;
-}
+const modeName = (m: string) => (m === 'with_contract' ? `with ${APP_NAME}` : m === 'without_contract' ? `without ${APP_NAME}` : m);
 
 export function App() {
   const live = useLive();
-  const tab = useHashTab();
   const [intro, setIntro] = useState(shouldPlayIntro);
   const endIntro = useCallback(() => setIntro(false), []);
   const [runPick, setRunPick] = useState<string>('latest');
   const run = runPick === 'latest' ? latestRun(live.runs) : live.runs.find((r) => String(r.id) === runPick);
   const { now } = live;
   const w = runWindow(run, now);
+  const { layout, resize, toggle } = useLayout();
+  const [picked, setPicked] = useState<string>();
+  const [panelTab, setPanelTab] = useState<'savings' | 'problems'>('savings');
 
-  const view = useMemo(() => {
-    const cs = cases(live, w);
-    const ppl = people(live.agents);
-    return {
-      agents: agentCards(live, run, now),
-      coord: coordinator(live, run, now),
-      cases: cs,
-      events: feed(live, w),
-      edits: edits(live, w),
-      map: codeMap(live, w, now),
-      stats: tokenStats(live, run),
-      without: modeSummary(live, 'without_contract', now),
-      withC: modeSummary(live, 'with_contract', now),
-      people: [...ppl.values()],
-    };
+  const view = useMemo(() => ({
+    agents: agentCards(live, run, now),
+    coord: coordinator(live, run, now),
+    cases: cases(live, w),
+    events: feed(live, w),
+    map: codeMap(live, w, now),
+    savings: savingsNow(live, run, now),
+    stage: runStage(live, run, w),
+    focus: coordFocus(live, w),
     // `now` ticks every second; the tables change only when the server pushes rows
-  }, [live, run, now, w.start, w.end]);
+  }), [live, run, now, w.start, w.end]);
 
-  const clock = run ? fmtClock(w.end - w.start, false) : '00:00';
+  const selected = picked && view.map.nodes.some((n) => n.id === picked) ? picked : undefined;
+  const node = view.map.nodes.find((n) => n.id === selected);
+  const openCount = view.cases.filter((c) => c.open).length;
   const runs = live.runs.slice().sort((a, b) => Number(b.id - a.id));
+  const openRun = live.runs.find((r) => r.endedAt === undefined);
+  const STAGES = ['Plan', 'Code', 'Merge'] as const;
+  const stageAt = STAGES.indexOf(view.stage);
+  const { open, size } = layout;
 
   return (
-    <div className={'app' + (tab === 'live' ? ' fit' : '')}>
+    <div className="wb">
       <AnimatePresence>{intro && <Intro key="intro" onDone={endIntro} />}</AnimatePresence>
-      <header className="topnav">
+
+      <header className="titlebar">
         <div className="brand">
-          <button className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><LanesMark /></button>
+          <button type="button" className="logo-btn" onClick={() => setIntro(true)} aria-label="Replay intro" title="Replay intro"><LanesMark size={24} /></button>
           {APP_NAME}
         </div>
-        <span className="vsep" />
-        <label className="runsel">
-          <span>demo-repo</span><span className="muted">·</span>
-          <select aria-label="Run" value={runPick} onChange={(e) => setRunPick(e.target.value)}>
-            <option value="latest">{run ? `latest: run ${run.id} · ${run.mode}` : 'no runs yet'}</option>
-            {runs.map((r) => <option key={String(r.id)} value={String(r.id)}>run {String(r.id)} · {r.mode} · seed {r.seed}{r.endedAt ? '' : ' · live'}</option>)}
-          </select>
-        </label>
-        <div className="grow" />
-        <nav aria-label="Dashboard sections" className="tabs">
-          {TABS.map(([k, label]) => (
-            <a key={k} href={`#/${k}`} className="tab" aria-current={tab === k ? 'page' : undefined}>
-              {label}{k === 'activity' && view.events.length > 0 && <span className="count">{view.events.length}</span>}
-            </a>
-          ))}
-        </nav>
-        <div className="navright">
-          <span style={{ display: 'flex', alignItems: 'center', gap: 7 }} className="muted">
-            <span className="dot" style={{ width: 8, height: 8, background: live.connected ? (w.live ? 'var(--ok)' : 'var(--text2)') : 'var(--danger)' }} />
-            {!live.connected ? 'Offline' : w.live ? 'Live' : run ? 'Ended' : 'Connected'}
-          </span>
-          <span className="mono">T+{clock}</span>
+        <div className="cmd">
+          <label>
+            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+            <span>demo-repo</span>
+            <select aria-label="Run" value={runPick} onChange={(e) => { setRunPick(e.target.value); setPicked(undefined); }}>
+              <option value="latest">{run ? `latest · run ${run.id} · ${modeName(run.mode)}` : 'no runs yet'}</option>
+              {runs.map((r) => <option key={String(r.id)} value={String(r.id)}>run {String(r.id)} · {modeName(r.mode)} · seed {r.seed}{r.endedAt ? '' : ' · live'}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="tb-right">
+          <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" title="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
+          <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" title="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
+          <button type="button" className="iconbtn" aria-pressed={open.chat} aria-label="Toggle chat" title="Chat" onClick={() => toggle('chat')}>{ICON.chat}</button>
         </div>
       </header>
 
-      {!live.connected && (
-        <div style={{ padding: '0 20px' }}>
-          <div className="banner" role="status">
-            Not connected to SpacetimeDB at <span className="mono">{SPACETIME_HOST}</span> (database <span className="mono">{SPACETIME_DB_NAME}</span>).
-            {live.error ? ` ${live.error}.` : ''} Check SPACETIME_HOST and SPACETIME_DB_NAME in the root .env, or start a local server with <span className="mono">spacetime start</span>.
-          </div>
-        </div>
-      )}
+      <div className="main">
+        {open.side && (
+          <>
+            <aside className="pane side" style={{ width: size.side }} aria-label="Agents">
+              <PaneHead title="Agents" onClose={() => toggle('side', false)} />
+              <div className="pane-body">
+                <Boundary name="Agents">
+                  <AgentsView agents={view.agents} coord={view.coord} events={view.events} runLabel={run ? `RUN #${run.id}` : 'NO RUN YET'} />
+                </Boundary>
+              </div>
+            </aside>
+            <Sash dir="v" label="Resize agents" size={size.side} sign={1} onSize={(px) => resize('side', px)} onToggle={() => toggle('side', false)} />
+          </>
+        )}
 
-      <div className="body">
-        <AgentsPanel agents={view.agents} coord={view.coord} openRun={live.runs.find((r) => r.endedAt === undefined)} tasks={live.tasks}
-          onlineIds={new Set(live.agents.filter((a) => now - Number(a.lastHeartbeat.microsSinceUnixEpoch / 1000n) < 60_000).map((a) => a.id))} />
-        <main className="main">
-          {tab === 'live' && <LiveTab agents={view.agents} cases={view.cases} events={view.events} map={view.map} stats={view.stats} without={view.without} symbols={live.symbols} edges={live.edges} runStart={w.start} edits={view.edits} />}
-          {tab === 'code' && <CodeTab agents={view.agents} edits={view.edits} />}
-          {tab === 'activity' && <ActivityTab events={view.events} cases={view.cases} people={view.people} />}
-          {tab === 'tokens' && <TokensTab stats={view.stats} agents={view.agents} coord={view.coord} cases={view.cases} runStart={w.start} />}
-          {tab === 'replay' && <ReplayTab live={live} />}
-          {tab === 'scoreboard' && <ScoreboardTab without={view.without} withC={view.withC} />}
-        </main>
+        <div className="center">
+          <main className="pane" style={{ flex: 1 }} aria-label="Editor">
+            <div className="tabs"><div className="etab">{ICON.map}Code map</div></div>
+            <nav className="crumbs" aria-label="Run stage">
+              <span>demo-repo</span>
+              {STAGES.map((s, i) => <span key={s}>›&nbsp; <span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
+              <span className="grow" />
+              <span>dashed = planned · outline = claimed · click a symbol for details</span>
+            </nav>
+            {!live.connected && (
+              <div className="banner" role="status">
+                Not connected to SpacetimeDB at <span className="mono">{SPACETIME_HOST}</span> (database <span className="mono">{SPACETIME_DB_NAME}</span>).
+                {live.error ? ` ${live.error}.` : ''} Retrying. Check SPACETIME_HOST and SPACETIME_DB_NAME in the root .env, or start a local server with <span className="mono">spacetime start</span>.
+              </div>
+            )}
+            <div className="editor">
+              <Boundary name="Code map">
+                {live.connected && !live.ready ? <div className="map-empty">Loading the code map…</div> : (
+                  <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked}
+                    widget={node && <SymbolWidget key={node.id} node={node} symbols={live.symbols} edges={live.edges} history={symbolHistory(live, w, node.id)}
+                      openCase={view.cases.find((c) => c.open && c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
+                )}
+              </Boundary>
+            </div>
+          </main>
+          {open.panel && (
+            <>
+              <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
+              <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings and problems">
+                <Boundary name="Panel">
+                  <BottomPanel savings={view.savings} cases={view.cases} tab={panelTab} setTab={setPanelTab} onClose={() => toggle('panel', false)} />
+                </Boundary>
+              </section>
+            </>
+          )}
+        </div>
+
+        {open.chat && (
+          <>
+            <Sash dir="v" label="Resize chat" size={size.chat} sign={-1} onSize={(px) => resize('chat', px)} onToggle={() => toggle('chat', false)} />
+            <aside className="pane chat" style={{ width: size.chat }} aria-label="Chat">
+              <PaneHead title="Chat" onClose={() => toggle('chat', false)}><span className="muted" style={{ fontSize: 12 }}>{run ? `run #${run.id}` : ''}</span></PaneHead>
+              <Boundary name="Chat">
+                <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} />
+              </Boundary>
+            </aside>
+          </>
+        )}
       </div>
+
+      <footer className="statusbar" aria-label="Status bar">
+        {run ? <><span>Run #{String(run.id)}</span><span>{modeName(run.mode)}</span><span>seed {run.seed}</span></> : <span>Start a run: npm run demo -- --mode with_contract</span>}
+        <span>{view.agents.length} agent{view.agents.length === 1 ? '' : 's'}</span>
+        <span className="grow" />
+        <button type="button" onClick={() => { toggle('panel', true); setPanelTab('problems'); }} aria-label="Show problems">
+          <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2L14.5 13.5h-13z M8 6.5v3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          {openCount} open
+        </button>
+        <span>Stage: {view.stage}</span>
+      </footer>
     </div>
   );
 }

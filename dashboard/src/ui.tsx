@@ -1,5 +1,5 @@
 // Small shared pieces: event icons, avatars, status chips.
-import type { CSSProperties } from 'react';
+import { Component, type CSSProperties, type ReactNode } from 'react';
 import type { Kind, Person } from './model.ts';
 
 export const KIND_COLOR: Record<Kind, string> = {
@@ -57,4 +57,14 @@ export function StatusLabel({ status, dot = true }: { status: string; dot?: bool
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{children}</div>;
+}
+
+/** Keeps one crashing pane from blanking the whole workbench. */
+export class Boundary extends Component<{ name: string; children: ReactNode }, { error?: Error }> {
+  state: { error?: Error } = {};
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  render() {
+    if (this.state.error) return <div className="boundary" role="alert">{this.props.name} hit an error and was hidden: {this.state.error.message}</div>;
+    return this.props.children;
+  }
 }
