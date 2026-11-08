@@ -1,17 +1,26 @@
 // scripts/join.ts: get a new laptop into a Contract run with one command (issue #19).
 //   npm run join -- --agent agent-b --name "Agent B" [--owner Bob] [--repo <path|git URL>]
+//   npm run join -- --agent dana --name "Dana" --client claude-code|cursor|codex [--dir .] [--task "…"]
+//
+// --client (issue #22) joins your own editor instead of our worker script: it creates a task
+// for the agent in the open run and writes that editor's MCP config and Contract rules into
+// --dir (default: the target repo). Claude Code also gets the edit hooks (claim guard, change
+// reporting, pause); Cursor/Codex use `npm run watch-agent` for change reporting. No tokens
+// are written: the MCP server and hooks read the saved identity.
 //
 // Checks what a worker needs and says how to fix anything missing:
 //   Node >= 22, .env with SPACETIME_HOST / SPACETIME_DB_NAME, the `claude` CLI and its login,
 //   git and the target repo's origin. Then registers the agent (saving its identity so the
 //   worker reuses it) and prints the command to start working.
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { connect, resolveTarget } from '@contract/client';
-import { log, REPO, savedToken, saveToken } from './lib.ts';
+import { joinedRules } from '../agents/worker/src/rules.ts';
+import { clientFiles, CLIENTS, codexToml, type ClientKind } from './join-clients.ts';
+import { adminConnect, log, REPO, savedToken, saveToken, waitFor } from './lib.ts';
 
 export interface CheckLine { ok: boolean; what: string; fix?: string }
 
@@ -58,8 +67,13 @@ async function main() {
       owner: { type: 'string', default: process.env.USER ?? 'dev' },
       machine: { type: 'string', default: hostname().replace(/\.local$/, '') },
       repo: { type: 'string' },
+      client: { type: 'string' },
+      dir: { type: 'string' },
+      task: { type: 'string' },
     },
   });
+  const editor = values.client as ClientKind | undefined;
+  if (editor && !CLIENTS.includes(editor)) throw new Error(`--client must be one of ${CLIENTS.join(', ')}`);
   const agentId = values.agent;
   if (!agentId || !/^[\w-]+$/.test(agentId)) throw new Error('usage: npm run join -- --agent agent-b --name "Agent B" [--owner Bob] [--repo <path|git URL>]');
 
@@ -90,10 +104,74 @@ async function main() {
   });
   saveToken(agentId, client.token);
   await client.disconnect();
+  if (editor) {
+    await joinEditor(editor, agentId, values);
+    return;
+  }
   const repo = values.repo ? ` --repo ${values.repo}` : '';
   log('join', `registered ${agentId} (${values.name ?? agentId}, ${values.owner} on ${values.machine}); it shows on the dashboard now`);
   log('join', `start working:  npm run worker -- --id ${agentId}${repo} --wait     (takes tasks from the dashboard)`);
   log('join', `           or:  npm run worker -- --id ${agentId}${repo} --prompt "what to build"`);
+}
+
+/** --client: a task in the open run, then the editor's config files in --dir. */
+async function joinEditor(client: ClientKind, agentId: string, values: { name?: string; owner?: string; machine?: string; repo?: string; dir?: string; task?: string }) {
+  const dir = resolve(process.env.INIT_CWD ?? process.cwd(), values.dir ?? resolveTarget(REPO, values.repo).dir);
+  if (!existsSync(dir)) throw new Error(`--dir ${dir} does not exist`);
+
+  const conn = await adminConnect(['SELECT * FROM run', 'SELECT * FROM task']);
+  const run = [...conn.db.run.iter()].find((r) => r.endedAt === undefined);
+  if (!run) throw new Error('no open run; start one first: npm run session -- start');
+  const description = values.task?.trim() || `Interactive ${client} session (${values.name ?? agentId})`;
+  const mine = () => [...conn.db.task.iter()].find((t) => t.runId === run.id && t.agentId === agentId && (t.status === 'todo' || t.status === 'in_progress'));
+  let task = mine();
+  if (!task) {
+    await conn.reducers.createTask({ title: description.length > 60 ? `${description.slice(0, 57)}...` : description, description, agentId, runId: run.id });
+    task = await waitFor(mine, 'the new task');
+  }
+  if (task.status === 'todo') await conn.reducers.setTaskStatus({ taskId: task.id, status: 'in_progress' });
+  conn.disconnect();
+
+  const info = {
+    monorepo: REPO, dir, agentId, name: values.name ?? agentId, owner: values.owner ?? '', machine: values.machine ?? '',
+    taskId: task.id, host: process.env.SPACETIME_HOST!, dbName: process.env.SPACETIME_DB_NAME!, rules: joinedRules(client === 'claude-code'),
+  };
+  const created: string[] = [];
+  for (const f of clientFiles(client, info)) {
+    const current = existsSync(f.path) ? readFileSync(f.path, 'utf8') : undefined;
+    if (current === undefined) created.push(f.path);
+    mkdirSync(dirname(f.path), { recursive: true });
+    writeFileSync(f.path, f.write(current));
+    log('join', `${current === undefined ? 'wrote' : 'updated'} ${f.path}`);
+  }
+  excludeFromGit(dir, created);
+
+  log('join', `${agentId} works on task ${task.id} in run ${run.id}: ${task.description}`);
+  if (client === 'claude-code') {
+    log('join', `start it:  cd ${dir} && claude      (Contract tools, rules and edit hooks load automatically)`);
+  } else if (client === 'cursor') {
+    log('join', `open ${dir} in Cursor; enable the "contract" MCP server in Settings > MCP if asked.`);
+    log('join', `and run next to it:  npm run watch-agent -w @contract/worker -- --agent ${agentId} --dir ${dir}`);
+  } else {
+    log('join', 'add this to ~/.codex/config.toml, then run `codex` in that folder (AGENTS.md has the rules):');
+    console.log('\n' + codexToml(info) + '\n');
+    log('join', `and run next to it:  npm run watch-agent -w @contract/worker -- --agent ${agentId} --dir ${dir}`);
+  }
+}
+
+/** New editor files are machine-specific: keep them out of `git status` without touching .gitignore. */
+function excludeFromGit(dir: string, files: string[]) {
+  if (!files.length) return;
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' }).trim();
+    const exclude = resolve(dir, execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: dir, encoding: 'utf8' }).trim());
+    const have = existsSync(exclude) ? readFileSync(exclude, 'utf8') : '';
+    const add = files.map((f) => '/' + relative(top, f)).filter((l) => !have.split('\n').includes(l));
+    if (add.length) {
+      mkdirSync(dirname(exclude), { recursive: true });
+      appendFileSync(exclude, `${have && !have.endsWith('\n') ? '\n' : ''}# contract join\n${add.join('\n')}\n`);
+    }
+  } catch { /* not a git folder: nothing to exclude */ }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

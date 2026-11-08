@@ -5,6 +5,12 @@
 // The worker script (not this server) handles register_agent, heartbeats, pauses and
 // token logging, so this connects with noHeartbeat.
 //
+// Joined editors (issue #22, `npm run join -- --client …`): Claude Code, Cursor or Codex
+// start this from their own MCP config. Then there's no worker, so:
+//   - CONTRACT_TOKEN may be unset: the agent's saved identity (.contract/identities.json) is used;
+//   - CONTRACT_HEARTBEAT=1 registers and heartbeats as the agent (CONTRACT_AGENT_NAME,
+//     CONTRACT_OWNER, CONTRACT_MACHINE, CONTRACT_MODEL), so it shows online while the editor runs.
+//
 // stdout is the MCP stdio channel: never console.log here (console.error/warn are fine).
 import { config as loadEnv } from 'dotenv';
 import { dirname, resolve } from 'node:path';
@@ -12,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { ClaimedError, connect, estimateTokens, type ContractClient, type Instruction } from '@contract/client';
+import { ClaimedError, connect, estimateTokens, readSavedToken, type ContractClient, type Instruction } from '@contract/client';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 // Claude Code starts us in the agent's worktree, so load the monorepo's .env explicitly.
@@ -285,13 +291,23 @@ async function main() {
   const agentId = env('CONTRACT_AGENT_ID');
   const taskId = BigInt(env('CONTRACT_TASK_ID'));
   // Connect in the background so the MCP handshake isn't held up; tools await it.
+  const token = process.env.CONTRACT_TOKEN || readSavedToken(REPO, agentId);
+  if (!token) throw new Error(`no identity for ${agentId}: run \`npm run join -- --agent ${agentId}\` first`);
+  const heartbeat = process.env.CONTRACT_HEARTBEAT === '1';
   const clientP = connect({
     host: env('SPACETIME_HOST'),
     dbName: env('SPACETIME_DB_NAME'),
-    token: env('CONTRACT_TOKEN'),
-    noHeartbeat: true,
+    token,
+    noHeartbeat: !heartbeat,
     repoDir: process.env.CONTRACT_REPO_DIR ?? process.cwd(),
-    agent: { id: agentId, name: agentId, ownerDev: '', machine: '', model: 'claude-code', tokenBudget: 0 },
+    agent: {
+      id: agentId,
+      name: process.env.CONTRACT_AGENT_NAME || agentId,
+      ownerDev: process.env.CONTRACT_OWNER ?? '',
+      machine: process.env.CONTRACT_MACHINE ?? '',
+      model: process.env.CONTRACT_MODEL || 'claude-code',
+      tokenBudget: 200_000,
+    },
   });
   clientP.catch((e: unknown) => console.error(`contract mcp: connect failed: ${String(e)}`));
 

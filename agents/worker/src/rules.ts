@@ -20,3 +20,22 @@ Workflow:
 5. After changing a function's signature or behavior, call report_change. Call release_claim
    when you're done with a function.
 6. Call get_instructions after each step and follow the coordinator's instructions.`;
+
+/**
+ * Rules for an agent that joined from its own editor (issue #22): Claude Code, Cursor or
+ * Codex with the Contract MCP server, no worker script around it. `hooks` says whether
+ * contract-hook reports changes automatically (Claude Code) or the model must (others).
+ */
+export function joinedRules(hooks: boolean): string {
+  return [
+    CONTRACT_RULES.replace('(mcp__contract__*)', '(the "contract" MCP server: get_context, find_existing, declare_plan, claim_symbol, release_claim, report_change, get_instructions, get_summary, put_summary)'),
+    '',
+    'Working inside Contract from your own editor:',
+    '7. You can be paused when another agent changes code your plan depends on (Rule 1). If an edit is',
+    '   blocked with "you are paused", or get_instructions says to wait, stop editing and call',
+    '   get_instructions until the coordinator\'s decision arrives. Then follow it.',
+    hooks
+      ? '8. Your edits are reported automatically (diffs and signature changes); still call report_change for behavior changes with the same signature.'
+      : '8. Nothing reports your edits automatically unless `npm run watch-agent` runs next to you: after every edit that changes a function\'s signature or behavior, call report_change yourself.',
+  ].join('\n');
+}
