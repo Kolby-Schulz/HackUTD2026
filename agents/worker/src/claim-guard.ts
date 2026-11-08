@@ -7,9 +7,12 @@
 // It also blocks every edit while this agent is paused (Rule 1, issue #22): a worker stops on
 // its own, but a joined interactive Claude Code session needs the hook to make it wait.
 //
+// With CONTRACT_ALLOWED_PATHS (comma-separated folder prefixes, issue #29 judge tasks) it
+// also refuses edits to any file outside those folders.
+//
 // Fails open: no Contract env, a parse error or a server problem lets the edit through.
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SymbolRange } from '@contract/mapper';
 import { repoFile } from './summary-hook.ts';
@@ -78,6 +81,13 @@ export function blockingClaims(claims: ClaimRow[], symbolIds: string[], me: stri
   return claims.filter((c) => ids.has(c.symbolId) && c.agentId !== me && c.expiresAtMs > nowMs);
 }
 
+/** Whether `rel` (repo-relative, '/'-separated) is inside one of the allowed prefixes. */
+export function pathAllowed(rel: string | undefined, allowed: string[]): boolean {
+  if (!allowed.length) return true;
+  if (!rel) return false; // outside the repo
+  return allowed.some((p) => rel === p.replace(/\/$/, '') || rel.startsWith(p.endsWith('/') ? p : `${p}/`));
+}
+
 export function pausedMessage(conflictHint: string): string {
   return [
     `Contract: you are paused${conflictHint}. Another agent changed code your plan depends on, and the coordinator is deciding who changes what.`,
@@ -104,11 +114,20 @@ async function main(): Promise<number> {
   // stderr is the message Claude Code shows the model, so keep the SpacetimeDB SDK's logs out of it.
   console.log = console.info = console.debug = () => {};
   const input = JSON.parse(readFileSync(0, 'utf8')) as GuardInput;
+  const repoDir = process.env.CONTRACT_REPO_DIR ?? input.cwd;
+  const path = input.tool_input?.file_path;
+  // Allowed folders first: a local check, no server needed.
+  const allowed = (process.env.CONTRACT_ALLOWED_PATHS ?? '').split(',').map((p) => p.trim()).filter(Boolean);
+  if (path && allowed.length) {
+    const inRepo = relative(repoDir, isAbsolute(path) ? path : resolve(input.cwd, path)).split(sep).join('/');
+    if (inRepo.startsWith('..') || isAbsolute(inRepo) || !pathAllowed(inRepo, allowed)) {
+      process.stderr.write(`Contract guard rail: this task may only edit files under ${allowed.join(', ')}; ${path} is outside. Put the change there or explain why you can't.\n`);
+      return 2;
+    }
+  }
   const agent = hookAgent();
   if (!agent) return 0;
   const { agentId, token, host } = agent;
-  const repoDir = process.env.CONTRACT_REPO_DIR ?? input.cwd;
-  const path = input.tool_input?.file_path;
   const rel = path ? repoFile(path, input.cwd, repoDir) : undefined;
   if (!rel) return 0;
 

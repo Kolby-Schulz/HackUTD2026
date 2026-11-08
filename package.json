@@ -23,7 +23,8 @@
     "triage": "npm run start -w @contract/triage --",
     "mcp": "npm run start -w @contract/mcp --",
     "session": "tsx scripts/session.ts",
-    "join": "tsx scripts/join.ts"
+    "join": "tsx scripts/join.ts",
+    "judge": "tsx scripts/judge.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
