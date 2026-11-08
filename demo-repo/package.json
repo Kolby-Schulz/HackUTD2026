@@ -1,0 +1,20 @@
+{
+  "name": "demo-billing",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Small TypeScript billing app with two planted conflicts (Contract spec section 14).",
+  "scripts": {
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "check:dupes": "tsx scripts/check-dupes.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "verify": "npm test && npm run test:integration && npm run check:dupes",
+    "selftest": "tsx scripts/selftest.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
