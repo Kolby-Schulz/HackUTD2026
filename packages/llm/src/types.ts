@@ -2,7 +2,7 @@
 // Every model call in the repo goes through here so tokens are always logged
 // and the provider can be swapped with LLM_PROVIDER.
 
-export type Purpose = 'plan' | 'code' | 'context' | 'test_fix' | 'merge_fix' | 'coordination' | 'triage';
+export type Purpose = 'plan' | 'code' | 'context' | 'test_fix' | 'merge_fix' | 'coordination' | 'triage' | 'design';
 
 /** Matches the spec's token_usage columns, plus cost. */
 export interface Usage {

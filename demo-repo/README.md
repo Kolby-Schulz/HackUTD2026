@@ -26,7 +26,7 @@ root `node_modules`, so a fresh worktree needs no `npm install`.
 | `npm test` | green (unit tests only) |
 | `npm run test:integration` | **red by design**: these are the two tasks' goals; run after merging both agents |
 | `npm run check:dupes` | green (0 date formatters) |
-| `npm run selftest` | green: baseline, A+B without Contract (both checks fail), A+B with Contract (both pass) |
+| `npm run selftest` | green: baseline, A+B without InSync (both checks fail), A+B with InSync (both pass) |
 | `npm run typecheck` | green |
 
 ## The two tasks and the planted conflicts
@@ -38,10 +38,10 @@ root `node_modules`, so a fresh worktree needs no `npm install`.
 
 1. **Changed behavior.** A changes `calculateFee` to round half-up. B, unaware, rounds the fee
    itself for the receipt, so `integration.test.ts` fails by one cent on a 1020¢ order.
-   With Contract, Rule 1 fires on A's `report_change` (B depends on `calculateFee`, and
+   With InSync, Rule 1 fires on A's `report_change` (B depends on `calculateFee`, and
    `computeTotal → calculateFee` is a call edge).
 2. **Duplicate helper.** No date formatter exists, so each agent writes one
-   (e.g. `formatDate` and `toDisplayDate`), and `check-dupes` fails. With Contract, Rule 2 fires
+   (e.g. `formatDate` and `toDisplayDate`), and `check-dupes` fails. With InSync, Rule 2 fires
    on B's plan and B reuses A's helper.
 
 Test dates are built with `Date.UTC`, so formatters should use `timeZone: 'UTC'`.

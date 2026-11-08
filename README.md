@@ -9,7 +9,13 @@ or Claude (`COORDINATOR_PROVIDER`).
 
 > InSync isn't another coding agent. It's what lets your team's coding agents work like a team.
 
-Built at HackUTD 2026. Full spec: [docs/SPEC.md](docs/SPEC.md).
+Built at HackUTD 2026 (final submission build). Live dashboard:
+**[hack-utd-2026.vercel.app](https://hack-utd-2026.vercel.app)** (pair it with a laptop running
+`npm run control`, see below). Full spec: [docs/SPEC.md](docs/SPEC.md).
+
+The project's working name was Contract, so the code still uses it: packages are `@contract/*`,
+env vars are `CONTRACT_*`, the per-repo config file is `contract.json` and the SpacetimeDB
+database is `contract-hackutd26`. InSync is the product name.
 
 ![InSync dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
 
@@ -43,6 +49,25 @@ In the dashboard's **Chat** tab, type what you want built, the way you'd prompt 
 InSync plans it, starts a coordinator and a session, puts one agent on each independent
 piece, catches the conflicts between them while they type, and merges and runs the checks when
 they finish. A second laptop joins the same run with `npm run control` and the same `.env`.
+
+## The dashboard
+
+An editor-style workbench (VS Code layout, InSync styling from [DESIGN.md](DESIGN.md)). Every
+panel is a live SpacetimeDB subscription, so every laptop and browser sees the same run.
+
+- **Chat**: say what to build; InSync splits it across agents and runs the whole session.
+  Messages sent while agents work reach them as follow-ups.
+- **Agents** (side bar): each agent online, its status and what it's working on.
+- **Code map**: the repo's functions and call edges, with what each agent is changing, creating
+  or removing highlighted as it happens. Focuses on agent work on large repos.
+- **Changes**: the agents' actual edits next to the code map.
+- **Control**: start and stop the coordinator, session, workers, judge, merge and reset on your
+  own laptop, with each process's output; lists the other laptops online.
+- **Savings** (bottom panel): conflicts caught, average time to resolve, tokens and dollars
+  saved; click a number to see where it came from.
+
+Light and dark themes. `#/variants` is the design comparison page used to build it
+(`dashboard/src/designs/README.md`).
 
 ## Architecture
 
@@ -123,13 +148,17 @@ mapped symbol without a claim.
 ```text
 server/              SpacetimeDB module: tables, reducers, conflict checks
 packages/client/     InSync client library + generated SpacetimeDB bindings
-packages/llm/        Shared model wrapper (Claude Code today): calls, token + cost logging
+packages/llm/        Shared model wrapper (Claude Code, Nemotron): calls, token + cost logging
+packages/mcp/        MCP server + edit hooks that put any coding agent on InSync
 agents/worker/       Worker agent loop and its tools
 agents/coordinator/  Coordinator agent loop and prompts
-mapper/              Code mapper: repo -> symbol rows
-dashboard/           React web app
+agents/triage/       Optional Jev triage in front of the coordinator (stretch, TRIAGE=off)
+mapper/              Code mapper: repo -> symbol rows (TS/JS + tree-sitter languages)
+dashboard/           React web app (deployed to Vercel from main)
 demo-repo/           Small TypeScript codebase with planted conflicts + tests
-scripts/             run-demo.ts, reset.ts, seed.ts
+scripts/             control daemon, session, merge, join, judge, bench, demo, reset
+docs/                Spec, Devpost draft, rehearsal and join guides
+vault/               Shared notes for the coding agents that built this
 ```
 
 ## Setup
@@ -155,6 +184,7 @@ share it with no LAN setup. Only its owner's login can publish; anyone can conne
    ```
 
 2. Both laptops: `git pull && npm run reset`, so they start from the same `origin/main`.
+   Reset also takes back the edits and conflicts of a run that ended without a merge.
 3. Host laptop: `npm run coordinator` and `npm run dashboard` (each in its own terminal), then
    `npm run session -- start`. That ends any open run, clears the last run's state, opens a
    `with_contract` run and maps `demo-repo/`.
@@ -181,7 +211,8 @@ share it with no LAN setup. Only its owner's login can publish; anyone can conne
    It fetches every agent's branch, merges them in `.worktrees/merge-<run>` and runs unit
    tests, typecheck and check-dupes. If those fail, a local agent gets a merge-fix pass.
    Then it ends the run. Add `--integration` when the agents ran the two canned tasks
-   (`agents/worker/src/tasks.ts`), and `--push` to push the merge branch.
+   (`agents/worker/src/tasks.ts`), `--push` to push the merge branch, and `--land` to push a
+   green merge straight to the base branch (never forced; it refuses if the base moved).
 
 To check who is online (a worker heartbeats every 15 s and goes stale after 60 s):
 
@@ -315,14 +346,44 @@ Across 2 scenario(s) and 4 runs, InSync saved **26%** of the cost (0% of tokens)
 _Generated 2026-11-08T07:33:30.039Z by `npm run bench`. Averages per run; tokens include cache reads (cost is what was billed)._
 <!-- bench:end -->
 
+## Security
+
+The demo database is public to connect to, so the server checks identity. Agents can only write
+as themselves. Opening and ending runs, creating tasks and resetting need an operator: a registered
+agent, a laptop's control daemon, or a dashboard paired with one. Only the mapper holding the
+`mapper` lock can rewrite the code map, and reset refuses while agents are still working. The
+control daemon only takes commands from browsers paired with a one-time code from its own terminal,
+through a fixed allowlist. Secrets stay in `.env`, which is never committed.
+
+## Tests
+
+```bash
+npm test             # 536 unit tests across every part, no server needed (~5 s)
+npm run typecheck
+npm run test:live -w @contract/server   # live tests against a local SpacetimeDB (see server/test-live/)
+```
+
+Live tests publish to a throwaway local database; never point them at Maincloud.
+
+## Limits and what's next
+
+- Workers run on Claude Code; the coordinator runs on Nemotron or Claude. Nemotron workers are next.
+- The benchmark above is a small sample; the full `--runs 3` run is the number to quote.
+- Call edges outside TypeScript/JavaScript are matched by name, so Rule 1 is approximate there.
+- Jev triage (sub-second rulings on easy conflicts) is optional and off by default (`TRIAGE=off`).
+
 ## Commands
 
 ```bash
+npm run control                       # dashboard daemon for this laptop (start here)
+npm run join -- --agent agent-b       # set up a new laptop or your own coding agent
 npm run mapper -- --repo ../demo-repo --watch
 npm run coordinator
 npm run worker -- --id agent-a --task 1 --mode with_contract
 npm run worker -- --id agent-b --prompt "..."   # or --wait (dashboard New task form)
-npm run session -- start | merge
+npm run session -- start | merge [--push] [--land]
+npm run judge                         # guarded agent that runs tasks typed into the Judge box
+npm run bench -- --runs 3             # A/B benchmark, rewrites the table above
 npm run dashboard
 npm run demo -- --mode without_contract --seed 7
 npm run reset
