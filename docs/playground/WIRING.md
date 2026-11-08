@@ -72,7 +72,11 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - todo: toasts pause/resume and sticky (WP-45; `core/toast.ts`).
 
 ## I. Remaining Wave 1 seams
-- todo: fill in from WP-16, 28, 30, 33, 46, 50 reports.
+- todo (WP-28): `ui/layers/LayersPanel.tsx` renders rows through `VirtualList` (import `VirtualList`, `ROW_HEIGHT` from
+  `LayerRow`): `<VirtualList className="pg-layers" items={rows} rowHeight={ROW_HEIGHT} getKey={(r) => r.id}
+  empty={...} renderRow={(row) => <LayerRow .../>} />`; keep a ref for WP-54's `scrollToIndex`.
+- WP-30: no seam.
+- todo: WP-16, 33, 46, 50 (pending reports).
 
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).
