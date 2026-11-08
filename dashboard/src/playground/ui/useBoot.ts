@@ -25,7 +25,9 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const offView = registerViewFallbacks();
     // restore the saved board and chat before agents start (here, not in createKit, so a StrictMode remount's
     // teardown cannot wipe what was just restored)
-    const restored = sink.persistence?.load() ?? false;
+    const loaded = sink.persistence?.load() ?? false;
+    // only a board with live layers counts as restored (an autosaved empty board must not idle the agents)
+    const restored = loaded && [...board.doc.getState().shapes.values()].some((sh) => !sh.deleted);
     const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text) });
     rtRef.current = r;
     setRt(r);
