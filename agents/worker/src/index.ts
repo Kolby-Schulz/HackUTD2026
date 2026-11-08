@@ -9,6 +9,9 @@
 //   Both push agent/<id> to origin when done (--no-push to skip) and branch the worktree
 //   from origin/main (--base <ref> to change), so both laptops start from the same commit.
 //
+// Any repo (issue #18): --repo <path|git URL> or CONTRACT_TARGET picks the target repository
+//   (default: the monorepo's demo-repo/). See packages/client/src/target.ts.
+//
 // Runs one Claude Code session headless in its own git worktree. In with_contract
 // mode it joins Contract (MCP server + rules + edit hook), stops on pause and resumes
 // with the coordinator's decision. In without_contract mode every coordination call
@@ -20,7 +23,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { connect, isOperatorInstruction, noopClient, type ContractClient, type Instruction } from '@contract/client';
+import { checkTools, connect, isOperatorInstruction, noopClient, resolveTarget, type ContractClient, type Instruction } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
@@ -43,6 +46,7 @@ const { values } = parseArgs({
     wait: { type: 'boolean', default: false },
     base: { type: 'string' },
     'no-push': { type: 'boolean', default: false },
+    repo: { type: 'string' },
     mode: { type: 'string', default: 'with_contract' },
     owner: { type: 'string', default: process.env.USER ?? 'dev' },
     machine: { type: 'string', default: process.env.HOSTNAME ?? hostname().replace(/\.local$/, '') },
@@ -63,18 +67,22 @@ let taskId = BigInt(values['task-id'] ?? taskKey);
 let task = TASKS[taskKey] ?? '';
 let attempt = 1;
 
-// 1. Worktree + branch (shares git history with the monorepo; agents work in its demo-repo/).
-// The session flow branches from origin/main so both laptops start from the same commit.
-const base = values.base ?? (session ? 'origin/main' : 'HEAD');
+// 1. Worktree + branch of the target repo (the monorepo for the demo; agents work in the
+// target's folder inside it, e.g. demo-repo/). The session flow branches from the target's
+// origin default branch so both laptops start from the same commit.
+const target = resolveTarget(REPO, values.repo);
+if (!target.demo && !session && values.task !== undefined) die('--task runs the canned demo tasks; use --prompt or --wait with --repo/CONTRACT_TARGET');
+const base = values.base ?? (session ? target.base : 'HEAD');
 const worktree = join(REPO, '.worktrees', agentId);
 if (!existsSync(worktree)) {
-  if (base.startsWith('origin/')) execFileSync('git', ['fetch', 'origin', base.slice('origin/'.length)], { cwd: REPO, stdio: 'inherit' });
+  if (base.startsWith('origin/')) execFileSync('git', ['fetch', 'origin', base.slice('origin/'.length)], { cwd: target.gitRoot, stdio: 'inherit' });
   mkdirSync(join(REPO, '.worktrees'), { recursive: true });
-  execFileSync('git', ['worktree', 'add', '-B', `agent/${agentId}`, worktree, base], { cwd: REPO, stdio: 'inherit' });
+  execFileSync('git', ['worktree', 'add', '--no-track', '-B', `agent/${agentId}`, worktree, base], { cwd: target.gitRoot, stdio: 'inherit' });
 } else if (session) {
   console.warn(`[${agentId}] reusing ${worktree} from an earlier run; \`npm run reset\` first for a clean start from ${base}`);
 }
-const cwd = join(worktree, 'demo-repo');
+const cwd = target.subdir ? join(worktree, target.subdir) : worktree;
+if (!target.demo) console.log(`[${agentId}] target ${target.label}: ${cwd}`);
 
 // 2. Join Contract (or not).
 // Every run is also logged locally (outside .worktrees/, which reset removes); the
@@ -138,7 +146,9 @@ const env: Record<string, string> = {
   SPACETIME_HOST: process.env.SPACETIME_HOST ?? '',
   SPACETIME_DB_NAME: process.env.SPACETIME_DB_NAME ?? '',
 };
-const mcpConfig = join(worktree, '.contract-mcp.json');
+// Outside the worktree so it never gets committed to the agent's branch (or someone's repo).
+const mcpConfig = join(REPO, '.contract', 'mcp', `${agentId}.json`);
+mkdirSync(dirname(mcpConfig), { recursive: true });
 if (mode === 'with_contract') {
   writeFileSync(
     mcpConfig,
@@ -202,7 +212,7 @@ for (;;) {
       },
       onUsage,
       // After the spread, so contractOpts.allowedTools can't drop the test commands.
-      allowedTools: ['Bash(npm test:*)', 'Bash(npm run:*)', 'Bash(npx vitest:*)', ...(contractOpts.allowedTools ?? [])],
+      allowedTools: [...checkTools(target), ...(contractOpts.allowedTools ?? [])],
     });
     console.log(`[${agentId}] done (${r.usage.prompt_tokens}+${r.usage.completion_tokens} tokens, $${r.usage.cost_usd.toFixed(4)})`);
     break;

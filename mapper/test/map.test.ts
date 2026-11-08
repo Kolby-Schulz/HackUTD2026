@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { duplicateReason, parseSignature } from '@contract/server/rules';
-import { isMappable, mapFile, RepoMapper, signatureHash, type FileMap } from '../src/index.ts';
+import { checkFileCount, isMappable, mapFile, maxFiles, RepoMapper, signatureHash, type FileMap } from '../src/index.ts';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/repo', import.meta.url));
 
@@ -252,7 +252,15 @@ describe('isMappable', () => {
     ['src/a.d.ts', false],
     ['node_modules/x/a.ts', false],
     ['.contract/x.ts', false],
-    ['src/a.js', false],
+    ['src/a.js', true],
+    ['src/a.jsx', true],
+    ['src/a.mjs', true],
+    ['src/a.cjs', true],
+    ['src/a.test.js', false],
+    ['src/a.spec.jsx', false],
+    ['eslint.config.mjs', false],
+    ['public/jquery.min.js', false],
+    ['tests/setup.js', false],
     ['README.md', false],
   ])('%s -> %s', (path, want) => expect(isMappable(path)).toBe(want));
 });
@@ -305,5 +313,107 @@ describe('watch primitives: refresh + dependents', () => {
   it('refresh ignores files that are not mapped', () => {
     expect(mapper.refresh('src/checkout.test.ts')).toBe(false);
     expect(mapper.refresh('README.md')).toBe(false);
+  });
+});
+
+const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
+
+describe('JavaScript files', () => {
+  const maps = new RepoMapper(fixture('js-repo')).mapAll();
+
+  it('maps .js/.jsx/.mjs/.cjs, skipping tests, .min.js and build output next to a .ts', () => {
+    expect(maps.map((m) => m.file)).toEqual(['src/app.jsx', 'src/legacy.cjs', 'src/lib/math.js', 'src/server.mjs', 'src/typed.ts']);
+  });
+
+  it('records ES module exports with unannotated signatures; CommonJS exports are not mapped', () => {
+    expect(allSymbols(maps).map((s) => `${s.kind} ${s.id}  ${s.signature}`)).toEqual([
+      'function src/app.jsx#Total  Total({ value })',
+      'function src/app.jsx#makeCounter  makeCounter()',
+      'function src/lib/math.js#add  add(a, b)',
+      'function src/lib/math.js#double  double(x)',
+      'const src/lib/math.js#SCALE  const SCALE = 10',
+      'class src/lib/math.js#Counter  class Counter; constructor(start = 0)',
+      'method src/lib/math.js#Counter.inc  inc()',
+      'function src/server.mjs#handle  async handle(req)',
+      'function src/typed.ts#typed  typed(n: number): number',
+    ]);
+  });
+
+  it('resolves call edges between JS files', () => {
+    expect(edgeList(maps)).toEqual([
+      'src/app.jsx#Total -> src/lib/math.js#SCALE',
+      'src/app.jsx#Total -> src/lib/math.js#double',
+      'src/app.jsx#makeCounter -> src/lib/math.js#Counter',
+      'src/app.jsx#makeCounter -> src/lib/math.js#Counter.inc',
+      'src/lib/math.js#Counter.inc -> src/lib/math.js#add',
+      'src/lib/math.js#double -> src/lib/math.js#add',
+      'src/server.mjs#handle -> src/lib/math.js#add',
+    ]);
+  });
+
+  it('mapFile without edges (contract-hook) reads a JS file too', () => {
+    const { symbols } = mapFile('src/lib/math.js', { repoDir: fixture('js-repo'), edges: false });
+    expect(symbols.map((s) => s.name)).toEqual(['add', 'double', 'SCALE', 'Counter', 'inc']);
+  });
+});
+
+describe('tsconfig paths aliases', () => {
+  it('resolve through the root tsconfig.json (comments and trailing commas allowed), into TS and JS', () => {
+    const maps = new RepoMapper(fixture('paths-repo')).mapAll();
+    expect(edgeList(maps)).toEqual(['src/main.ts#pageUrl -> src/lib/legacy.js#shout', 'src/main.ts#pageUrl -> src/lib/utils.ts#slugify']);
+  });
+
+  const monorepoEdges = [
+    'packages/web/src/page.ts#renderCart -> packages/shared/src/format.ts#formatPrice',
+    'packages/web/src/page.ts#renderCart -> packages/web/src/cart.ts#cartTotal',
+  ];
+
+  it("resolve in a monorepo with no root tsconfig, from each package's own tsconfig", () => {
+    expect(edgeList(new RepoMapper(fixture('monorepo')).mapAll())).toEqual(monorepoEdges);
+  });
+
+  describe('with a root tsconfig that has no paths', () => {
+    let work: string;
+    beforeEach(() => {
+      work = mkdtempSync(join(tmpdir(), 'mapper-mono-'));
+      cpSync(fixture('monorepo'), work, { recursive: true });
+    });
+    afterEach(() => rmSync(work, { recursive: true, force: true }));
+
+    it('solution style (only references): package aliases still resolve', () => {
+      const refs = '{ "files": [], "references": [{ "path": "packages/web" }, { "path": "packages/shared" }] }';
+      writeFileSync(join(work, 'tsconfig.json'), refs);
+      expect(edgeList(new RepoMapper(work).mapAll())).toEqual(monorepoEdges);
+    });
+
+    it('shared compiler options only: package aliases are merged in', () => {
+      writeFileSync(join(work, 'tsconfig.json'), '{ "compilerOptions": { "strict": true, "module": "ESNext", "moduleResolution": "bundler" } }');
+      expect(edgeList(new RepoMapper(work).mapAll())).toEqual(monorepoEdges);
+    });
+  });
+});
+
+describe('size check', () => {
+  const saved = process.env.CONTRACT_MAPPER_MAX_FILES;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.CONTRACT_MAPPER_MAX_FILES;
+    else process.env.CONTRACT_MAPPER_MAX_FILES = saved;
+  });
+
+  it('limit comes from CONTRACT_MAPPER_MAX_FILES, default 5000', () => {
+    expect(maxFiles({})).toBe(5000);
+    expect(maxFiles({ CONTRACT_MAPPER_MAX_FILES: '120' })).toBe(120);
+    expect(maxFiles({ CONTRACT_MAPPER_MAX_FILES: 'lots' })).toBe(5000);
+  });
+
+  it('warns above 2000 files and throws above the limit', () => {
+    expect(checkFileCount(100, '/r', 5000)).toBeUndefined();
+    expect(checkFileCount(2500, '/r', 5000)).toMatch(/2500 source files; the first map may be slow/);
+    expect(() => checkFileCount(5001, '/r', 5000)).toThrow(/over the limit of 5000.*--repo at a subfolder.*CONTRACT_MAPPER_MAX_FILES/);
+  });
+
+  it('RepoMapper refuses a repo over the limit before parsing it', () => {
+    process.env.CONTRACT_MAPPER_MAX_FILES = '3';
+    expect(() => new RepoMapper(FIXTURE)).toThrow(/has 6 source files, over the limit of 3/);
   });
 });

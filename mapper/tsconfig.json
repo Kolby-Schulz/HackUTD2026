@@ -1,4 +1,6 @@
 {
   "extends": "../tsconfig.base.json",
-  "include": ["src", "test", "test-live", "*.config.ts"]
+  "include": ["src", "test", "test-live", "*.config.ts"],
+  // These fixtures are JavaScript or import through their own path aliases.
+  "exclude": ["test/fixtures/js-repo", "test/fixtures/paths-repo", "test/fixtures/monorepo"]
 }

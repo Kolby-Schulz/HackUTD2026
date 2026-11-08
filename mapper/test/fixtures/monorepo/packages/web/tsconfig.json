@@ -1,0 +1,7 @@
+{
+  /* A package config with its own baseUrl. */
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@web/*": ["src/*"] }
+  }
+}

@@ -1,10 +1,10 @@
 // Merge, check and merge-fix helpers shared by run-demo.ts and session.ts. Owner: dashboard + demo.
 import { spawn } from 'node:child_process';
-import { connect, type DbConnection } from '@contract/client';
+import { checkTools, connect, type Check as TargetCheck, type DbConnection } from '@contract/client';
 import { createLLM } from '@contract/llm';
 import { git, log, savedToken } from './lib.ts';
 
-export interface Check { name: string; ok: boolean; output: string }
+export interface Check { name: string; ok: boolean; output: string; cmd: string }
 export interface TestCount { passed: number; failed: number }
 export interface CheckResult { checks: Check[]; tests: TestCount; dateFormatters: number }
 
@@ -17,8 +17,11 @@ export const CHECKS = {
 } as const;
 export type CheckScript = keyof typeof CHECKS;
 
-/** Merges `branch` into the worktree. Returns conflicted demo-repo/ files (left unresolved). */
-export function merge(dir: string, branch: string): string[] {
+/**
+ * Merges `branch` into the worktree. Returns conflicted target files (left unresolved).
+ * `prefix` is the target folder inside the repo ('demo-repo/' for the demo, '' = whole repo).
+ */
+export function merge(dir: string, branch: string, prefix = 'demo-repo/'): string[] {
   try {
     git(['merge', '--no-edit', '--no-ff', '-m', `merge ${branch}`, branch], dir);
     return [];
@@ -26,33 +29,38 @@ export function merge(dir: string, branch: string): string[] {
     const conflicted = git(['diff', '--name-only', '--diff-filter=U'], dir).split('\n').filter(Boolean);
     // Files outside demo-repo/ (e.g. each worker's .contract-mcp.json) are run plumbing,
     // not code: take ours and move on.
-    for (const f of conflicted.filter((f) => !f.startsWith('demo-repo/'))) {
+    for (const f of conflicted.filter((f) => !f.startsWith(prefix))) {
       git(['checkout', '--ours', '--', f], dir);
       git(['add', '--', f], dir);
     }
     git(['add', '-A'], dir); // commit with markers in place; the fix pass resolves them
     git(['commit', '--no-edit', '--no-verify'], dir);
-    return conflicted.filter((f) => f.startsWith('demo-repo/'));
+    return conflicted.filter((f) => f.startsWith(prefix));
   }
 }
 
-export function conflictMarkers(dir: string): string[] {
+export function conflictMarkers(dir: string, path = 'demo-repo'): string[] {
   try {
-    return git(['grep', '-l', '-E', '^(<<<<<<<|>>>>>>>) ', '--', 'demo-repo'], dir).split('\n').filter(Boolean);
+    return git(['grep', '-l', '-E', '^(<<<<<<<|>>>>>>>) ', '--', path || '.'], dir).split('\n').filter(Boolean);
   } catch {
     return []; // git grep exits 1 when nothing matches
   }
 }
 
 export async function checkAll(demoDir: string, scripts: readonly CheckScript[] = ['test', 'test:integration', 'check:dupes']): Promise<CheckResult> {
+  return runChecks(demoDir, scripts.map((s) => ({ name: CHECKS[s], cmd: `npm run --silent ${s}` })));
+}
+
+/** Runs each check's shell command in `dir` (issue #18: any repo's own checks). */
+export async function runChecks(dir: string, list: readonly TargetCheck[]): Promise<CheckResult> {
   const checks: Check[] = [];
   const testRuns: string[] = [];
   let dupesOut = '';
-  for (const script of scripts) {
-    const r = await run(`check:${script}`, 'npm', ['run', '--silent', script], demoDir, 5 * 60_000, {}, true);
-    checks.push({ name: CHECKS[script], ok: r.exitCode === 0, output: r.output });
-    if (script === 'test' || script === 'test:integration') testRuns.push(r.output);
-    if (script === 'check:dupes') dupesOut = r.output;
+  for (const c of list) {
+    const r = await run(`check:${c.name}`, 'sh', ['-c', c.cmd], dir, 5 * 60_000, {}, true);
+    checks.push({ name: c.name, ok: r.exitCode === 0, output: r.output, cmd: c.cmd });
+    if (/test/.test(c.name) || /\btest\b/.test(c.cmd)) testRuns.push(r.output);
+    if (c.name === 'check-dupes') dupesOut = r.output;
   }
   const tests = testRuns.map(countTests).reduce((x, y) => ({ passed: x.passed + y.passed, failed: x.failed + y.failed }), { passed: 0, failed: 0 });
   const fm = /(\d+) date formatter/.exec(dupesOut);
@@ -60,17 +68,20 @@ export async function checkAll(demoDir: string, scripts: readonly CheckScript[] 
   return { checks, tests, dateFormatters: fm ? Number(fm[1]) : 0 };
 }
 
+/** Passed/failed counts from vitest ("Tests 3 passed | 1 failed") or node:test/TAP ("ℹ pass 3", "# fail 1"). */
 export function countTests(out: string): TestCount {
-  const line = /Tests\s+(.*)/.exec(out.replace(/\x1b\[[0-9;]*m/g, ''))?.[1] ?? '';
-  return { passed: Number(/(\d+) passed/.exec(line)?.[1] ?? 0), failed: Number(/(\d+) failed/.exec(line)?.[1] ?? 0) };
+  const text = out.replace(/\x1b\[[0-9;]*m/g, '');
+  const line = /Tests\s+(.*)/.exec(text)?.[1];
+  if (line) return { passed: Number(/(\d+) passed/.exec(line)?.[1] ?? 0), failed: Number(/(\d+) failed/.exec(line)?.[1] ?? 0) };
+  const tap = (word: string) => Number(new RegExp(`^(?:ℹ|#) ${word} (\\d+)`, 'm').exec(text)?.[1] ?? 0);
+  return { passed: tap('pass'), failed: tap('fail') };
 }
 
 /** One Claude Code pass (purpose merge_fix, attempt 2) that repairs the merged code as `agentId`. */
 export async function mergeFix(agentId: string, taskId: bigint, demoDir: string, checks: Check[], conflicts: string[]) {
   log('demo', `merge fix by ${agentId}`);
   const failing = checks.filter((c) => !c.ok);
-  // Same wording as before for run-demo's three checks: "`npm test`, `npm run x` and `npm run y`".
-  const cmds = checks.map((c) => scriptFor(c.name)).map((s) => (s === 'test' ? '`npm test`' : `\`npm run ${s}\``));
+  const cmds = checks.map((c) => `\`${c.cmd.replace('npm run --silent test', 'npm test').replace('npm run --silent ', 'npm run ')}\``);
   const commands = cmds.length > 1 ? `${cmds.slice(0, -1).join(', ')} and ${cmds.at(-1)}` : cmds.join('');
   const prompt = [
     'Two features were developed in parallel and merged into this repository. The merged code fails these checks.',
@@ -91,7 +102,7 @@ export async function mergeFix(agentId: string, taskId: bigint, demoDir: string,
     const r = await createLLM().runWorker(prompt, {
       cwd: demoDir,
       purpose: 'merge_fix',
-      allowedTools: ['Bash(npm test:*)', 'Bash(npm run:*)', 'Bash(npx vitest:*)'],
+      allowedTools: checkTools({ checks }),
       onUsage: (u, purpose) =>
         client.logTokens(taskId, 2, purpose, u).catch((e: unknown) => log(agentId, `logTokens failed: ${String(e)}`)),
     });
@@ -101,10 +112,6 @@ export async function mergeFix(agentId: string, taskId: bigint, demoDir: string,
   } finally {
     await client.disconnect();
   }
-}
-
-function scriptFor(name: string): string {
-  return (Object.entries(CHECKS).find(([, n]) => n === name)?.[0] ?? 'test');
 }
 
 /** `conn` must subscribe to the agent table. */

@@ -36,6 +36,10 @@ const { values } = parseArgs({
     summary: { type: 'boolean', default: false },
   },
 });
+if (process.env.CONTRACT_TARGET) {
+  console.error('[demo] run-demo is the canned with/without experiment on demo-repo/; unset CONTRACT_TARGET, or use `npm run session` for your own repo');
+  process.exit(1);
+}
 
 interface RunResult {
   runId: string;

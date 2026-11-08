@@ -19,6 +19,7 @@ export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' 
 export type * as rows from './bindings/types.ts';
 export { DbConnection } from './bindings/index.ts';
 export { estimateTokens } from './context.ts';
+export { resolveTarget, checkTools, subdirPrefix, cloneDirFor, DEMO_CHECKS, type Target, type Check } from './target.ts';
 
 export interface AgentInfo {
   id: string; // 'agent-a', or the fixed ids 'coordinator', 'mapper', 'triage'

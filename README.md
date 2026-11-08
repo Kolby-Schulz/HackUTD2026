@@ -83,6 +83,24 @@ spacetime sql --server maincloud contract-hackutd26 "SELECT id, machine, status,
 After a change to `server/`, the owner republishes with `npm run publish:cloud -w @contract/server`.
 Keep live tests local (they wipe their database); they default to `ws://localhost:3000`.
 
+## Your own repo
+
+Contract works on any git repository, not only `demo-repo/` (issue #18). Pick it with
+`--repo <path|git URL>` or `CONTRACT_TARGET` in `.env`; a folder inside a repo works too.
+
+```bash
+npm run session -- start --repo ../my-app --tasks tasks.json   # maps it, queues tasks
+npm run worker -- --id agent-a --repo ../my-app --wait          # on each laptop
+npm run session -- merge --repo ../my-app                       # merge + run its checks
+npm run reset -- --repo ../my-app
+```
+
+`tasks.json` is `[{ "agent": "agent-a", "task": "Add a dark mode toggle" }]`. The merge runs
+the commands in the target's `contract.json` (`{ "checks": { "unit tests": "pytest -q" } }`),
+else `CONTRACT_TEST_CMD`, else `npm test`; workers may run those without asking. The repo
+needs an `origin` for the two-laptop flow (workers push `agent/<id>` there); a local-only
+repo works on one laptop. The mapper reads TypeScript and JavaScript.
+
 ## Commands
 
 ```bash
