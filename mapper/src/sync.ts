@@ -2,16 +2,14 @@
 // server's code map actually differs, so restarting the mapper (or re-saving a file
 // without changing an interface) writes nothing and never bumps a symbol's version.
 //
-// Two things on the server are not the mapper's to overwrite:
+// Two things on the server are not the mapper's to overwrite, and upsert_symbols keeps
+// both itself (issue #25), so the mapper just sends what it parsed:
 //   - behavior_note: agents set it through report_change('behavior'); the mapper always
-//     sends back what the server has (spec section 9: "leave empty from the mapper").
+//     sends '' (spec section 9: "leave empty from the mapper").
 //   - signature text when the hash is unchanged: report_change('signature') rewrites the
 //     row's signature with the agent's new one while the agent still works in its
-//     worktree. Until the change reaches this checkout (and the hash moves), the mapper
-//     keeps the server's text instead of reverting it.
-// Both are read from this connection's subscription, so a push landing within a few ms
-// of a report_change can still send the old text. Closing that fully needs
-// upsert_symbols itself to keep signature/behavior_note when the hash is unchanged.
+//     worktree. Until the change reaches this checkout (and the hash moves), the server
+//     keeps the agent's text.
 import { DbConnection } from '@contract/client';
 import type { FileMap, MappedEdge, MappedSymbol } from './map.ts';
 
@@ -42,19 +40,9 @@ const edgeKey = (e: MappedEdge) => `${e.callerId}\u0000${e.calleeId}`;
  */
 export function planUpsert(map: FileMap, serverSymbols: ServerSymbol[], serverEdges: MappedEdge[]): Upsert | undefined {
   const byId = new Map(serverSymbols.map((s) => [s.id, s]));
-  const symbols = map.symbols.map((s) => {
-    const cur = byId.get(s.id);
-    if (!cur) return s;
-    return {
-      ...s,
-      behaviorNote: cur.behaviorNote,
-      signature: cur.signatureHash === s.signatureHash ? cur.signature : s.signature,
-    };
-  });
-
   const sameSymbols =
-    serverSymbols.length === symbols.length &&
-    symbols.every((s) => {
+    serverSymbols.length === map.symbols.length &&
+    map.symbols.every((s) => {
       const cur = byId.get(s.id);
       return cur && cur.name === s.name && cur.kind === s.kind && cur.signatureHash === s.signatureHash;
     });
@@ -62,7 +50,7 @@ export function planUpsert(map: FileMap, serverSymbols: ServerSymbol[], serverEd
   const have = new Set(serverEdges.map(edgeKey));
   const sameEdges = want.size === have.size && [...want].every((k) => have.has(k));
   if (sameSymbols && sameEdges) return undefined;
-  return { file: map.file, symbols, edges: map.edges };
+  return { file: map.file, symbols: map.symbols, edges: map.edges };
 }
 
 export interface SyncOptions {

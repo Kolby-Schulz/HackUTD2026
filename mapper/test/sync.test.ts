@@ -46,18 +46,12 @@ describe('planUpsert', () => {
     expect(u?.symbols[0].signatureHash).toBe(signatureHash(SIG));
   });
 
-  it('keeps behavior_note set by an agent through report_change', () => {
-    const noted = server({ behaviorNote: 'rounds half-up now' });
-    expect(planUpsert(map, [noted], map.edges)).toBeUndefined();
-    const u = planUpsert({ ...map, edges: [] }, [noted], map.edges);
-    expect(u?.symbols[0].behaviorNote).toBe('rounds half-up now');
-  });
-
-  it("keeps an agent's reported signature text while the hash in this checkout is unchanged", () => {
-    const reported = server({ signature: 'calculateFee(amount: number, mode: Rounding): number' }); // report_change text, old hash
+  it('an agent-set behavior_note or reported signature alone is no reason to send', () => {
+    // upsert_symbols keeps both on the server (issue #25), so the mapper ignores them.
+    const reported = server({ behaviorNote: 'rounds half-up now', signature: 'calculateFee(amount: number, mode: Rounding): number' });
+    expect(planUpsert(map, [reported], map.edges)).toBeUndefined();
     const u = planUpsert({ ...map, edges: [] }, [reported], map.edges); // some other change forces a send
-    expect(u?.symbols[0].signature).toBe('calculateFee(amount: number, mode: Rounding): number');
-    expect(u?.symbols[0].signatureHash).toBe(signatureHash(SIG));
+    expect(u?.symbols).toEqual(map.symbols); // sends what it parsed; the server keeps the agent's fields
   });
 
   it('an empty map against an empty server is a no-op; against rows it clears them', () => {

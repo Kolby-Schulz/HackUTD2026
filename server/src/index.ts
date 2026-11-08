@@ -586,7 +586,7 @@ export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }
 /**
  * Clears per-run working state before a demo run so nothing leaks from the last one: the
  * code map (the mapper rebuilds it from the clean demo-repo; agent-reported signatures would
- * otherwise survive, since the mapper keeps server signature text while the hash matches),
+ * otherwise survive, since upsert_symbols keeps stored signature text while the hash matches),
  * plans, claims, and undelivered instructions. Live conflicts are dismissed and agents set idle.
  * History the dashboard shows per run (change, conflict, decision, token rows) is kept, as is
  * the summary cache (keyed by content hash, so it stays correct). Refused while a run is open.
@@ -642,8 +642,17 @@ export const upsert_symbols = spacetimedb.reducer(
       if (!old) {
         ctx.db.symbol.insert({ ...row, version: 1 });
       } else {
-        const version = old.signature_hash === s.signature_hash ? old.version : old.version + 1;
-        ctx.db.symbol.id.update({ ...row, version });
+        // Agents own behavior_note (report_change('behavior'); the mapper never sets it),
+        // and report_change('signature') rewrites the signature text while the agent's
+        // edit is still in its worktree. Keep both while the mapper's hash is unchanged,
+        // so a mapper push can never revert an agent's report (issue #25).
+        const sameHash = old.signature_hash === s.signature_hash;
+        ctx.db.symbol.id.update({
+          ...row,
+          signature: sameHash ? old.signature : s.signature,
+          behavior_note: old.behavior_note,
+          version: sameHash ? old.version : old.version + 1,
+        });
       }
     }
 
