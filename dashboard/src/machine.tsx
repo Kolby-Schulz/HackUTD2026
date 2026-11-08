@@ -8,6 +8,9 @@ import type * as R from '@bindings/types.ts';
 import { SPACETIME_DB_NAME, SPACETIME_HOST, useNow } from './data.ts';
 import { pairProof } from './sha256.ts';
 
+/** Same text as NEW_CONVERSATION in scripts/assistant.ts (the daemon's repo-switch marker). */
+const NEW_CONVERSATION = 'New conversation';
+
 /** A daemon that hasn't sent its heartbeat (every 10 s) for this long counts as offline. */
 const ONLINE_MS = 30_000;
 const PICK_KEY = 'contract.dashboard.machine';
@@ -160,6 +163,11 @@ export function MachineProvider({ children }: { children: ReactNode }) {
       .filter((m) => m.machineId === current)
       .sort((a, b) => (a.id < b.id ? -1 : 1))
       .map((m) => ({ id: Number(m.id), role: m.role as ChatMessage['role'], text: m.text, at: m.atMs }));
+    // A repository switch starts a new conversation (scripts/assistant.ts NEW_CONVERSATION): show
+    // only what came after the latest switch, so one repo's chat never follows you to the next.
+    let cut = messages.length - 1;
+    while (cut >= 0 && !(messages[cut].role === 'event' && messages[cut].text.startsWith(NEW_CONVERSATION))) cut--;
+    if (cut >= 0) messages.splice(0, cut + 1);
 
     const send = async (action: string, args: object = {}) => {
       const c = conn.getConnection() as unknown as DaemonConn | null;

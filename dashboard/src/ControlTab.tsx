@@ -49,6 +49,7 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
   const [workerId, setWorkerId] = useState('agent-a');
   const [prompt, setPrompt] = useState('');
   const [integration, setIntegration] = useState(false);
+  const [land, setLand] = useState(false);
 
   const procs = status?.processes ?? [];
   const running = (key: string) => procs.some((p) => p.key === key && p.status === 'running');
@@ -156,8 +157,13 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
               <input type="checkbox" checked={integration} onChange={(e) => setIntegration(e.target.checked)} /> Integration test (canned demo tasks only)
             </label>
           )}
+          <label className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="checkbox" checked={land} onChange={(e) => setLand(e.target.checked)} /> Push to the default branch (e.g. main) when every check passes
+          </label>
           <div className="row">
-            <button type="button" className="btn" disabled={!!busy || running('session-merge') || !openRun} onClick={() => act('Merge', '/run', { action: 'session-merge', integration: isDemo && integration })}>
+            <button type="button" className="btn" disabled={!!busy || running('session-merge') || !openRun}
+              onClick={() => act('Merge', '/run', { action: 'session-merge', integration: isDemo && integration, land },
+                land ? `Merge and push to ${status?.repoLabel ?? 'the repo'}'s default branch on GitHub if the checks pass?` : undefined)}>
               {running('session-merge') ? 'Merging…' : 'Merge and check'}
             </button>
             <ProcState p={procs.find((p) => p.key === 'session-merge')} />
@@ -210,6 +216,28 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
   const failed = clone && clone.status !== 'running' && clone.code !== 0;
   const checks = status?.repoInfo?.checks;
   const showForm = (demo || editing) && !locked;
+  // Changing the repo needs everything stopped first. Instead of a grayed-out button, Change asks
+  // to stop what's running (coordinator, agents, …) here, then opens the link field.
+  const { send } = useMachine();
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string>();
+  const runningProcs = (status?.processes ?? []).filter((p) => p.status === 'running' && p.key !== 'clone');
+  useEffect(() => {
+    if (stopping && !locked) { setStopping(false); dialog.current?.close(); }
+  }, [stopping, locked]);
+  function askStop() { setStopError(undefined); dialog.current?.showModal(); }
+  async function stopAll() {
+    setStopping(true);
+    setStopError(undefined);
+    setEditing(true); setText(status?.repo ?? '');
+    try {
+      await Promise.all(runningProcs.map((p) => send('stop', { key: p.key })));
+    } catch (e) {
+      setStopping(false);
+      setStopError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
   async function use(repo: string) {
     if (await onSet(repo)) { setEditing(false); setText(''); }
@@ -225,8 +253,8 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
         <span className="grow" />
         {!demo && !editing && (
           <>
-            <button type="button" className="btn small ghost" disabled={busy || locked} title={locked ? 'Stop what is running first' : undefined}
-              onClick={() => { setText(status?.repo ?? ''); setEditing(true); }}>Change</button>
+            <button type="button" className="btn small ghost" disabled={busy} title={locked ? 'Stops what is running first' : undefined}
+              onClick={() => { if (locked) { askStop(); return; } setText(status?.repo ?? ''); setEditing(true); }}>Change</button>
           </>
         )}
       </div>
@@ -239,7 +267,25 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
           {editing && <button type="button" className="btn small ghost" onClick={() => setEditing(false)}>Cancel</button>}
         </form>
       )}
-      {demo && locked && <p className="muted">Stop what's running to switch to your own repository.</p>}
+      {demo && locked && <p className="muted">Stop what's running to switch to your own repository. <button type="button" className="linkish" disabled={busy} onClick={askStop}>Stop it now</button></p>}
+      {editing && locked && stopping && <p className="muted">Stopping… the link field opens once everything has stopped.</p>}
+
+      <dialog ref={dialog} className="confirm-dialog" aria-labelledby="stop-to-change"
+        onKeyDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => { if (e.target === dialog.current && !stopping) dialog.current?.close(); }}>
+        <h3 id="stop-to-change">Stop what's running to change the repository?</h3>
+        <p className="muted">Agents work inside the current repository, so these stop first. Their pushed branches and the run's history stay.</p>
+        <ul>
+          {runningProcs.map((p) => <li key={p.key}>{p.label}</li>)}
+        </ul>
+        {stopError && <p className="repo-err" role="alert">Couldn't stop: {stopError}</p>}
+        <div className="confirm-actions">
+          <button type="button" className="btn small ghost" disabled={stopping} onClick={() => dialog.current?.close()}>Cancel</button>
+          <button type="button" className="btn small danger" disabled={stopping || !runningProcs.length} onClick={() => void stopAll()} autoFocus>
+            {stopping ? 'Stopping…' : runningProcs.length > 1 ? `Stop ${runningProcs.length} and change` : 'Stop and change'}
+          </button>
+        </div>
+      </dialog>
 
       {!demo && failed && (
         <p className="repo-err" role="alert">
@@ -298,6 +344,9 @@ export function useAssistant(onChange?: () => void) {
   // Show what you typed until the daemon's copy of it arrives.
   const echoed = !sent.length || chat.messages.some((m) => m.role === 'user' && m.text === sent[0].text && m.at >= sent[0].at - 5000);
   const messages = echoed ? chat.messages : [...chat.messages, ...sent];
+  // Drop the echo once the daemon has it; a repo switch hides the daemon's copy, and a kept echo
+  // would then reappear as an unanswered message.
+  useEffect(() => { if (sent.length && echoed) setSent([]); }, [sent, echoed]);
   async function send(text: string) {
     setSent([{ id: -Date.now(), role: 'user', text, at: Date.now() }]);
     try {

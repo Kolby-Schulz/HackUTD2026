@@ -4,7 +4,9 @@
 // workers from a plain request; its replies interleave with the run's events. A working agent is
 // steered through send_instruction (issue #11); an idle agent in an open run gets a new task through
 // create_task. "Every running agent" ('*') reaches teammates' agents too, so the picker groups agents
-// by laptop and names everyone a message will reach.
+// by laptop and names everyone a message will reach. An offline agent can be picked too: sending
+// starts it as a worker on the paired laptop (the Control tab's "Start" button), with the text as
+// its first task, or waiting for one when the text is empty.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useReducer } from 'spacetimedb/react';
 import { reducers } from '@bindings/index.ts';
@@ -84,7 +86,9 @@ function Composer({ agents, openRun, connected, assistant, machine }: {
   const createTask = useReducer(reducers.createTask);
   // create_task takes operators only (#62): this browser must be paired with a laptop's
   // `npm run control` daemon (any laptop, online or not). Messages (send_instruction) are open.
-  const paired = useMachine().mine.length > 0;
+  const machineState = useMachine();
+  const paired = machineState.mine.length > 0;
+  const canStart = !!machineState.current; // a paired laptop is online to run the worker
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; bad?: boolean }>();
@@ -98,17 +102,21 @@ function Composer({ agents, openRun, connected, assistant, machine }: {
   const running = agents.filter((a) => a.status === 'Working' || a.status === 'Paused');
   const fallback = defaultRecipient(agents, machine, assistant.up);
   const [picked, setPicked] = useState<string>();
-  const valid = (k?: string) => !!k && (k === 'insync' ? assistant.up : k === 'all' ? running.length > 0 : online.some((a) => a.id === k));
+  const valid = (k?: string) => !!k && (k === 'insync' ? assistant.up : k === 'all' ? running.length > 0 : agents.some((a) => a.id === k));
   const to = valid(picked) ? picked! : fallback;
 
   const toAssistant = to === 'insync';
   const target = online.find((a) => a.id === to);
+  const sleeper = agents.find((a) => a.offline && a.id === to); // offline: sending starts it
   const asTask = !!target && !!openRun && (target.status === 'Idle' || target.status === 'Done');
   const where = (a: AgentCard) => [a.ownerDev, a.machine].filter(Boolean).join(' · ') || 'unknown laptop';
   const laptops = new Set(running.map((a) => a.machine || a.ownerDev)).size;
   const others = running.filter((a) => !mine(a)).length;
-  const what = toAssistant ? 'Tell InSync what to build' : to === 'all' ? `Message ${running.length} running agents` : asTask ? `New task for ${target!.person.name}` : target ? `Message ${target.person.name}` : 'No agent to message';
-  const reach = toAssistant ? 'The assistant on this laptop starts and coordinates agents for you.'
+  const what = sleeper ? `Start ${sleeper.person.name} with a task (or send empty to wait)` : toAssistant ? 'Tell InSync what to build' : to === 'all' ? `Message ${running.length} running agents` : asTask ? `New task for ${target!.person.name}` : target ? `Message ${target.person.name}` : 'No agent to message';
+  const reach = sleeper ? (!canStart ? `${sleeper.person.name} is offline. Pair this browser with your laptop (Control tab) to start it.`
+      : !openRun ? `${sleeper.person.name} is offline. Start a session first (Control tab), then start it here.`
+      : `${sleeper.person.name} is offline · sending starts it on ${machineState.current}${mine(sleeper) ? '' : ` (it last ran on ${where(sleeper)})`}`)
+    : toAssistant ? 'The assistant on this laptop starts and coordinates agents for you.'
     : to === 'all' ? `Reaches ${running.map((a) => `${a.person.name} (${where(a)})`).join(', ')}${machine && others ? ` · ${others} on other laptops` : laptops > 1 ? ` · ${laptops} laptops` : ''}.`
     : asTask && !paired ? `${where(target!)} · ${target!.status} · becomes a new task, so pair this browser with a laptop first (Control tab)`
     : target ? `${where(target)} · ${target.status}${asTask ? ' · becomes a new task' : ''}`
@@ -117,11 +125,16 @@ function Composer({ agents, openRun, connected, assistant, machine }: {
 
   async function submit() {
     const body = text.trim();
-    if (!body || busy || !to || (toAssistant && assistant.busy)) return;
+    if ((!body && !sleeper) || busy || !to || (toAssistant && assistant.busy)) return;
     setBusy(true);
     setNote(undefined);
     try {
-      if (toAssistant) {
+      if (sleeper) {
+        if (!canStart) throw new Error('pair this browser with your laptop first (Control tab)');
+        if (!openRun) throw new Error('start a session first (Control tab)');
+        await machineState.send('worker', { id: sleeper.id, ...(body ? { prompt: body } : {}) });
+        setNote({ text: body ? `Starting ${sleeper.person.name} with that task on ${machineState.current}.` : `Starting ${sleeper.person.name} on ${machineState.current}; it waits for a task.` });
+      } else if (toAssistant) {
         await assistant.send(body);
       } else if (asTask) {
         if (!paired) throw new Error('pair this browser with a laptop first (Control tab); only paired dashboards can create tasks');
@@ -141,8 +154,8 @@ function Composer({ agents, openRun, connected, assistant, machine }: {
   }
 
   const option = (a: AgentCard) => (
-    <option key={a.id} value={a.id} disabled={a.offline}>
-      {a.person.name} · {a.offline ? 'offline' : a.status}{mine(a) ? '' : ` · ${where(a)}`}
+    <option key={a.id} value={a.id}>
+      {a.person.name} · {a.offline ? 'offline · send to start' : a.status}{mine(a) ? '' : ` · ${where(a)}`}
     </option>
   );
 
@@ -172,9 +185,9 @@ function Composer({ agents, openRun, connected, assistant, machine }: {
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit(); } }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="grow" style={{ fontSize: 11.5, color: note?.bad ? 'var(--danger)' : 'var(--text2)' }}>
-            {note?.text ?? (toAssistant && assistant.busy ? 'InSync is working on it…' : 'Enter to send · Shift+Enter for a new line')}
+            {note?.text ?? (toAssistant && assistant.busy ? 'InSync is working on it…' : sleeper ? 'Enter to start · empty starts it waiting for a task' : 'Enter to send · Shift+Enter for a new line')}
           </span>
-          <button type="submit" className="send" aria-label="Send" disabled={!to || (!connected && !toAssistant) || busy || (toAssistant && assistant.busy) || !text.trim()}>
+          <button type="submit" className="send" aria-label={sleeper ? `Start ${sleeper.person.name}` : 'Send'} disabled={!to || (!connected && !toAssistant) || busy || (toAssistant && assistant.busy) || (sleeper ? !canStart || !openRun : !text.trim())}>
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13V3M3.5 7.5L8 3l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </button>
         </div>

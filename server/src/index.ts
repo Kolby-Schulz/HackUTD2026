@@ -802,6 +802,33 @@ export const end_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }
 });
 
 /**
+ * Takes back what an ended run produced that never reached a merge: its file_edit diffs, its
+ * reported changes, and the conflicts they caused (with their decisions and instructions), so the
+ * Changes tab, "Conflicts caught" and "Merge failures avoided" stop counting them. `npm run reset`
+ * calls it for each run it has to end itself: a merge always ends its run first, so those runs
+ * were never merged and their worktrees are gone. Merged runs keep everything. Token usage, tasks
+ * and the run row stay (those tokens were really spent). Refused while the run is open.
+ */
+export const discard_unmerged_run = spacetimedb.reducer({ run_id: t.u64() }, (ctx, { run_id }) => {
+  requireOperator(ctx);
+  const r = ctx.db.run.id.find(run_id);
+  if (!r) throw new SenderError(`unknown run ${run_id}`);
+  if (r.ended_at === undefined) throw new SenderError(`run ${run_id} is still open; end it first`);
+  const from = r.started_at.microsSinceUnixEpoch, to = r.ended_at.microsSinceUnixEpoch;
+  const inRun = (ts: { microsSinceUnixEpoch: bigint }) => ts.microsSinceUnixEpoch >= from && ts.microsSinceUnixEpoch <= to;
+  for (const e of [...ctx.db.fileEdit.iter()]) if (inRun(e.created_at)) ctx.db.fileEdit.id.delete(e.id);
+  for (const c of [...ctx.db.change.iter()]) if (inRun(c.created_at)) ctx.db.change.id.delete(c.id);
+  const gone = new Set<bigint>();
+  for (const c of [...ctx.db.conflict.iter()]) {
+    if (!inRun(c.created_at)) continue;
+    gone.add(c.id);
+    ctx.db.conflict.id.delete(c.id);
+  }
+  for (const d of [...ctx.db.decision.iter()]) if (gone.has(d.conflict_id)) ctx.db.decision.id.delete(d.id);
+  for (const i of [...ctx.db.instruction.iter()]) if (i.conflict_id !== undefined && gone.has(i.conflict_id)) ctx.db.instruction.id.delete(i.id);
+});
+
+/**
  * Clears per-run working state before a demo run so nothing leaks from the last one: the
  * code map (the mapper rebuilds it from the clean demo-repo; agent-reported signatures would
  * otherwise survive, since upsert_symbols keeps stored signature text while the hash matches),

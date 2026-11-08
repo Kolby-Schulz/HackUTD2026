@@ -1,17 +1,17 @@
 // Dashboard (spec section 13). Owner: dashboard + demo.
 // One screen, laid out like an editor workbench (storyboard "Frame 1 as an editor workbench"):
 // Agents side bar, editor groups holding the Code map, Control and Chat tabs (drag to reorder,
-// move or split; Dock.tsx), Savings / Problems panel, status bar. Tables come from live subscriptions; Control and the chat's
+// move or split; Dock.tsx), Savings panel, status bar. Tables come from live subscriptions; Control and the chat's
 // assistant talk to the local control server (npm run control). ReplayTab.tsx stays, unmounted.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
-import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory, symbolName, tokenStats, type CaseView } from './model.ts';
+import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory, tokenStats, type CaseView } from './model.ts';
 import { APP_NAME, Intro, SCurveMark, shouldPlayIntro } from './Intro.tsx';
 import { CodeMap } from './CodeMap.tsx';
 import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
 import { DockArea, useDock, type ViewId } from './Dock.tsx';
-import { AgentsView, BottomPanel, SymbolWidget, type CaseFilter, type PanelTab } from './Views.tsx';
+import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
 import { ChatView } from './Chat.tsx';
 import { ChangesView } from './Changes.tsx';
 import { CommandCenter } from './CommandCenter.tsx';
@@ -32,15 +32,16 @@ export function App() {
   const w = runWindow(run, now);
   const { layout, resize, toggle } = useLayout();
   const [picked, setPicked] = useState<string>();
-  const [panelTab, setPanelTab] = useState<PanelTab>('savings');
-  const [caseFilter, setCaseFilter] = useState<CaseFilter>('all');
-  const [openCase, setOpenCase] = useState<string>(); // the problem row shown expanded
-  const [flash, setFlash] = useState(0); // bumps when a number opens Problems, to highlight what it opened
   const dock = useDock();
   const [theme, toggleTheme] = useTheme();
   const { repoLabel, machine } = useControlInfo();
   // A pairing link (#/pair?…) opens the Control tab, where its progress shows.
-  const pairingWith = useMachine().pairing?.machine;
+  const machineState = useMachine();
+  const pairingWith = machineState.pairing?.machine;
+  // Runs don't record their repo, but the paired laptop knows when its last session was for a
+  // different repo than the one picked now (needs_session). Then the latest run's changes belong
+  // to that other repo, so the Changes tab and the chat hide them; switching back shows them again.
+  const otherRepoRun = runPick === 'latest' && run && machineState.status?.needsSession ? run : undefined;
   const openView = dock.open;
   useEffect(() => { if (pairingWith) openView('control'); }, [pairingWith, openView]);
 
@@ -68,15 +69,28 @@ export function App() {
   const stageAt = STAGES.indexOf(view.stage);
   const { open, size } = layout;
   const flip = (v: ViewId) => (dock.isOpen(v) ? dock.close(v) : dock.open(v));
-  const showProblems = (f: CaseFilter) => { toggle('panel', true); setPanelTab('problems'); setCaseFilter(f); setFlash(Date.now()); };
-  // A problem row: select its symbol (the map highlights it, Changes filters to its diffs); click again to clear.
-  const pickCase = (c: CaseView) => {
-    if (openCase === c.key) { setOpenCase(undefined); setPicked(undefined); return; }
-    setOpenCase(c.key);
-    setPicked(c.symbolId);
+  // A Savings number shows its conflict where conflicts live: open the map, select the function
+  // (its popup has the coordinator's decision) and glide the camera to it.
+  const [reveal, setReveal] = useState(0);
+  const showConflict = (c: CaseView) => {
     if (!dock.isOpen('map')) dock.open('map');
-    if (!dock.isOpen('changes')) dock.open('changes');
+    setPicked(c.symbolId);
+    setReveal((r) => r + 1);
   };
+
+  // The Savings panel sits under the code map's editor group, only as wide as the map, so the
+  // columns beside it (Chat, Changes) run full height; with the code map closed it spans the editor.
+  const mapOpen = dock.isOpen('map');
+  const panel = open.panel && (
+    <>
+      <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
+      <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings">
+        <Boundary name="Panel">
+          <BottomPanel savings={view.savings} tokens={view.tokens} cases={view.cases} onShowConflict={showConflict} onClose={() => toggle('panel', false)} />
+        </Boundary>
+      </section>
+    </>
+  );
 
   return (
     <div className="wb">
@@ -88,24 +102,29 @@ export function App() {
           {APP_NAME}
         </div>
         <CommandCenter repoLabel={repoLabel} runs={runs} run={run} runPick={runPick} openRun={openRun} modeName={modeName}
-          onPickRun={(v) => { setRunPick(v); setPicked(undefined); setOpenCase(undefined); }} />
-        <div className="tb-right">
-          <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" data-tip="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
-          <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" data-tip="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('map')} aria-label="Toggle code map" data-tip="Code map" onClick={() => flip('map')}>{ICON.map}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('changes')} aria-label="Toggle changes" data-tip="Changes" onClick={() => flip('changes')}>{ICON.changes}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('control')} aria-label="Toggle control" data-tip="Control" onClick={() => flip('control')}>{ICON.control}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('chat')} aria-label="Toggle chat" data-tip="Chat" onClick={() => flip('chat')}>{ICON.chat}</button>
-          <span className="tb-sep" aria-hidden="true" />
-          <button type="button" className="iconbtn" aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} data-tip={theme === 'dark' ? 'Light theme' : 'Dark theme'} onClick={toggleTheme}>
-            {theme === 'dark'
-              ? <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><circle cx="8" cy="8" r="3" /><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1" /></g></svg>
-              : <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 9.6A5.6 5.6 0 0 1 6.4 2.5a5.6 5.6 0 1 0 7.1 7.1z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>}
-          </button>
-        </div>
+          onPickRun={(v) => { setRunPick(v); setPicked(undefined); }} />
+        {/* balances the brand so the command center stays centred */}
+        <div className="tb-right" />
       </header>
 
       <div className="main">
+        <nav className="activitybar" aria-label="Views">
+          <div className="ab-group">
+            <ActivityButton label="Agents" on={open.side} onClick={() => toggle('side')} badge={view.agents.filter((a) => a.status === 'Working').length} badgeTitle="working">{ICON.agents}</ActivityButton>
+            <ActivityButton label="Code map" on={dock.isOpen('map')} onClick={() => flip('map')}>{ICON.map}</ActivityButton>
+            <ActivityButton label="Changes" on={dock.isOpen('changes')} onClick={() => flip('changes')} badge={view.edits.length} badgeTitle="edits this run">{ICON.changes}</ActivityButton>
+            <ActivityButton label="Control" on={dock.isOpen('control')} onClick={() => flip('control')}>{ICON.control}</ActivityButton>
+            <ActivityButton label="Chat" on={dock.isOpen('chat')} onClick={() => flip('chat')}>{ICON.chat}</ActivityButton>
+            <ActivityButton label="Savings panel" on={open.panel} onClick={() => toggle('panel')} badge={openCount} badgeTitle="open conflicts" alert>{ICON.panel}</ActivityButton>
+          </div>
+          <div className="ab-group">
+            <ActivityButton label={theme === 'dark' ? 'Light theme' : 'Dark theme'} on={false} onClick={toggleTheme}>
+              {theme === 'dark'
+                ? <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" /></g></svg>
+                : <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>}
+            </ActivityButton>
+          </div>
+        </nav>
         {open.side && (
           <>
             <aside className="pane side" style={{ width: size.side }} aria-label="Agents">
@@ -135,14 +154,14 @@ export function App() {
                     {repoLabel && <span>{repoLabel}</span>}
                     {STAGES.map((s, i) => <span key={s}>{(i > 0 || repoLabel) && <>›&nbsp; </>}<span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
                     <span className="grow" />
-                    <span className="ellipsis">dashed = planned · outline = claimed · click a symbol for details</span>
+                    <span className="ellipsis">focused on what agents touch · ⋯ expands · dashed = planned · outline = claimed</span>
                   </nav>
                   <div className="editor">
                     <Boundary name="Code map">
                       {live.connected && !live.ready ? <div className="map-empty">Loading the code map…</div> : (
-                        <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked}
+                        <CodeMap nodes={view.map.nodes} edges={view.map.edges} selected={selected} coord={view.focus} onSelect={setPicked} reveal={reveal}
                           widget={node && <SymbolWidget key={node.id} node={node} symbols={live.symbols} edges={live.edges} history={symbolHistory(live, w, node.id)}
-                            openCase={view.cases.find((c) => c.open && c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
+                            conflict={view.cases.find((c) => c.symbolId === node.id)} onClose={() => setPicked(undefined)} />} />
                       )}
                     </Boundary>
                   </div>
@@ -151,8 +170,8 @@ export function App() {
               changes: { title: 'Changes', icon: ICON.changes, hint: "The code each agent wrote, as diffs · drag to move or split", render: () => (
                 <div className="view">
                   <Boundary name="Changes">
-                    <ChangesView edits={view.edits} agents={view.agents} symbol={picked} symbolName={node?.name ?? (picked && symbolName(picked))}
-                      onPickSymbol={(id) => { setPicked(id); if (!dock.isOpen('map')) dock.open('map'); }} onClearSymbol={() => { setPicked(undefined); setOpenCase(undefined); }} />
+                    <ChangesView edits={otherRepoRun ? [] : view.edits} otherRepoRun={otherRepoRun?.id} repoLabel={repoLabel} agents={view.agents} symbol={selected} symbolName={node?.name}
+                      onPickSymbol={(id) => { setPicked(id); if (!dock.isOpen('map')) dock.open('map'); }} onClearSymbol={() => setPicked(undefined)} />
                   </Boundary>
                 </div>
               ) },
@@ -162,24 +181,13 @@ export function App() {
               chat: { title: 'Chat', icon: ICON.chat, render: () => (
                 <div className="view chat-view">
                   <Boundary name="Chat">
-                    <ChatView events={view.events} agents={view.agents.filter((a) => view.called.has(a.id) || !a.offline)} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
+                    <ChatView events={otherRepoRun ? view.events.filter((e) => e.kind !== 'edit') : view.events} agents={view.agents.filter((a) => view.called.has(a.id) || !a.offline)} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
                   </Boundary>
                 </div>
               ) },
-            }} />
+            }} below={panel && mapOpen ? { view: 'map', node: panel } : undefined} />
           </main>
-          {open.panel && (
-            <>
-              <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
-              <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings and problems">
-                <Boundary name="Panel">
-                  <BottomPanel savings={view.savings} tokens={view.tokens} cases={view.cases} tab={panelTab} setTab={setPanelTab}
-                    filter={caseFilter} setFilter={setCaseFilter} flash={flash} expanded={openCase} onPickCase={pickCase} onShowProblems={showProblems}
-                    onClose={() => toggle('panel', false)} />
-                </Boundary>
-              </section>
-            </>
-          )}
+          {panel && !mapOpen && panel}
         </div>
 
       </div>
@@ -188,12 +196,27 @@ export function App() {
         {run ? <><span>Run #{String(run.id)}</span><span>{modeName(run.mode)}</span><span>seed {run.seed}</span></> : <span>Start a run: npm run demo -- --mode with_contract</span>}
         <span>{view.called.size} agent{view.called.size === 1 ? '' : 's'} in this run</span>
         <span className="grow" />
-        <button type="button" onClick={() => showProblems(openCount ? 'open' : 'all')} aria-label="Show problems">
+        <span title="Open conflicts, marked in red on the code map" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2L14.5 13.5h-13z M8 6.5v3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           {openCount} open
-        </button>
+        </span>
         <span>Stage: {view.stage}</span>
       </footer>
     </div>
+  );
+}
+
+/** One icon in the activity bar, styled like VS Code's: grey when its view is hidden, bright with a
+ *  full-height bar on the left edge while open, an optional count badge, and a tooltip. */
+function ActivityButton({ label, on, onClick, badge, badgeTitle, alert, children }: {
+  label: string; on: boolean; onClick: () => void; badge?: number; badgeTitle?: string; alert?: boolean; children: ReactNode;
+}) {
+  const count = badge && badge > 0 ? (badge > 99 ? '99+' : String(badge)) : undefined;
+  return (
+    <button type="button" className="ab-btn" aria-pressed={on} aria-label={`${on ? 'Hide' : 'Show'} ${label}${count ? `, ${count} ${badgeTitle ?? ''}` : ''}`} onClick={onClick}>
+      {children}
+      {count && <span className={'ab-badge' + (alert ? ' alert' : '')} aria-hidden="true">{count}</span>}
+      <span className="ab-tip" role="tooltip">{label}{count && badgeTitle ? ` · ${count} ${badgeTitle}` : ''}</span>
+    </button>
   );
 }

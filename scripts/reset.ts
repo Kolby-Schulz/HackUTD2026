@@ -7,8 +7,8 @@
 //     deletes those branches; other worktrees in .worktrees/ are left alone
 //  2. restores the target folder (demo-repo/ by default) to its HEAD commit (refuses if it
 //     has uncommitted edits, unless --force)
-//  3. ends any open run and clears per-run server state (unless --offline). Past runs'
-//     rows stay: the scoreboard averages them.
+//  3. ends any open run (never merged, since a merge ends its run) and drops its edits, changes and conflicts, then
+//     clears per-run server state (unless --offline). Past runs' rows stay: the scoreboard averages them.
 // Keeps .contract/ (baseline token log, saved identities, run results, cloned repos).
 import { parseArgs } from 'node:util';
 import { resolveTarget, type Target } from '@contract/client';
@@ -72,7 +72,7 @@ export const demoRepoChanges = () => targetChanges(resolveTarget(REPO, ''));
 export async function resetRuns(waitSecs = 0) {
   const conn = await adminConnect(['SELECT * FROM run']);
   const ended = await resetServerState(conn, waitSecs);
-  log('reset', ended.length ? `ended open run(s) ${ended.join(', ')}` : 'no open run');
+  log('reset', ended.length ? `ended open run(s) ${ended.join(', ')} and took back their unmerged edits and conflicts` : 'no open run');
   log('reset', 'cleared code map, plans, claims and pending instructions');
   conn.disconnect();
 }

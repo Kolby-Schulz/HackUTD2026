@@ -109,11 +109,7 @@ const Panel = () => {
   const { saved = 0, base = 0, current } = demo.savings;
   return (
     <div className={s.panel}>
-      <div className="ptabs" role="tablist">
-        <button type="button" role="tab" aria-selected="true">SAVINGS</button>
-        <button type="button" role="tab" aria-selected="false">PROBLEMS <span className="count" style={{ background: 'var(--danger)' }}>{open}</span></button>
-        <button type="button" role="tab" aria-selected="false">TOKENS</button>
-      </div>
+      <div className="ptabs"><h2 className="ptitle">SAVINGS</h2></div>
       <div className={s.hero}>
         <button type="button" className={s.heroCard}>
           <span className="hd">Tokens saved</span>
@@ -122,7 +118,7 @@ const Panel = () => {
             <span className={s.barRow}><span className="muted">without</span><span className={s.track}><span style={{ width: '100%', background: 'var(--faint)' }} /></span><span className="mono">{fmtK(base)}</span></span>
             <span className={s.barRow}><b style={{ color: 'var(--accent)' }}>with</b><span className={s.track}><span style={{ width: `${(current / Math.max(1, base)) * 100}%`, background: 'var(--accent)' }} /></span><span className="mono">{fmtK(current)}</span></span>
           </span>
-          <span className={s.cta}>See where they came from →</span>
+          <span className={s.cta}>See where they went →</span>
         </button>
         <button type="button" className={s.heroCard}>
           <span className="hd">Conflicts caught</span>
@@ -131,7 +127,7 @@ const Panel = () => {
             <span className={s.chipOk}>{resolved} resolved</span>
             <span className={s.chipBad}><span className={s.pulseDot} />{open} open</span>
           </span>
-          <span className={s.cta}>Show them →</span>
+          <span className={s.cta}>Show #3 on the map →</span>
         </button>
         <button type="button" className={s.heroCard}>
           <span className="hd">Avg time to resolve</span>
@@ -145,7 +141,7 @@ const Panel = () => {
               </span>
             ))}
           </span>
-          <span className={s.cta}>Show the resolved ones →</span>
+          <span className={s.cta}>Show the slowest on the map →</span>
         </button>
       </div>
     </div>

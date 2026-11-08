@@ -40,6 +40,7 @@ import ClaimServiceReducer from "./claim_service_reducer";
 import ClaimSymbolReducer from "./claim_symbol_reducer";
 import CreateTaskReducer from "./create_task_reducer";
 import DeleteMachineProcessReducer from "./delete_machine_process_reducer";
+import DiscardUnmergedRunReducer from "./discard_unmerged_run_reducer";
 import DismissConflictReducer from "./dismiss_conflict_reducer";
 import EndRunReducer from "./end_run_reducer";
 import FinishMachineCommandReducer from "./finish_machine_command_reducer";
@@ -413,6 +414,7 @@ const reducersSchema = __reducers(
   __reducerSchema("claim_symbol", ClaimSymbolReducer),
   __reducerSchema("create_task", CreateTaskReducer),
   __reducerSchema("delete_machine_process", DeleteMachineProcessReducer),
+  __reducerSchema("discard_unmerged_run", DiscardUnmergedRunReducer),
   __reducerSchema("dismiss_conflict", DismissConflictReducer),
   __reducerSchema("end_run", EndRunReducer),
   __reducerSchema("finish_machine_command", FinishMachineCommandReducer),

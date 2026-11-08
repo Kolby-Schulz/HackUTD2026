@@ -33,7 +33,7 @@ const LOG_LINES = 300;
 export type Action =
   | { action: 'coordinator' }
   | { action: 'session-start' }
-  | { action: 'session-merge'; integration?: boolean }
+  | { action: 'session-merge'; integration?: boolean; land?: boolean }
   | { action: 'worker'; id: string; prompt?: string }
   | { action: 'judge' }
   | { action: 'reset' };
@@ -166,7 +166,7 @@ export function toCommand(body: unknown): Command {
     case 'session-start':
       return { key: 'session-start', label: 'Start session', args: ['scripts/session.ts', 'start'], long: false };
     case 'session-merge':
-      return { key: 'session-merge', label: 'Merge session', args: ['scripts/session.ts', 'merge', ...(b.integration === true ? ['--integration'] : [])], long: false };
+      return { key: 'session-merge', label: 'Merge session', args: ['scripts/session.ts', 'merge', ...(b.integration === true ? ['--integration'] : []), ...(b.land === true ? ['--land'] : [])], long: false };
     case 'judge':
       return { key: 'judge', label: 'Judge agent', args: ['scripts/judge.ts'], long: true };
     case 'reset':
@@ -413,6 +413,7 @@ function connectDaemon(id: string): Promise<DbConnection> {
             `SELECT * FROM machine_command WHERE machine_id = '${q(id)}'`,
             `SELECT * FROM machine_pair_request WHERE machine_id = '${q(id)}'`,
             `SELECT * FROM machine_process WHERE machine_id = '${q(id)}'`,
+            `SELECT * FROM machine_chat WHERE machine_id = '${q(id)}'`,
             'SELECT * FROM run',
             'SELECT * FROM agent',
             'SELECT * FROM task',
@@ -504,6 +505,9 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
     }
   }
   const assistant = new Assistant(liveDeps(reg, conn));
+  // A restarted daemon has no memory of the earlier chat, but the server keeps its rows (same
+  // identity). Start a new conversation so the dashboard hides them, as after a repo switch.
+  if ([...conn.db.machineChat.iter()].some((m) => m.machineId === id)) assistant.reset(reg.repoLabel());
   const daemon = new Daemon(reg, machinePort(conn, id), assistant);
   const toCmd = (row: { id: bigint; action: string; argsJson: string; status: string; createdAt: { microsSinceUnixEpoch: bigint } }) => ({
     id: row.id, action: row.action, argsJson: row.argsJson, status: row.status, createdAtMs: Number(row.createdAt.microsSinceUnixEpoch / 1000n),

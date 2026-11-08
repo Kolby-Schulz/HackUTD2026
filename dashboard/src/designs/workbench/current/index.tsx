@@ -1,8 +1,7 @@
 // Today's dashboard: the real Agents, Code map, Changes and Savings components with the sample
 // run. Chat needs a live SpacetimeDB connection, so it is drawn with the same classes instead.
-import { useState } from 'react';
 import { defineVariant } from '../../../variants/define.ts';
-import { AgentsView, BottomPanel, type CaseFilter, type PanelTab } from '../../../Views.tsx';
+import { AgentsView, BottomPanel } from '../../../Views.tsx';
 import { CodeMap } from '../../../CodeMap.tsx';
 import { ChangesView } from '../../../Changes.tsx';
 import { ICON, PaneHead } from '../../../Workbench.tsx';
@@ -17,9 +16,7 @@ export const Titlebar = () => (
     <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
       <button type="button" className="cc-btn"><span className="muted">⌕</span><span className="grow ellipsis">demo-repo</span><span className="mono">latest · run 2 · with InSync</span></button>
     </div>
-    <div className="tb-right">
-      {(['agents', 'panel', 'map', 'changes', 'control', 'chat'] as const).map((k) => <span key={k} className="iconbtn" aria-pressed={k !== 'control'}>{ICON[k]}</span>)}
-    </div>
+    <div className="tb-right" />
   </header>
 );
 
@@ -65,18 +62,11 @@ export const Chat = () => (
   </div>
 );
 
-const Panel = () => {
-  const [tab, setTab] = useState<PanelTab>('savings');
-  const [filter, setFilter] = useState<CaseFilter>('all');
-  const [open, setOpen] = useState<string>();
-  return (
-    <div style={{ height: 230, display: 'flex', flexDirection: 'column' }}>
-      <BottomPanel savings={demo.savings} tokens={demo.tokens} cases={demo.cases} tab={tab} setTab={setTab} filter={filter} setFilter={setFilter}
-        flash={0} expanded={open} onPickCase={(c) => setOpen(open === c.key ? undefined : c.key)}
-        onShowProblems={(f) => { setTab('problems'); setFilter(f); }} onClose={noop} />
-    </div>
-  );
-};
+const Panel = () => (
+  <div style={{ height: 210, display: 'flex', flexDirection: 'column' }}>
+    <BottomPanel savings={demo.savings} tokens={demo.tokens} cases={demo.cases} onShowConflict={noop} onClose={noop} />
+  </div>
+);
 
 const Statusbar = () => (
   <footer className="statusbar">

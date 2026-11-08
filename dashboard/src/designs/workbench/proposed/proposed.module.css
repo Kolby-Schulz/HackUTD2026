@@ -48,11 +48,11 @@
 @keyframes changedRing { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 45%, transparent); } 100% { box-shadow: 0 0 0 12px transparent; } }
 
 /* ---------- savings hero ---------- */
-.panel { height: 300px; display: flex; flex-direction: column; }
-.hero { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 14px 16px 16px; }
-.heroCard { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; text-align: left; color: inherit; transition: border-color 0.15s, box-shadow 0.15s; }
+.panel { height: 260px; display: flex; flex-direction: column; }
+.hero { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; padding: 12px; overflow: auto; }
+.heroCard { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; text-align: left; color: inherit; transition: border-color 0.15s, box-shadow 0.15s; }
 .heroCard:hover { border-color: var(--accent); box-shadow: 0 4px 16px var(--lift); }
-.big { font-size: 52px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+.big { font-size: 40px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums; }
 .bigRow { display: flex; align-items: baseline; gap: 10px; }
 .bump { font-size: 12px; font-weight: 700; color: var(--danger); background: var(--danger-soft); border-radius: 10px; padding: 2px 8px; animation: bump 0.6s cubic-bezier(.2,.9,.3,1.4); }
 @keyframes bump { from { transform: translateY(6px) scale(0.8); opacity: 0; } }

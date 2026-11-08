@@ -114,6 +114,12 @@ export async function endOpenRuns(conn: DbConnection): Promise<bigint[]> {
  */
 export async function resetServerState(conn: DbConnection, waitSecs = 0): Promise<bigint[]> {
   const ended = await endOpenRuns(conn);
+  // A merge ends its run itself, so a run still open here was never merged: its worktrees are
+  // about to go, so its edits, changes and the conflicts they caused leave the dashboard too.
+  // An older published module has no discard_unmerged_run; the reset still goes on without it.
+  for (const runId of ended) {
+    await conn.reducers.discardUnmergedRun({ runId }).catch((e) => log('reset', `kept run ${runId}'s edits and conflicts: ${e instanceof Error ? e.message : String(e)}`));
+  }
   const deadline = Date.now() + waitSecs * 1000;
   for (let said = false; ; said = true) {
     try {
