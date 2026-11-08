@@ -13,7 +13,7 @@ import { parseArgs } from 'node:util';
 import { benchMarkdown, benchReport, type BenchRun } from './bench-report.ts';
 import { run } from './merge.ts';
 import { scenarioOrDie, SCENARIO_NAMES } from './scenarios.ts';
-import { log, MODES, REPO, RESULTS_DIR, STATE_DIR, TSX, type Mode } from './lib.ts';
+import { log, MODES, REPO, RESULTS_DIR, STATE_DIR, TSX, TSX_CLI, type Mode } from './lib.ts';
 
 const { values } = parseArgs({
   options: {
@@ -34,7 +34,7 @@ if (!values['report-only']) {
   for (const s of scenarios) {
     for (const m of modes) {
       log('bench', `=== ${s} · ${m} · ${values.runs} run(s) ===`);
-      const r = await run('demo', TSX, [join(REPO, 'scripts/run-demo.ts'), '--scenario', s, '--mode', m, '--runs', values.runs!, '--timeout-min', values['timeout-min']!], REPO, 6 * 3600_000);
+      const r = await run('demo', TSX, [TSX_CLI, join(REPO, 'scripts/run-demo.ts'), '--scenario', s, '--mode', m, '--runs', values.runs!, '--timeout-min', values['timeout-min']!], REPO, 6 * 3600_000);
       if (r.exitCode !== 0) log('bench', `run-demo exited ${r.exitCode} for ${s} · ${m}; continuing`);
     }
   }

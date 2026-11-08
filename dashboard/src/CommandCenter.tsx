@@ -22,8 +22,10 @@ function RepoSection({ openRun }: { openRun?: R.Run }) {
   if (!status) {
     return (
       <div className="cc-off" style={{ display: 'block' }}>
-        {mine.length ? 'Your paired laptop is offline.' : 'No laptop is paired with this browser yet.'} Run <span className="mono">npm run control</span> on
-        the laptop that should do the work and open the pairing link it prints (or enter its code in the Control tab), then pick the repository here.
+        {mine.length ? 'Your paired laptop is offline.' : 'No laptop is paired with this browser yet.'} On
+        the laptop that should do the work, open a terminal in the repo root, run <span className="mono">git checkout main</span>, <span className="mono">git pull</span> and <span className="mono">npm install</span>,
+        then <span className="mono">npm run control</span>, and open the pairing link it prints (or enter its code in the Control tab). Then pick the repository here.
+        (If npm says <span className="mono">Missing script: "control"</span>, that checkout isn't on an up-to-date main.)
       </div>
     );
   }

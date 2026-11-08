@@ -62,3 +62,4 @@ All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `np
 - **bench writes tracked files**: `bench.ts:52-59` rewrites `dashboard/public/bench.json` and the README table. Expect diffs after each bench run.
 - **vitest is not declared** in the root or `dashboard/package.json` devDependencies, though both have a `test` script. It presumably resolves from other workspaces (unverified).
 - **Replay** and **Judge box** are extras beyond the spec and are not in the storyboard.
+- **Cross-platform processes**: scripts start tsx as `node` + `TSX_CLI` (`scripts/lib.ts`), and `Registry.stop` uses `taskkill /T` on Windows. `scripts/test/spawn.test.ts` starts and stops real processes; CI runs the scripts suite on Windows, macOS and Linux (`.github/workflows/scripts-cross-platform.yml`). The Control card picks setup commands per OS (`dashboard/src/os.ts`).

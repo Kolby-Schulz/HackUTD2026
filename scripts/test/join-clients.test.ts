@@ -1,5 +1,6 @@
 // Editor configs written by `npm run join -- --client …` (issue #22).
 import { describe, it, expect } from 'vitest';
+import { join } from 'node:path';
 import { clientFiles, codexToml, upsertBlock, withClaudeSettings, withMcpServer, type JoinInfo } from '../join-clients.ts';
 import { joinedRules } from '../../agents/worker/src/rules.ts';
 import { pausedMessage } from '../../agents/worker/src/claim-guard.ts';
@@ -14,7 +15,7 @@ describe('join --client configs', () => {
     const out = JSON.parse(withMcpServer(JSON.stringify({ mcpServers: { other: { command: 'x' } }, extra: 1 }), info, 'p'));
     expect(out.extra).toBe(1);
     expect(out.mcpServers.other).toEqual({ command: 'x' });
-    expect(out.mcpServers.contract).toMatchObject({ command: '/c/node_modules/.bin/tsx', args: ['/c/packages/mcp/src/index.ts'] });
+    expect(out.mcpServers.contract).toMatchObject({ command: process.execPath, args: [join('/c', 'node_modules/tsx/dist/cli.mjs'), join('/c', 'packages/mcp/src/index.ts')] });
     expect(out.mcpServers.contract.env).toMatchObject({ CONTRACT_AGENT_ID: 'dana', CONTRACT_TASK_ID: '7', CONTRACT_HEARTBEAT: '1', CONTRACT_REPO_DIR: '/w/app' });
     expect(JSON.stringify(out)).not.toMatch(/TOKEN/);
   });
@@ -43,11 +44,12 @@ describe('join --client configs', () => {
   });
 
   it('writes the right files per client', () => {
-    expect(clientFiles('claude-code', info).map((f) => f.path)).toEqual(['/w/app/.mcp.json', '/w/app/.claude/settings.local.json', '/w/app/CLAUDE.local.md']);
-    expect(clientFiles('cursor', info).map((f) => f.path)).toEqual(['/w/app/.cursor/mcp.json', '/w/app/.cursor/rules/contract.mdc']);
+    const at = (p: string) => join('/w/app', p); // \ on Windows, / elsewhere
+    expect(clientFiles('claude-code', info).map((f) => f.path)).toEqual([at('.mcp.json'), at('.claude/settings.local.json'), at('CLAUDE.local.md')]);
+    expect(clientFiles('cursor', info).map((f) => f.path)).toEqual([at('.cursor/mcp.json'), at('.cursor/rules/contract.mdc')]);
     expect(clientFiles('cursor', info)[1].write(undefined)).toMatch(/^---\ndescription: .*\nalwaysApply: true\n---/);
-    expect(clientFiles('codex', info).map((f) => f.path)).toEqual(['/w/app/AGENTS.md']);
-    expect(codexToml(info)).toMatch(/^\[mcp_servers\.contract\]\ncommand = "\/c\/node_modules\/\.bin\/tsx"/);
+    expect(clientFiles('codex', info).map((f) => f.path)).toEqual([at('AGENTS.md')]);
+    expect(codexToml(info)).toContain(`[mcp_servers.contract]\ncommand = ${JSON.stringify(process.execPath)}`);
   });
 
   it('rules tell hook-less agents to report changes and every agent to wait when paused', () => {

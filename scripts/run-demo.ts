@@ -25,7 +25,7 @@ import { demoRepoChanges, resetFiles, resetRuns } from './reset.ts';
 import { seed } from './seed.ts';
 import { scenarioOrDie } from './scenarios.ts';
 import {
-  adminConnect, AGENTS, git, log, MODES, REPO, resetServerState, RESULTS_DIR, savedToken, saveToken, TSX, WORKTREES, type Mode,
+  adminConnect, AGENTS, git, log, MODES, REPO, resetServerState, RESULTS_DIR, savedToken, saveToken, TSX, TSX_CLI, WORKTREES, type Mode,
 } from './lib.ts';
 
 const { values } = parseArgs({
@@ -106,7 +106,7 @@ async function runOnce() {
     log('demo', 'cleared server state from the last run');
   }
   if (mode === 'with_contract') {
-    const code = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts')], REPO, 5 * 60_000);
+    const code = await run('mapper', TSX, [TSX_CLI, join(REPO, 'mapper/src/cli.ts')], REPO, 5 * 60_000);
     if (code.exitCode !== 0) die('mapper failed; is the server reachable?');
   }
 
@@ -131,7 +131,7 @@ async function runOnce() {
       const r = await run(
         a.id,
         TSX,
-        [join(REPO, 'agents/worker/src/index.ts'), '--id', a.id, '--task', a.task, '--task-id', String(s.tasks[a.id]), '--mode', mode,
+        [TSX_CLI, join(REPO, 'agents/worker/src/index.ts'), '--id', a.id, '--task', a.task, '--task-id', String(s.tasks[a.id]), '--mode', mode,
           '--task-text', a.id === 'agent-a' ? scenario.a.task : scenario.b.task],
         REPO,
         timeoutMs,
