@@ -13,9 +13,10 @@ import { ScoreboardTab } from './ScoreboardTab.tsx';
 import { CodeTab } from './CodeTab.tsx';
 import { ReplayTab } from './ReplayTab.tsx';
 import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
+import { ControlTab, useControlRepo } from './ControlTab.tsx';
 
-type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard' | 'replay';
-const TABS: [Tab, string][] = [['live', 'Live'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard'], ['replay', 'Replay']];
+type Tab = 'live' | 'code' | 'activity' | 'tokens' | 'scoreboard' | 'replay' | 'chat';
+const TABS: [Tab, string][] = [['live', 'Live'], ['chat', 'Chat'], ['code', 'Code'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard'], ['replay', 'Replay']];
 
 function useHashTab(): Tab {
   const read = (): Tab => {
@@ -59,6 +60,7 @@ export function App() {
     // `now` ticks every second; the tables change only when the server pushes rows
   }, [live, run, now, w.start, w.end]);
 
+  const repoLabel = useControlRepo();
   const clock = run ? fmtClock(w.end - w.start, false) : '00:00';
   const runs = live.runs.slice().sort((a, b) => Number(b.id - a.id));
 
@@ -72,7 +74,7 @@ export function App() {
         </div>
         <span className="vsep" />
         <label className="runsel">
-          <span>demo-repo</span><span className="muted">·</span>
+          {repoLabel && <><span className="mono" title="Repository this laptop's control server targets">{repoLabel}</span><span className="muted">·</span></>}
           <select aria-label="Run" value={runPick} onChange={(e) => setRunPick(e.target.value)}>
             <option value="latest">{run ? `latest: run ${run.id} · ${run.mode}` : 'no runs yet'}</option>
             {runs.map((r) => <option key={String(r.id)} value={String(r.id)}>run {String(r.id)} · {r.mode} · seed {r.seed}{r.endedAt ? '' : ' · live'}</option>)}
@@ -113,6 +115,7 @@ export function App() {
           {tab === 'activity' && <ActivityTab events={view.events} cases={view.cases} people={view.people} />}
           {tab === 'tokens' && <TokensTab stats={view.stats} agents={view.agents} coord={view.coord} cases={view.cases} runStart={w.start} />}
           {tab === 'replay' && <ReplayTab live={live} />}
+          {tab === 'chat' && <ControlTab openRun={live.runs.find((r) => r.endedAt === undefined)} />}
           {tab === 'scoreboard' && <ScoreboardTab without={view.without} withC={view.withC} />}
         </main>
       </div>

@@ -14,7 +14,7 @@ Workflow:
    can describe a file better (rounding, units, side effects).
 2. Before writing any new helper, call find_existing; reuse a match with score >= 0.8.
 3. Call declare_plan with every function you will modify, create or depend on. For each
-   create, include the signature you will write (e.g. "formatDate(d: Date): string").
+   create, include the signature you will write, in this shape in every language: name(param: Type): ReturnType (e.g. "formatDate(d: Date): string", or Python "format_date(d: date): str").
 4. Call claim_symbol before modifying a function. If the claim fails, don't edit it: call
    get_instructions and follow them.
 5. After changing a function's signature or behavior, call report_change. Call release_claim

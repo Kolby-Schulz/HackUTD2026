@@ -60,6 +60,11 @@ describe('summary hook', () => {
     expect(repoFile('/elsewhere/a.ts', REPO, REPO)).toBeUndefined();
     expect(repoFile(`${REPO}/node_modules/x/index.js`, REPO, REPO)).toBeUndefined();
     expect(repoFile(`${REPO}/README.md`, REPO, REPO)).toBeUndefined();
+    // Every language the mapper knows counts as source, not just TS/JS.
+    for (const f of ['app/fees.py', 'pkg/fees.go', 'src/Main.java', 'src/lib.rs', 'lib/a.rb', 'src/A.php', 'src/A.cs', 'src/a.cpp', 'src/a.h']) {
+      expect(repoFile(f, REPO, REPO), f).toBe(f);
+    }
+    expect(repoFile('src/types.d.ts', REPO, REPO)).toBeUndefined();
   });
 
   it('outline keeps the header, doc comments and signatures, not bodies', () => {
@@ -69,6 +74,7 @@ describe('summary hook', () => {
     expect(o).toContain('export function calculateFee(amountCents: number): number');
     expect(o).not.toContain('Math.floor');
     expect(outline('const x = 1;\n')).toBeUndefined(); // no exports
+    expect(outline('def fee(x):\n    return x\n')).toBeUndefined(); // other languages: read in full
   });
 
   it('on a miss, allows the Read and caches an outline; a later agent is served it', async () => {

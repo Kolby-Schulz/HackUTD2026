@@ -22,7 +22,8 @@ Summary: The dashboard is a React 19 + Vite single page that reads 15 SpacetimeD
 All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `npx tsx scripts/<file>.ts`.
 
 - `seed.ts`: opens a run (ends any open run) and creates the two demo tasks. `npm run seed -- [--mode with_contract|without_contract] [--seed 7]`. `run-demo.ts` calls `seed()` directly.
-- `reset.ts`: removes `.worktrees/<id>` and `agent/*`, `demo/*` branches, restores the target to HEAD, ends the run and clears server state. `npm run reset -- [--force] [--offline] [--repo <path|url>]`. Keeps `.contract/`.
+- `control.ts` (`npm run control`, 127.0.0.1:5199) + `assistant.ts`: local process server and chat behind the dashboard's Chat tab. Holds the target repo (`POST /repo`; owner/name, GitHub URL or path; saved in `.contract/control.json`), passes it to every child as `CONTRACT_TARGET`, clones/pulls it, and reports languages, installs, checks and missing tools (`missingTools`). `GET /` redirects to the dashboard.
+- `reset.ts`: removes the run's worktrees (`.worktrees/<id>`, or `.worktrees/<repoKey>/<id>` for other repos) and `agent/*`, `demo/*` branches, restores the target to HEAD, ends the run and clears server state. `npm run reset -- [--force] [--offline] [--repo <path|url>]`. Keeps `.contract/`.
 - `run-demo.ts`: one measured run (seed, both workers, merge, checks, merge-fix, end). `npm run demo -- --mode without_contract|with_contract [--seed 7] [--runs 1] [--timeout-min 20] [--no-fix] [--scenario planted]` (`:31-35`).
 - `session.ts`: the two-laptop live flow. `npm run session -- start [--no-map] [--tasks f.json]`, then `npm run session -- merge [--agents a,b] [--integration] [--no-fix] [--fixer id] [--push]` (dispatch at `:49-50`).
 - `join.ts`: joins a laptop to a run. `npm run join -- --agent <id> --name "<name>" [--owner X] [--repo …]`, or `--client claude-code|cursor|codex [--dir .] [--task "…"]`. Checks Node 22+, `.env`, `claude` CLI login. Writes no tokens.
@@ -37,7 +38,7 @@ All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `np
 ## Demo flow
 
 1. Start: `npm run coordinator` on one laptop, `npm run session -- start`. Each laptop runs `npm run join ...` and `npm run worker -- --id <id> --wait` (or `--prompt`).
-2. Work: workers run in `.worktrees/<id>`, push `agent/<id>`, and the dashboard shows live state.
+2. Work: workers run in `.worktrees/<id>` (other repos: `.worktrees/<repoKey>/<id>`, with dependencies installed), push `agent/<id>`, and the dashboard shows live state.
 3. Merge: `npm run session -- merge` (or `npm run demo` for the measured version, which does merge, checks, then merge-fix).
 4. Proof: `npm run reset`, then the same demo with the other `--mode`. Run `npm run bench` for averaged results and `dashboard/public/bench.json`. Spec 15 wants at least 3 runs per mode.
 5. Watch: `npm run dashboard`, then the Scoreboard and Replay tabs.

@@ -35,13 +35,13 @@ export function NewTaskForm({ agents, openRun, tasks }: { agents: AgentCard[]; o
   }
 
   if (!openRun) {
-    return <div className="new-task muted">To assign tasks, start a session: <span className="mono">npm run session -- start</span></div>;
+    return <div className="new-task muted">To assign tasks, start a session from the <a href="#/chat">Chat</a> tab (or <span className="mono">npm run session -- start</span>).</div>;
   }
   return (
     <form className="new-task" onSubmit={submit} aria-label="New task">
       <div className="cap muted">New task</div>
       {free.length === 0 ? (
-        <div className="muted" style={{ fontSize: 12 }}>No free agent. On a laptop, run <span className="mono">npm run worker -- --id agent-b --wait</span></div>
+        <div className="muted" style={{ fontSize: 12 }}>No free agent. Start one from the <a href="#/chat">Chat</a> tab, or run <span className="mono">npm run worker -- --id agent-b --wait</span></div>
       ) : (
         <>
           <select value={target} onChange={(e) => setAgentId(e.target.value)} aria-label="Agent">

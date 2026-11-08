@@ -2,8 +2,9 @@
 
 Live coordination for AI coding agents. A shared SpacetimeDB server lets a team's
 coding agents see each other's plans as they work, so conflicting changes are caught
-while code is being written, not at merge time. A Nemotron coordinator resolves
-conflicts and a live dashboard shows everything.
+while code is being written, not at merge time. A coordinator agent resolves
+conflicts and a live dashboard shows everything. Every model call goes through one
+provider switch (`LLM_PROVIDER`); today that is Claude Code, and NVIDIA Nemotron is planned.
 
 > Contract isn't another coding agent. It's what lets your team's coding agents work like a team.
 
@@ -14,7 +15,7 @@ Built at HackUTD 2026. Full spec: [docs/SPEC.md](docs/SPEC.md).
 ```text
 server/              SpacetimeDB module: tables, reducers, conflict checks
 packages/client/     Contract client library + generated SpacetimeDB bindings
-packages/llm/        Shared Nemotron wrapper: calls, tool loop, token logging
+packages/llm/        Shared model wrapper (Claude Code today): calls, token + cost logging
 agents/worker/       Worker agent loop and its tools
 agents/coordinator/  Coordinator agent loop and prompts
 mapper/              Code mapper: repo -> symbol rows
@@ -27,7 +28,8 @@ scripts/             run-demo.ts, reset.ts, seed.ts
 
 1. Node 20+ and the [SpacetimeDB CLI](https://spacetimedb.com/install).
 2. `npm install`
-3. `cp .env.example .env` and add your `NVIDIA_API_KEY` from build.nvidia.com.
+3. `cp .env.example .env`, and log in to Claude Code on this laptop (`claude -p "hi"` should
+   answer). `NVIDIA_API_KEY` is only needed once the Nemotron provider lands.
 4. `spacetime start`, then publish `server/` and generate bindings into
    `packages/client/src/bindings` (see the SpacetimeDB TypeScript quickstart).
 
@@ -83,6 +85,24 @@ spacetime sql --server maincloud contract-hackutd26 "SELECT id, machine, status,
 After a change to `server/`, the owner republishes with `npm run publish:cloud -w @contract/server`.
 Keep live tests local (they wipe their database); they default to `ws://localhost:3000`.
 
+## Running it from the dashboard
+
+The easiest way: open the dashboard's **Chat** tab and say what you want, the way you'd prompt a
+coding agent ("Add late fees to invoices, and have another agent format receipt dates").
+Contract plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
+session if they aren't running, puts one agent on each independent piece, and merges and runs
+the checks when they all finish. While agents work, follow-ups ("make it round half up") go to
+them as messages. It needs one local helper running:
+
+```bash
+npm run control     # then open the dashboard's Chat tab
+```
+
+**Manual controls** under the chat start and stop each piece yourself (coordinator, session,
+workers, judge, merge, reset) and show each process's output. The helper listens on 127.0.0.1
+only, accepts requests only from pages served on localhost, and runs things only on the laptop
+it runs on (each laptop runs its own). Workers push `agent/<id>` to origin as usual.
+
 ## Joining from a new laptop
 
 ```bash
@@ -98,7 +118,9 @@ To join from your own Claude Code, Cursor or Codex session instead of our worker
 
 ## Your own repo
 
-Contract works on any git repository, not only `demo-repo/` (issue #18). Pick it with
+Contract works on any git repository, not only `demo-repo/` (issue #18). The easiest way:
+run `npm run control`, open the dashboard's **Chat** tab and paste a GitHub link
+(`owner/name` works too) into **Repository**. From the command line, pick it with
 `--repo <path|git URL>` or `CONTRACT_TARGET` in `.env`; a folder inside a repo works too.
 
 ```bash
@@ -108,11 +130,26 @@ npm run session -- merge --repo ../my-app                       # merge + run it
 npm run reset -- --repo ../my-app
 ```
 
-`tasks.json` is `[{ "agent": "agent-a", "task": "Add a dark mode toggle" }]`. The merge runs
-the commands in the target's `contract.json` (`{ "checks": { "unit tests": "pytest -q" } }`),
-else `CONTRACT_TEST_CMD`, else `npm test`; workers may run those without asking. The repo
-needs an `origin` for the two-laptop flow (workers push `agent/<id>` there); a local-only
-repo works on one laptop. The mapper reads TypeScript and JavaScript.
+`tasks.json` is `[{ "agent": "agent-a", "task": "Add a dark mode toggle" }]`.
+
+- **Checks.** The merge runs the commands in the target's `contract.json`
+  (`{ "checks": { "unit tests": "pytest -q" } }`), else `CONTRACT_TEST_CMD`, else what it
+  detects: `npm test`, `python -m pytest -q`, `go test ./...`, `cargo test`, `mvn -q test` /
+  `./gradlew test`, `bundle exec rspec`, `vendor/bin/phpunit`, `dotnet test`. Workers may run
+  those without asking.
+- **Dependencies.** Each worker worktree and the merge worktree get an install step detected
+  from lockfiles (`npm ci`, `pnpm`/`yarn`/`bun install`, a `.venv` with pip, `uv sync`,
+  `poetry install`, `go mod download`, `cargo fetch`, `bundle install`, `composer install`,
+  `dotnet restore`). Tools missing on the laptop are skipped. Override with
+  `"install": "make deps"` in `contract.json`, or turn it off with `"install": false`.
+  `node_modules`, `.venv` and friends are never committed to agent branches.
+- **Worktrees.** The demo's are `.worktrees/<id>`; another repo's are
+  `.worktrees/<name>-<hash>/<id>`, so switching repos never reuses a folder.
+- **Push access.** The repo needs an `origin` you can push to for the two-laptop flow
+  (workers push `agent/<id>` there); a local-only repo works on one laptop.
+- **Languages.** The code map reads TypeScript and JavaScript (ES modules), plus Python, Go,
+  Java, Rust, Ruby, PHP, C# and C/C++ through tree-sitter. For those, call edges are matched by
+  name, so they're approximate.
 
 ## Benchmark
 

@@ -111,7 +111,7 @@ export function createServer(clientP: Promise<ContractClient>, taskId: bigint): 
               signature: z
                 .string()
                 .optional()
-                .describe('For intent create: the full signature you will write, e.g. formatDate(d: Date): string'),
+                .describe('For intent create: the signature you will write, as name(param: Type): ReturnType in any language, e.g. formatDate(d: Date): string or format_date(d: date): str'),
             }),
           )
           .describe('Every function you will modify or create, and the ones your code calls (depend)'),

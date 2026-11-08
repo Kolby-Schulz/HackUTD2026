@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The path-only half of the mapper: no parser imports, so this hook stays fast.
+import { isSourceFile } from '@contract/mapper/lang';
 
 export interface HookInput {
   session_id: string;
@@ -45,13 +47,11 @@ export interface HookDeps {
 
 export type HookOutput = { hookSpecificOutput: Record<string, string> } | undefined;
 
-const SOURCE = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
-
-/** Path relative to the repo dir for a source file inside it, else undefined. */
+/** Path relative to the repo dir for a source file (any language the mapper knows) inside it, else undefined. */
 export function repoFile(path: string, cwd: string, repoDir: string): string | undefined {
   const rel = relative(repoDir, isAbsolute(path) ? path : resolve(cwd, path));
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) return undefined;
-  if (/(^|\/)(node_modules|\.git)\//.test(rel) || !SOURCE.test(rel)) return undefined;
+  if (/(^|\/)(node_modules|\.git)\//.test(rel) || !isSourceFile(rel)) return undefined;
   return rel;
 }
 
@@ -73,7 +73,8 @@ export function catTargets(command: string, cwd: string, repoDir: string): strin
 /**
  * A short outline of a source file: its header comment, then each export's signature with
  * its doc comment; small interface/type bodies are kept whole. Undefined when the file has
- * no exports or the outline wouldn't be much smaller than the file.
+ * no exports or the outline wouldn't be much smaller than the file, so for languages other than
+ * TS/JS (no `export` lines) the full file is read and nothing is cached.
  */
 export function outline(src: string): string | undefined {
   const lines = src.split('\n');
