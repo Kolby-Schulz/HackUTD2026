@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { rows } from '@contract/client';
 import type { LLM } from '@contract/llm';
-import { buildConflictContext, createQueue, handleConflict, priorDecisions, type Deps, type Tables } from '../src/live.ts';
+import { buildConflictContext, createQueue, handleConflict, priorDecisions, takenBy, type Deps, type Tables } from '../src/live.ts';
 import { buildPrompt } from '../src/decide.ts';
 
 const ts = {} as rows.Conflict['createdAt'];
@@ -160,5 +160,26 @@ describe('coordinator queue', () => {
     const deps = fakeDeps({ action: 'dismiss', owner_agent: 'agent-b', instructions_a: 'x', instructions_b: 'y', reason: 'no clash' });
     await handleConflict(deps, conflict(10n));
     expect(deps.calls).toEqual(['mark 10', 'dismiss 10']);
+  });
+});
+
+describe('takenBy (standby: is another coordinator live?)', () => {
+  it('names the machine from the service-lock refusal', () => {
+    const e = new Error('coordinator is already running on laptop-1; stop it there first (or wait 30 s after it crashed)');
+    expect(takenBy(e)).toBe('laptop-1');
+  });
+
+  it('names the machine from the register_agent refusal', () => {
+    const e = new Error("agent id 'coordinator' is already linked to another identity (registered from laptop-2, heartbeat 12 s ago); use a different id");
+    expect(takenBy(e)).toBe('laptop-2');
+  });
+
+  it('falls back to a generic name for an older server module', () => {
+    expect(takenBy(new Error("agent id 'coordinator' is already linked to another identity"))).toBe('another laptop');
+  });
+
+  it('is undefined for any other error', () => {
+    expect(takenBy(new Error('no response from wss://x within 10000 ms'))).toBeUndefined();
+    expect(takenBy('connection closed')).toBeUndefined();
   });
 });

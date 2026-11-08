@@ -74,7 +74,74 @@ describe('register_agent', () => {
 
     // Assert
     expect(act).toThrow(/already linked to another identity/);
+    expect(act).toThrow(/registered from laptop-1, heartbeat 30 s ago/);
     expect(t.db.agent.id.find('agent-a')!.name).toBe('Agent A');
+  });
+
+  describe("the 'coordinator' id follows the coordinator service lock", () => {
+    const claimLock = (who: 'coordinator' | 'worker-b', machine: string) =>
+      t.as(who, (ctx) => mod.claim_service(ctx, { name: 'coordinator', machine, holder: `${machine}:p1` }));
+    const registerAs = (who: 'coordinator' | 'worker-b', machine: string) =>
+      t.as(who, (ctx) => mod.register_agent(ctx, agentArgs('coordinator', { machine })));
+
+    beforeEach(() => {
+      registerAs('coordinator', 'laptop-1');
+      claimLock('coordinator', 'laptop-1');
+      t.advance(5);
+    });
+
+    it('refuses a second laptop while the lock holder is live, naming the machine', () => {
+      // Act
+      const act = () => registerAs('worker-b', 'laptop-2');
+
+      // Assert
+      expect(act).toThrow(/coordinator is already running on laptop-1; stop it there first/);
+      expect(t.db.agent.id.find('coordinator')!.machine).toBe('laptop-1');
+    });
+
+    it('lets a second laptop take over as soon as the lock is released (no 60 s wait)', () => {
+      // Arrange
+      t.as('coordinator', (ctx) => mod.release_service(ctx, { name: 'coordinator', holder: 'laptop-1:p1' }));
+
+      // Act
+      registerAs('worker-b', 'laptop-2');
+
+      // Assert
+      expect(t.db.agent.id.find('coordinator')!.machine).toBe('laptop-2');
+      expect(() => t.as('worker-b', (ctx) => mod.heartbeat(ctx, { agent_id: 'coordinator' }))).not.toThrow();
+      expect(() => t.as('coordinator', (ctx) => mod.heartbeat(ctx, { agent_id: 'coordinator' }))).toThrow(/different identity/);
+    });
+
+    it('lets a second laptop take over once the lock is stale (30 s), before the 60 s heartbeat rule', () => {
+      // Arrange
+      t.advance(26); // 31 s since the lock heartbeat, 31 s since the agent heartbeat
+
+      // Act
+      registerAs('worker-b', 'laptop-2');
+
+      // Assert
+      expect(t.db.agent.id.find('coordinator')!.machine).toBe('laptop-2');
+    });
+
+    it('lets a second laptop take over a row that has no lock at all', () => {
+      // Arrange: a coordinator from before the lock existed, or one whose lock row was removed.
+      t.as('coordinator', (ctx) => mod.release_service(ctx, { name: 'coordinator', holder: 'laptop-1:p1' }));
+      t.as('coordinator', (ctx) => mod.heartbeat(ctx, { agent_id: 'coordinator' }));
+
+      // Act
+      registerAs('worker-b', 'laptop-2');
+
+      // Assert
+      expect(t.db.agent.id.find('coordinator')!.machine).toBe('laptop-2');
+    });
+
+    it('still lets the lock holder re-register itself', () => {
+      // Act
+      registerAs('coordinator', 'laptop-1');
+
+      // Assert
+      expect(t.db.agent.id.find('coordinator')!.machine).toBe('laptop-1');
+    });
   });
 
   it('lets a new identity take over an id whose old link went stale (>60 s)', () => {

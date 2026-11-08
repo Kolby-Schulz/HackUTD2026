@@ -12,7 +12,9 @@
 // - report_change accepts changes on unclaimed symbols (REQUIRE_CLAIM_FOR_CHANGE) so
 //   contract-hook's auto-detected changes still run Rule 1. See "Decisions needed".
 // - register_agent lets an id move to a new identity only when the old link has gone
-//   stale (no heartbeat for 60 s), so restarted demos don't get locked out.
+//   stale (no heartbeat for 60 s), so restarted demos don't get locked out. The fixed
+//   `coordinator` id follows the `coordinator` service lock instead: whoever may hold the
+//   lock may own the row, so a second laptop takes over as soon as the first lets go.
 
 import { schema, table, t, SenderError, type InferSchema, type ReducerCtx } from 'spacetimedb/server';
 import { ScheduleAt, Timestamp } from 'spacetimedb';
@@ -486,6 +488,14 @@ function isLiveWorker(ctx: Ctx, a: { status: string; last_heartbeat: Timestamp }
   return micros(ctx.timestamp) - micros(a.last_heartbeat) < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n;
 }
 
+/** The `service` row for `name` if another identity holds it with a heartbeat inside SERVICE_TIMEOUT_SECS. */
+function liveServiceHeldByOther(ctx: Ctx, name: string) {
+  const row = ctx.db.service.name.find(name);
+  if (!row || row.identity.equals(ctx.sender)) return undefined;
+  const stale = micros(ctx.timestamp) - micros(row.heartbeat_at) > BigInt(SERVICE_TIMEOUT_SECS) * 1_000_000n;
+  return stale ? undefined : row;
+}
+
 function setAgentStatus(ctx: Ctx, agentId: string, status: string): void {
   const row = ctx.db.agent.id.find(agentId);
   if (row && row.status !== status) ctx.db.agent.id.update({ ...row, status });
@@ -712,9 +722,24 @@ export const register_agent = spacetimedb.reducer(
       return;
     }
     if (!existing.identity.equals(ctx.sender)) {
-      const silentFor = micros(ctx.timestamp) - micros(existing.last_heartbeat);
-      if (silentFor < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n) {
-        throw new SenderError(`agent id '${id}' is already linked to another identity`);
+      if (id === COORDINATOR_ID) {
+        // The coordinator row belongs to whoever holds (or may take) the coordinator service
+        // lock, so a standby on another laptop takes over the moment the lock is released.
+        const lock = liveServiceHeldByOther(ctx, COORDINATOR_ID);
+        if (lock) {
+          throw new SenderError(
+            `coordinator is already running on ${lock.machine}; stop it there first (or wait ${SERVICE_TIMEOUT_SECS} s after it crashed)`,
+          );
+        }
+      } else {
+        const silentFor = micros(ctx.timestamp) - micros(existing.last_heartbeat);
+        if (silentFor < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n) {
+          const secs = silentFor / 1_000_000n;
+          throw new SenderError(
+            `agent id '${id}' is already linked to another identity (registered from ${existing.machine}, heartbeat ${secs} s ago); ` +
+              `use a different id on this laptop, or wait ${HEARTBEAT_TIMEOUT_SECS} s after it stops`,
+          );
+        }
       }
     }
     ctx.db.agent.id.update({
