@@ -1,10 +1,15 @@
 // Coordinator (spec section 12). Owner: coordinator + mapper.
 // npm run coordinator            -> subscribes to open conflicts (needs the client)
 // npm run coordinator -- --demo  -> runs one decision on the planted calculateFee conflict
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createLLM } from '@contract/llm';
 import { decideConflict, type ConflictContext } from './decide.ts';
+
+// npm -w runs us inside our own folder, so load the monorepo's .env explicitly.
+loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env'), quiet: true });
 
 const { values } = parseArgs({ options: { demo: { type: 'boolean', default: false } } });
 const llm = createLLM();

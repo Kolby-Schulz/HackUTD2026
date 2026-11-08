@@ -6,6 +6,6 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    projects: ['server', 'packages/client', 'packages/mcp', 'agents/worker'],
+    projects: ['server', 'packages/client', 'packages/mcp', 'agents/worker', 'mapper'],
   },
 });
