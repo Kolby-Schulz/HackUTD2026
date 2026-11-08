@@ -215,12 +215,12 @@ function CodeMapView({ nodes, edges, selected, coord, onSelect, widget, reveal }
                 ? <><span>Agent work · {layout.shown} of {nodes.length} functions</span>
                     <button type="button" onClick={() => toggle(true)} title="Show every function, with the agents' work highlighted">
                       <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 6l3-3 3 3M5 10l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      Expand all ({nodes.length - layout.shown} collapsed)
+                      <span className="ellipsis">Expand all ({nodes.length - layout.shown} collapsed)</span>
                     </button></>
                 : <><span>All {nodes.length} functions</span>
                     <button type="button" onClick={() => toggle(false)} title="Collapse back to the functions agents are working on">
                       <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3l3 3 3-3M5 13l3-3 3 3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      Collapse to agent work
+                      <span className="ellipsis">Collapse to agent work</span>
                     </button></>}
             </div>
           )}
@@ -333,5 +333,6 @@ function Anchored({ x, y, children }: { x: number; y: number; children: ReactNod
   const below = !fitsRight && !fitsLeft;
   const sx = fitsRight ? right + 12 : fitsLeft ? left - 12 - WIDGET_W : Math.max(8, Math.min(left, width - WIDGET_W - 8));
   const sy = below ? Math.max(8, Math.min(top + H * zoom + 12, height - 300)) : Math.max(8, Math.min(top - 8, height - 340));
-  return <div className="widget" style={{ left: sx, top: sy }} onClick={(e) => e.stopPropagation()}>{children}</div>;
+  // never taller than the room left under it, so a short map scrolls the widget instead of cutting it off
+  return <div className="widget" style={{ left: sx, top: sy, maxHeight: Math.max(120, height - sy - 8) }} onClick={(e) => e.stopPropagation()}>{children}</div>;
 }

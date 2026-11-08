@@ -15,6 +15,9 @@ export interface DockState { groups: Group[]; v?: number }
 
 const KEY = 'insync.workbench.dock';
 const MIN_PX = 240;
+/** The narrowest a group gets when the window or side bar squeezes the editor (the sash itself stops at
+ *  MIN_PX). Below this the editor scrolls sideways instead of breaking text one word per line. */
+const MIN_W = 180;
 // Code map and its code changes side by side, Chat on the right
 const VERSION = 2;
 const DEFAULT: DockState = { v: VERSION, groups: [
@@ -165,7 +168,7 @@ export function DockArea({ dock, views, below }: {
   return (
     <div className="dock" ref={area}>
       {groups.map((g, gi) => (
-        <div key={g.id} className="dock-wrap" style={{ flex: `${g.size} 1 0`, minWidth: MIN_PX / 2 }}>
+        <div key={g.id} className="dock-wrap" style={{ flex: `${g.size} 1 0`, minWidth: MIN_W }}>
           <section className="group" aria-label={`Editor group ${gi + 1}`}>
             <div className={'tabs' + (drop?.gid === g.id && drop.kind === 'tab' ? ' drop' : '')} role="tablist" aria-label={`Editor group ${gi + 1} tabs`}
               onDragOver={(e) => {
@@ -197,7 +200,7 @@ export function DockArea({ dock, views, below }: {
                         else dock.split(v, g.id, step > 0 ? 'right' : 'left');
                       }
                     }}>
-                    {views[v].icon}{views[v].title}
+                    {views[v].icon}<span className="etab-title">{views[v].title}</span>
                   </button>
                   <button type="button" className="etab-x" aria-label={`Close ${views[v].title}`} title="Close" onClick={() => dock.close(v)}>{ICON.close}</button>
                 </div>
