@@ -193,3 +193,18 @@ describe('window.board shim', () => {
     expect(dev.bench().ok).toBe(false);
   });
 });
+
+describe('claim.acquire (WP-40 wiring)', () => {
+  it('denies an overlapping claim to another agent, never to a human', () => {
+    const board = createBoard({ me: 'human-you' });
+    const mk = board.exec({ actor: 'agent-iris', opId: 'c-mk', commands: [{ t: 'shape.create', kind: 'frame', props: { x: 0, y: 0, w: 300, h: 200 } }] });
+    const frame = mk.results[0].ok ? mk.results[0].id! : '';
+    const a = board.exec({ actor: 'agent-iris', opId: 'c-a', commands: [{ t: 'claim.acquire', target: { kind: 'shape', id: frame } }] });
+    expect(a.ok).toBe(true);
+    const b = board.exec({ actor: 'agent-bolt', opId: 'c-b', commands: [{ t: 'claim.acquire', target: { kind: 'shape', id: frame } }] });
+    expect(b.ok).toBe(false);
+    expect(b.results[0]).toMatchObject({ ok: false, error: 'claimed_by', holder: 'agent-iris' });
+    const h = board.exec({ actor: 'human-you', opId: 'c-h', commands: [{ t: 'claim.acquire', target: { kind: 'shape', id: frame } }] });
+    expect(h.ok).toBe(true);
+  });
+});

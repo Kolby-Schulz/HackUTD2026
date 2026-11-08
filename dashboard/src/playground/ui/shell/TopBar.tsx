@@ -6,10 +6,11 @@ import { prefs } from '../../core/prefs';
 import { useStoreValue } from '../../core/react';
 import { toast } from '../../core/toast';
 import type { Persistence } from '../../core/persist';
-import { BUBBLE, YOU_COLOR } from '../constants';
+import { BUBBLE } from '../constants';
 import { useUi } from '../hooks';
 import type { SlotProps } from '../slotProps';
 import { ZoomMenu } from '../ZoomMenu';
+import { AvatarStack, jumpToActor } from '../PresenceList';
 import { pickTool } from './Toolbar';
 import '../../styles/topbar.css';
 
@@ -51,7 +52,7 @@ function SaveDot({ ui }: { ui: SlotProps['ui'] }) {
   return <span className="pg-save" data-status={status} role="status" aria-label={label} title={label} />;
 }
 
-export function TopBar({ ui, cursors, showPins, onShowPins, onClearResolved }: SlotProps & {
+export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolved }: SlotProps & {
   showPins: boolean;
   onShowPins: (v: boolean) => void;
   onClearResolved: () => void;
@@ -73,10 +74,7 @@ export function TopBar({ ui, cursors, showPins, onShowPins, onClearResolved }: S
       <SaveDot ui={ui} />
       <span className="pg-sub">multi-agent design board · proof of concept</span>
       <span className="pg-grow" />
-      <div className="pg-avatars">
-        {cursors.slice(0, 8).map((c) => <span key={c.id} title={c.name} style={{ background: c.kind === 'human' ? YOU_COLOR : c.color }}>{c.name[0]}</span>)}
-        {cursors.length > 8 && <span className="more">+{cursors.length - 8}</span>}
-      </div>
+      <AvatarStack cursors={cursors} onPick={(id) => jumpToActor(board, id)} />
       <div className="pg-cbtn">
         <button className={'pg-icon' + (tool === 'comment' ? ' on' : '')} title={`Comment (${TOOL_KEYS.comment.toUpperCase()})`} onClick={() => pickTool(ui, tool === 'comment' ? 'select' : 'comment')}>
           <svg viewBox="0 0 24 24" width="20" height="20"><path d={BUBBLE} /></svg>

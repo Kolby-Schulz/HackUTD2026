@@ -1,4 +1,4 @@
-/* Smart guides and the align bar. The guide red (#F24822, same in both themes) is set as `color` by SmartGuides.tsx until tokens.css gains --pg-guide. */
+/* Smart guides and the align bar. The guide red comes from --pg-guide (set as `color` by SmartGuides.tsx). */
 .pg-guides { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .pg-guides line, .pg-guides path { fill: none; stroke: currentColor; stroke-width: 1; shape-rendering: crispEdges; vector-effect: non-scaling-stroke; }
 .pg-guides .pg-gl-label { fill: currentColor; }

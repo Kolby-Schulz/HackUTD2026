@@ -15,6 +15,7 @@ import { useChildren } from '../../core/react';
 import type { Cam } from '../../core/types';
 import { createPipeline, shapeAt } from '../gestures/pipeline';
 import { enterAt } from '../gestures/select';
+import { cursorFor } from './cursor';
 import type { PointerInfo } from '../gestures/pipeline';
 import { trackSpace } from '../gestures/pan';
 import { startEditing } from '../gestures/text';
@@ -108,12 +109,16 @@ export function Board(props: {
       board.presence.subscribe(() => paint.wake()),
       attachWheel(view, camera),
       trackSpace(ui),
-      ui.subscribe(() => {
-        const s = ui.get();
-        view.classList.toggle('panning', s.space || s.panning || s.tool === 'hand');
-        view.classList.toggle('commenting', s.tool === 'comment');
-      }),
+      ui.subscribe(() => applyUi()),
     ];
+    function applyUi() {
+      const s = ui.get();
+      view.classList.toggle('panning', s.space || s.panning || s.tool === 'hand');
+      view.classList.toggle('commenting', s.tool === 'comment');
+      // the local human gets native per-tool cursors; remote and agent cursors are drawn by ui/Cursors.tsx
+      view.style.cursor = s.panning ? 'grabbing' : s.space ? 'grab' : cursorFor(s.tool, s.hover);
+    }
+    applyUi();
     paint.wake();
     return () => {
       ro.disconnect();

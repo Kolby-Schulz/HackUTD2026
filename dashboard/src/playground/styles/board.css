@@ -1,5 +1,5 @@
 /* Board viewport, world layer, nested shapes and the screen-space overlay layer (WP-11). Scoped under .pg. */
-.pg-view { position: relative; flex: 1; overflow: hidden; cursor: none; touch-action: none; background-color: var(--pg-bg); }
+.pg-view { position: relative; flex: 1; overflow: hidden; touch-action: none; background-color: var(--pg-bg); }
 .pg-grid { position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(circle, var(--pg-dot) 1.2px, transparent 1.4px); }
 
 /* world: one transform written by the paint frame; --pg-zi = 1 / zoom for zoom-independent labels */

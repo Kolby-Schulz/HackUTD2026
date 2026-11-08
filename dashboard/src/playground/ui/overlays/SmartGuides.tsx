@@ -7,7 +7,7 @@ import type { Cam } from '../../core/types';
 import { useBoardEnv, usePainter } from '../board/context';
 import '../../styles/guides.css';
 
-const GUIDE_RED = '#F24822'; // ALIGN-2 smart-guide red; move to a --pg-guide token when tokens.css allows
+const GUIDE_RED = 'var(--pg-guide)'; // ALIGN-2 smart-guide red (styles/tokens.css)
 const X = 3;           // half size of the 6 px x mark
 const MARGIN = 50;     // lines are clipped to the viewport plus this margin
 

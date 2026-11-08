@@ -11,7 +11,9 @@ import { toast } from '../core/toast';
 import type { ActorId } from '../core/types';
 import { chatSayHandler, createChatStore } from '../chat/store';
 import type { ChatStore } from '../chat/store';
+import { attachClaims } from '../presence/claims';
 import { attachLocks } from '../presence/locks';
+import { commentThreads } from '../comments/threads';
 import { createUiStore } from './board/state';
 
 /**
@@ -41,6 +43,8 @@ export function createKit() {
 
   // humans win: lock-aware gestures, takeover revokes agent locks (must run before agents capture board.gesture)
   attachLocks(board, { toast: (text) => toast(text) });
+  // claims: frame/descendant/rect coverage, TTL sweep, contention conflicts, claim events
+  attachClaims(board, { toast: (text) => toast(text) });
 
   // snapping reads the live document, the shared spatial index and the camera
   bindSnapSource({
@@ -53,6 +57,7 @@ export function createKit() {
   // autosave: the board plus chat survive a reload; `?demo=1` skips both load and save
   const persistence = createPersistence(board.doc, { boardId: 'playground', demo: DEMO, toast: (t, o) => toast(t, o) });
   registerExtra('chat', { get: () => chat.toJSON(), set: (v) => chat.load(v as Parameters<ChatStore['load']>[0]) });
+  registerExtra('comments', { get: () => commentThreads.toJSON(), set: (v) => commentThreads.load(v as Parameters<typeof commentThreads.load>[0]) });
 
   const ui = createUiStore();
   ui.set({ persistence });

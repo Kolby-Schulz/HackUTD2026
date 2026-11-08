@@ -4,7 +4,7 @@
 // only publish when they act) are glided to; a jump over 2000 world units snaps with a short fade.
 
 /** Single flag: draw the local human's pointer as an outline arrow too. Flip to false when WP-20 uses native tool cursors. */
-export const DRAW_LOCAL_CURSOR = true;
+export const DRAW_LOCAL_CURSOR = false; // the local human uses native per-tool cursors (ui/board/cursor.ts)
 
 export const DELAY_MS = 100;
 export const TAU_MS = 60;

@@ -407,10 +407,14 @@ function compile(cmd: Command, c: Ctx, clock: { n: number }): Compiled {
     case 'claim.acquire': {
       const t = cmd.target;
       if (!t || (t.kind !== 'rect' && !live(s, t.id))) return fail('not_found', 'claim target does not exist');
-      return done([], undefined, (r) => {
-        const claim = c.deps.claims.acquire(actor, t, { ttlMs: cmd.ttlMs, reason: cmd.reason });
-        r.id = claim.id;
-      });
+      // agents are denied an overlapping claim (Contract's claim/conflict); humans are never blocked
+      const opts = { ttlMs: cmd.ttlMs, reason: cmd.reason };
+      if (isHuman(actor)) {
+        return done([], undefined, (r) => { r.id = c.deps.claims.acquire(actor, t, opts).id; });
+      }
+      const got = c.deps.claims.tryAcquire(actor, t, opts);
+      if (!got.ok) return fail('claimed_by', `claimed by ${got.holder}`, got.holder);
+      return done([], undefined, (r) => { r.id = got.claim.id; });
     }
     case 'claim.release': {
       const claim = c.deps.claims.list().find((k) => k.id === cmd.claimId);

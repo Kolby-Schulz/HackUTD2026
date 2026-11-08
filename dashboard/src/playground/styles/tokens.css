@@ -35,6 +35,7 @@
 
   /* selection and accent */
   --pg-sel: #0d99ff;
+  --pg-guide: #f24822;   /* smart guides (ALIGN-2), same in both themes */
   --pg-sel-bg: #e5f4ff;
   --pg-accent: #d97757;
   --pg-accent-soft: #fbe9e2;
