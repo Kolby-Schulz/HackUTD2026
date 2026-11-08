@@ -1,6 +1,5 @@
 // Floating tool palette at the bottom of the board, plus the controls hint.
 import type { Tool, UiStore } from '../board/state';
-import { TOOL_KEYS } from '../../actions/tools';
 import { runAction } from '../../core/actions';
 import { BUBBLE } from '../constants';
 import { useUi } from '../hooks';
@@ -25,7 +24,7 @@ export function Toolbar({ ui }: { ui: UiStore }) {
     <>
       <div className="pg-toolbar">
         {TOOLS.map((t) => (
-          <button key={t.id} className={tool === t.id ? 'on' : ''} title={`${t.label} (${TOOL_KEYS[t.id].toUpperCase()})`} aria-label={t.label} aria-pressed={tool === t.id} onClick={() => { if (runAction(`tool.${t.id}`) !== true) pickTool(ui, t.id); }}>
+          <button key={t.id} className={tool === t.id ? 'on' : ''} data-tip-action={`tool.${t.id}`} aria-label={t.label} aria-pressed={tool === t.id} onClick={() => { if (runAction(`tool.${t.id}`) !== true) pickTool(ui, t.id); }}>
             <svg viewBox="0 0 24 24" width="18" height="18"><path d={t.icon} /></svg>
           </button>
         ))}
