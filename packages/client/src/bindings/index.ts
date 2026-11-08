@@ -44,6 +44,7 @@ import HeartbeatReducer from "./heartbeat_reducer";
 import LogSavingReducer from "./log_saving_reducer";
 import LogTokensReducer from "./log_tokens_reducer";
 import MarkAttemptWastedReducer from "./mark_attempt_wasted_reducer";
+import MarkConflictResolvingReducer from "./mark_conflict_resolving_reducer";
 import PublishPlanReducer from "./publish_plan_reducer";
 import RecordCacheHitReducer from "./record_cache_hit_reducer";
 import RegisterAgentReducer from "./register_agent_reducer";
@@ -283,6 +284,7 @@ const reducersSchema = __reducers(
   __reducerSchema("log_saving", LogSavingReducer),
   __reducerSchema("log_tokens", LogTokensReducer),
   __reducerSchema("mark_attempt_wasted", MarkAttemptWastedReducer),
+  __reducerSchema("mark_conflict_resolving", MarkConflictResolvingReducer),
   __reducerSchema("publish_plan", PublishPlanReducer),
   __reducerSchema("record_cache_hit", RecordCacheHitReducer),
   __reducerSchema("register_agent", RegisterAgentReducer),

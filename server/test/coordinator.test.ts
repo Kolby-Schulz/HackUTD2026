@@ -346,3 +346,63 @@ describe('acknowledge_instruction', () => {
     expect(act).toThrow(/unknown instruction 12345/);
   });
 });
+
+describe('mark_conflict_resolving', () => {
+  let t: Harness;
+  let conflictId: bigint;
+  beforeEach(() => {
+    t = makeHarness();
+    conflictId = withOpenConflict(t).id;
+  });
+  const mark = (who: Who = 'coordinator', conflict_id = conflictId) =>
+    t.as(who, (ctx) => mod.mark_conflict_resolving(ctx, { conflict_id }));
+
+  it("moves an open conflict to 'resolving' and leaves B paused", () => {
+    // Act
+    mark();
+
+    // Assert
+    expect(t.db.conflict.id.find(conflictId)!.status).toBe('resolving');
+    expect(status(t, 'agent-b')).toBe('paused');
+  });
+
+  it('then resolve_conflict still works', () => {
+    // Arrange
+    mark();
+
+    // Act
+    resolve(t, conflictId);
+
+    // Assert
+    expect(t.db.conflict.id.find(conflictId)!.status).toBe('resolved');
+    expect(status(t, 'agent-b')).toBe('working');
+  });
+
+  it.each<Who>(['worker-a', 'worker-b', 'outsider'])('rejects a caller that is not the coordinator (%s)', (who) => {
+    // Act
+    const act = () => mark(who);
+
+    // Assert
+    expect(act).toThrow(/only the coordinator/);
+    expect(t.db.conflict.id.find(conflictId)!.status).toBe('open');
+  });
+
+  it('rejects a conflict that is not open (so two coordinators never both take it)', () => {
+    // Arrange
+    mark();
+
+    // Act
+    const act = () => mark();
+
+    // Assert
+    expect(act).toThrow(/is resolving, not open/);
+  });
+
+  it('rejects an unknown conflict', () => {
+    // Act
+    const act = () => mark('coordinator', 999n);
+
+    // Assert
+    expect(act).toThrow(/unknown conflict 999/);
+  });
+});
