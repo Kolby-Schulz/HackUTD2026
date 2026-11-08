@@ -5,7 +5,7 @@
 // mode it joins Contract (MCP server + rules + edit hook), stops on pause and resumes
 // with the coordinator's decision. In without_contract mode every coordination call
 // is a no-op but tokens are still logged, so the same script produces the baseline.
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -18,6 +18,8 @@ import { CONTRACT_RULES } from './rules.ts';
 import { TASKS } from './tasks.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+// npm -w runs us inside our own folder, so load the monorepo's .env explicitly.
+loadEnv({ path: resolve(REPO, '.env'), quiet: true });
 
 const { values } = parseArgs({
   options: {
