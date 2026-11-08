@@ -3,13 +3,20 @@
 //   [--task-id <task row id>]  (default: --task; scripts/seed.ts creates new rows each run)
 //   CONTRACT_TOKEN in env reuses an identity, so the same agent id can run again at once.
 //
+// Two-laptop session flow (always with_contract; `npm run session -- start` opens the run):
+// npm run worker -- --id agent-b --prompt "add a receipt to checkout..."   own task row
+// npm run worker -- --id agent-b --wait          take the next todo task (dashboard form)
+//   Both push agent/<id> to origin when done (--no-push to skip) and branch the worktree
+//   from origin/main (--base <ref> to change), so both laptops start from the same commit.
+//
 // Runs one Claude Code session headless in its own git worktree. In with_contract
 // mode it joins Contract (MCP server + rules + edit hook), stops on pause and resumes
 // with the coordinator's decision. In without_contract mode every coordination call
 // is a no-op but tokens are still logged, so the same script produces the baseline.
 import { config as loadEnv } from 'dotenv';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -17,33 +24,55 @@ import { connect, noopClient, type ContractClient } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
+import { createPromptTask, waitForTask } from './session-task.ts';
 import { TASKS } from './tasks.ts';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 // npm -w runs us inside our own folder, so load the monorepo's .env explicitly.
 loadEnv({ path: resolve(REPO, '.env'), quiet: true });
+/** Saved SpacetimeDB tokens per agent id and server (gitignored; same file and keys as scripts/lib.ts). */
+const IDENTITIES = join(REPO, '.contract', 'identities.json');
+const identityKey = (id: string) => `${id}@${process.env.SPACETIME_DB_NAME}@${process.env.SPACETIME_HOST}`;
 
 const { values } = parseArgs({
   options: {
     id: { type: 'string' },
-    task: { type: 'string', default: '1' },
+    task: { type: 'string' },
     'task-id': { type: 'string' },
+    prompt: { type: 'string' },
+    wait: { type: 'boolean', default: false },
+    base: { type: 'string' },
+    'no-push': { type: 'boolean', default: false },
     mode: { type: 'string', default: 'with_contract' },
     owner: { type: 'string', default: process.env.USER ?? 'dev' },
-    machine: { type: 'string', default: process.env.HOSTNAME ?? 'laptop' },
+    machine: { type: 'string', default: process.env.HOSTNAME ?? hostname().replace(/\.local$/, '') },
   },
 });
 const agentId = values.id ?? die('--id is required');
 const mode = values.mode as 'with_contract' | 'without_contract';
-const taskId = BigInt(values['task-id'] ?? values.task!);
-const task = TASKS[values.task!] ?? die(`unknown --task ${values.task}`);
+/** --prompt / --wait: the two-laptop flow, where the task row comes from the open run. */
+const session = values.prompt !== undefined || values.wait;
+if (session && values.task !== undefined) die('use --task, --prompt or --wait, not several');
+if (values.prompt !== undefined && values.wait) die('use --prompt or --wait, not both');
+if (session && mode !== 'with_contract') die('--prompt and --wait need --mode with_contract');
+if (values.prompt !== undefined && !values.prompt.trim()) die('--prompt is empty');
+const taskKey = values.task ?? '1';
+if (!session && !TASKS[taskKey]) die(`unknown --task ${taskKey}`);
+const push = session && !values['no-push'];
+let taskId = BigInt(values['task-id'] ?? taskKey);
+let task = TASKS[taskKey] ?? '';
 let attempt = 1;
 
 // 1. Worktree + branch (shares git history with the monorepo; agents work in its demo-repo/).
+// The session flow branches from origin/main so both laptops start from the same commit.
+const base = values.base ?? (session ? 'origin/main' : 'HEAD');
 const worktree = join(REPO, '.worktrees', agentId);
 if (!existsSync(worktree)) {
+  if (base.startsWith('origin/')) execFileSync('git', ['fetch', 'origin', base.slice('origin/'.length)], { cwd: REPO, stdio: 'inherit' });
   mkdirSync(join(REPO, '.worktrees'), { recursive: true });
-  execFileSync('git', ['worktree', 'add', '-B', `agent/${agentId}`, worktree, 'HEAD'], { cwd: REPO, stdio: 'inherit' });
+  execFileSync('git', ['worktree', 'add', '-B', `agent/${agentId}`, worktree, base], { cwd: REPO, stdio: 'inherit' });
+} else if (session) {
+  console.warn(`[${agentId}] reusing ${worktree} from an earlier run; \`npm run reset\` first for a clean start from ${base}`);
 }
 const cwd = join(worktree, 'demo-repo');
 
@@ -59,7 +88,9 @@ const connectOpts = {
   host: process.env.SPACETIME_HOST!,
   dbName: process.env.SPACETIME_DB_NAME!,
   repoDir: cwd,
-  token: process.env.CONTRACT_TOKEN || undefined,
+  // Reuse this agent id's saved identity (register_agent refuses an id held by another
+  // identity for 60 s), so a worker can be restarted straight away on the same laptop.
+  token: process.env.CONTRACT_TOKEN || savedToken() || undefined,
   agent: { id: agentId, name: agentId, ownerDev: values.owner!, machine: values.machine!, model: 'claude-code', tokenBudget: 200_000 },
 };
 let contract: ContractClient;
@@ -76,6 +107,24 @@ if (mode === 'with_contract') {
   });
   contract.disconnect = async () => server?.disconnect();
 }
+if (mode === 'with_contract') saveToken(contract.token);
+
+// Session flow: the task row comes from the open run (our own, or one the dashboard made).
+if (session) {
+  const o = { host: connectOpts.host, dbName: connectOpts.dbName, token: contract.token, agentId };
+  try {
+    const t = values.prompt !== undefined
+      ? await createPromptTask(o, values.prompt.trim())
+      : await waitForTask(o, (msg) => console.log(`[${agentId}] ${msg}`));
+    taskId = t.id;
+    task = t.description;
+  } catch (e) {
+    await contract.disconnect();
+    die(`[${agentId}] ${e instanceof Error ? e.message : String(e)}`);
+  }
+  console.log(`[${agentId}] task ${taskId}: ${task}`);
+}
+
 const logTokens: ContractClient['logTokens'] =
   mode === 'with_contract' ? async (...a) => (await logLocally(...a), await contract.logTokens(...a)) : contract.logTokens;
 
@@ -166,7 +215,38 @@ for (const symbolId of contract.myClaims()) {
 }
 await contract.setTaskStatus(taskId, 'done').catch((e: unknown) => console.warn(`[${agentId}] set_task_status: ${String(e)}`));
 await contract.disconnect();
+
+// 7. Session flow: publish the branch so `npm run session -- merge` on either laptop sees it.
+if (push) {
+  try {
+    execFileSync('git', ['push', '--force', '-u', 'origin', `agent/${agentId}`], { cwd: worktree, stdio: 'inherit' });
+    console.log(`[${agentId}] pushed agent/${agentId}; run \`npm run session -- merge\` once every agent is done`);
+  } catch {
+    console.error(`[${agentId}] git push failed; push agent/${agentId} by hand before the merge`);
+    process.exit(1);
+  }
+}
 process.exit(0);
+
+function savedToken(): string | undefined {
+  try {
+    return (JSON.parse(readFileSync(IDENTITIES, 'utf8')) as Record<string, string>)[identityKey(agentId)];
+  } catch {
+    return undefined;
+  }
+}
+
+/** Same file scripts/lib.ts uses, so run-demo and a hand-started worker share identities. */
+function saveToken(token: string) {
+  let all: Record<string, string> = {};
+  try {
+    all = JSON.parse(readFileSync(IDENTITIES, 'utf8')) as Record<string, string>;
+  } catch { /* first save */ }
+  if (all[identityKey(agentId)] === token) return;
+  all[identityKey(agentId)] = token;
+  mkdirSync(dirname(IDENTITIES), { recursive: true });
+  writeFileSync(IDENTITIES, JSON.stringify(all, null, 2) + '\n', { mode: 0o600 });
+}
 
 /** Resolves once this agent's status is no longer 'paused'. */
 function waitUntilUnpaused(c: ContractClient) {

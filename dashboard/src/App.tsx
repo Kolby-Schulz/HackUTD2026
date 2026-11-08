@@ -94,7 +94,8 @@ export function App() {
       )}
 
       <div className="body">
-        <AgentsPanel agents={view.agents} coord={view.coord} />
+        <AgentsPanel agents={view.agents} coord={view.coord} openRun={live.runs.find((r) => r.endedAt === undefined)} tasks={live.tasks}
+          onlineIds={new Set(live.agents.filter((a) => now - Number(a.lastHeartbeat.microsSinceUnixEpoch / 1000n) < 60_000).map((a) => a.id))} />
         <main className="main">
           {tab === 'live' && <LiveTab agents={view.agents} cases={view.cases} events={view.events} map={view.map} stats={view.stats} without={view.without} symbols={live.symbols} edges={live.edges} runStart={w.start} />}
           {tab === 'activity' && <ActivityTab events={view.events} cases={view.cases} people={view.people} />}

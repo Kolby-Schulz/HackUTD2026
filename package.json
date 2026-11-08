@@ -21,7 +21,8 @@
     "seed": "tsx scripts/seed.ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "triage": "npm run start -w @contract/triage --",
-    "mcp": "npm run start -w @contract/mcp --"
+    "mcp": "npm run start -w @contract/mcp --",
+    "session": "tsx scripts/session.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

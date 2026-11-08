@@ -15,12 +15,11 @@
 //
 // The coordinator (npm run coordinator) must be running for with_contract, or a paused
 // worker waits until --timeout-min.
-import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { connect, type DbConnection } from '@contract/client';
-import { createLLM } from '@contract/llm';
+import { connect } from '@contract/client';
+import { checkAll, conflictMarkers, merge, mergeFix, run, warnIfNoCoordinator, type Check, type TestCount } from './merge.ts';
 import { demoRepoChanges, resetFiles, resetRuns } from './reset.ts';
 import { seed } from './seed.ts';
 import {
@@ -38,7 +37,6 @@ const { values } = parseArgs({
   },
 });
 
-interface Check { name: string; ok: boolean; output: string }
 interface RunResult {
   runId: string;
   mode: Mode;
@@ -53,7 +51,6 @@ interface RunResult {
   mergeFixPasses: number;
   tokens: TokenTotals;
 }
-interface TestCount { passed: number; failed: number }
 interface TokenTotals {
   prompt: number; completion: number; cacheRead: number; costUsd: number;
   wasted: number; mergeFix: number; coordination: number;
@@ -184,88 +181,6 @@ async function runOnce() {
 
 // ---------------------------------------------------------------------------------
 
-/** Merges `branch` into the worktree. Returns conflicted demo-repo/ files (left unresolved). */
-function merge(dir: string, branch: string): string[] {
-  try {
-    git(['merge', '--no-edit', '--no-ff', '-m', `merge ${branch}`, branch], dir);
-    return [];
-  } catch {
-    const conflicted = git(['diff', '--name-only', '--diff-filter=U'], dir).split('\n').filter(Boolean);
-    // Files outside demo-repo/ (e.g. each worker's .contract-mcp.json) are run plumbing,
-    // not code: take ours and move on.
-    for (const f of conflicted.filter((f) => !f.startsWith('demo-repo/'))) {
-      git(['checkout', '--ours', '--', f], dir);
-      git(['add', '--', f], dir);
-    }
-    git(['add', '-A'], dir); // commit with markers in place; the fix pass resolves them
-    git(['commit', '--no-edit', '--no-verify'], dir);
-    return conflicted.filter((f) => f.startsWith('demo-repo/'));
-  }
-}
-
-function conflictMarkers(dir: string): string[] {
-  try {
-    return git(['grep', '-l', '-E', '^(<<<<<<<|>>>>>>>) ', '--', 'demo-repo'], dir).split('\n').filter(Boolean);
-  } catch {
-    return []; // git grep exits 1 when nothing matches
-  }
-}
-
-async function checkAll(demoDir: string) {
-  const npm = (script: string) => run(`check:${script}`, 'npm', ['run', '--silent', script], demoDir, 5 * 60_000, {}, true);
-  const unit = await npm('test');
-  const integration = await npm('test:integration');
-  const dupes = await npm('check:dupes');
-  const checks: Check[] = [
-    { name: 'unit tests', ok: unit.exitCode === 0, output: unit.output },
-    { name: 'integration test', ok: integration.exitCode === 0, output: integration.output },
-    { name: 'check-dupes', ok: dupes.exitCode === 0, output: dupes.output },
-  ];
-  const tests = [unit, integration].map((r) => countTests(r.output)).reduce((x, y) => ({ passed: x.passed + y.passed, failed: x.failed + y.failed }));
-  const fm = /(\d+) date formatter/.exec(dupes.output);
-  for (const c of checks) log('check', `${c.ok ? 'PASS' : 'FAIL'} ${c.name}`);
-  return { checks, tests, dateFormatters: fm ? Number(fm[1]) : 0 };
-}
-
-function countTests(out: string): TestCount {
-  const line = /Tests\s+(.*)/.exec(out.replace(/\x1b\[[0-9;]*m/g, ''))?.[1] ?? '';
-  return { passed: Number(/(\d+) passed/.exec(line)?.[1] ?? 0), failed: Number(/(\d+) failed/.exec(line)?.[1] ?? 0) };
-}
-
-async function mergeFix(agentId: string, taskId: bigint, demoDir: string, checks: Check[], conflicts: string[]) {
-  log('demo', `merge fix by ${agentId}`);
-  const failing = checks.filter((c) => !c.ok);
-  const prompt = [
-    'Two features were developed in parallel and merged into this repository. The merged code fails these checks.',
-    conflicts.length ? `These files still contain git conflict markers: ${conflicts.join(', ')}.` : '',
-    ...failing.map((c) => `--- ${c.name} ---\n${c.output.slice(-3000)}`),
-    'Fix the source so `npm test`, `npm run test:integration` and `npm run check:dupes` all pass, keeping both features.',
-    'Do not edit tests/ or scripts/.',
-  ].filter(Boolean).join('\n\n');
-
-  const client = await connect({
-    host: process.env.SPACETIME_HOST!,
-    dbName: process.env.SPACETIME_DB_NAME!,
-    token: savedToken(agentId),
-    repoDir: demoDir,
-    agent: { id: agentId, name: agentId, ownerDev: process.env.USER ?? 'dev', machine: process.env.HOSTNAME ?? 'laptop', model: 'claude-code', tokenBudget: 200_000 },
-  });
-  try {
-    const r = await createLLM().runWorker(prompt, {
-      cwd: demoDir,
-      purpose: 'merge_fix',
-      allowedTools: ['Bash(npm test:*)', 'Bash(npm run:*)', 'Bash(npx vitest:*)'],
-      onUsage: (u, purpose) =>
-        client.logTokens(taskId, 2, purpose, u).catch((e: unknown) => log(agentId, `logTokens failed: ${String(e)}`)),
-    });
-    log(agentId, `merge fix done (${r.usage.prompt_tokens}+${r.usage.completion_tokens} tokens, $${r.usage.cost_usd.toFixed(4)})`);
-  } catch (e) {
-    log(agentId, `merge fix failed: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    await client.disconnect();
-  }
-}
-
 async function ensureIdentity(agentId: string) {
   if (savedToken(agentId)) return;
   const c = await connect({
@@ -295,12 +210,6 @@ async function tokenTotals(runId: bigint): Promise<TokenTotals> {
   return t;
 }
 
-function warnIfNoCoordinator(conn: DbConnection) {
-  const c = [...conn.db.agent.iter()].find((a) => a.id === 'coordinator');
-  const ageMs = c ? Date.now() - Number(c.lastHeartbeat.microsSinceUnixEpoch / 1000n) : Infinity;
-  if (ageMs > 60_000) log('demo', 'WARNING: no live coordinator; start `npm run coordinator` or paused workers will wait until the timeout');
-}
-
 function hasLeftovers(): boolean {
   return git(['for-each-ref', '--format=%(refname)', 'refs/heads/agent', 'refs/heads/demo']) !== '' ||
     demoRepoChanges() !== '';
@@ -328,24 +237,6 @@ function printSummary() {
     };
   });
   console.table(rows);
-}
-
-/** Runs a command, prefixing its output with [scope]. Kills it after timeoutMs. */
-function run(scope: string, cmd: string, args: string[], cwd: string, timeoutMs: number, env: Record<string, string> = {}, quiet = false) {
-  return new Promise<{ exitCode: number | null; timedOut: boolean; output: string }>((res) => {
-    const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env, FORCE_COLOR: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
-    let output = '';
-    let timedOut = false;
-    const onData = (buf: Buffer) => {
-      const text = buf.toString();
-      output += text;
-      if (!quiet) for (const line of text.split('\n')) if (line.trim()) console.log(`[${scope}] ${line}`);
-    };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    const timer = setTimeout(() => ((timedOut = true), child.kill('SIGTERM')), timeoutMs);
-    child.on('close', (exitCode) => (clearTimeout(timer), res({ exitCode, timedOut, output })));
-  });
 }
 
 function die(msg: string): never {

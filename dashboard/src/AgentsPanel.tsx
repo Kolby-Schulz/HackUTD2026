@@ -1,11 +1,13 @@
 // Left column, on every tab: agents grouped by status, paused first (storyboard H1 option B).
+import type * as R from '@bindings/types.ts';
 import type { AgentCard, CoordView } from './model.ts';
 import { fmtK } from './model.ts';
+import { NewTaskForm } from './NewTaskForm.tsx';
 import { Avatar, Empty } from './ui.tsx';
 
 const GROUPS: [string, string][] = [['Paused', 'var(--warn)'], ['Working', 'var(--ok)'], ['Idle', 'var(--text2)'], ['Done', 'var(--done)']];
 
-export function AgentsPanel({ agents, coord }: { agents: AgentCard[]; coord: CoordView }) {
+export function AgentsPanel({ agents, coord, openRun, tasks, onlineIds }: { agents: AgentCard[]; coord: CoordView; openRun?: R.Run; tasks: readonly R.Task[]; onlineIds: Set<string> }) {
   return (
     <aside className="card agents" aria-label="Agents">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -23,6 +25,7 @@ export function AgentsPanel({ agents, coord }: { agents: AgentCard[]; coord: Coo
           </section>
         );
       })}
+      <NewTaskForm agents={agents.filter((a) => onlineIds.has(a.id))} openRun={openRun} tasks={tasks} />
       <div style={{ marginTop: 'auto', borderTop: '1px solid var(--border)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
         <div className="cap muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="dot" style={{ width: 6, height: 6, background: coord.status === 'Working' ? 'var(--ok)' : 'var(--text2)' }} />Coordinator · {coord.status}
