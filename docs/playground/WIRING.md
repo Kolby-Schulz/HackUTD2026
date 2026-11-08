@@ -101,47 +101,51 @@ humanEdited rule, palette.open, toast action, share link and URL view.
   pane (per-frame work under 1 ms; culling mounts ~370 of 5,000).
 
 ## Waves 2-3 seams
-- todo (WP-53): `ui/Cursors.tsx` painter calls `layoutTags(...)` and `cursorScale(zoom)` from `presence/cursors.ts` and
+- done (wire2) (WP-53): `ui/Cursors.tsx` painter calls `layoutTags(...)` and `cursorScale(zoom)` from `presence/cursors.ts` and
   toggles the `.pg-tag` full/short/dot classes and the "+n" chip (tag declutter when zoomed out / crowded).
-- todo (WP-60): `ui/gestures/resize.ts` text resize commit adds `textMode: modeAfterResize(shape.textMode, handle)`;
+- done (wire2) (WP-60): `ui/gestures/resize.ts` text resize commit adds `textMode: modeAfterResize(shape.textMode, handle)`;
   handle double-click sets `modeAfterHandleDoubleClick()` then `writeMeasuredSize`.
-- todo (WP-60): agent host calls `writeMeasuredSize(board, id, {role:'host'}, true)` after agent text create/update
+- done (wire2) (WP-60): agent host calls `writeMeasuredSize(board, id, {role:'host'}, true)` after agent text create/update
   (host peer only).
-- todo (WP-60/57): inspector font/size/mode changes call `writeMeasuredSize(..., {role:'editor', actor})` so auto-width
+- done (wire2) (WP-60/57): inspector font/size/mode changes call `writeMeasuredSize(..., {role:'editor', actor})` so auto-width
   text re-measures after a typography change.
-- todo (WP-60): fold `commitText` and the fitted-size write into one undo entry (`ui/gestures/text.ts`).
-- todo (WP-54): `LayerRow.tsx` flash class on reveal; `onHover` prop for a canvas hover outline from the layers panel
+- done (wire2) (WP-60): fold `commitText` and the fitted-size write into one undo entry (`ui/gestures/text.ts`).
+- done (wire2) (WP-54): `LayerRow.tsx` flash class on reveal; `onHover` prop for a canvas hover outline from the layers panel
   (keep the comment tool's use of `ui.hover`).
-- todo (WP-62/44): one document title: `(N) <file name> · Playground` (WP-44 sets the file-name title, WP-62 the unread
+- done (wire2) (WP-62/44): one document title: `(N) <file name> · Playground` (WP-44 sets the file-name title, WP-62 the unread
   count; today whichever runs last wins).
 - WP-57, WP-59: no seam.
-- todo (WP-68): `ui/useBoot.ts` starts the coordinator next to `startAgents` (and stops it in cleanup):
+- done (wire2) (WP-68): `ui/useBoot.ts` starts the coordinator next to `startAgents` (and stops it in cleanup):
   `startCoordinator({ board, chat: sink.chat, pickSlot, freeSlot, onRedirect })` wired to the runtime's slot API
   (check the real `occupy`/slot signatures in `agents/runtime.ts`).
-- todo (WP-71): `ui/shell/TopBar.tsx` `AvatarStack onPick={toggleFollow}` (follow an agent from its avatar).
-- todo (WP-73): `core/snap/move.ts` runs `snapSpacing(final, cands, t, round, axes)` from `./spacing` on axes without an
+- done (wire2) (WP-71): `ui/shell/TopBar.tsx` `AvatarStack onPick={toggleFollow}` (follow an agent from its avatar).
+- done (wire2) (WP-73): `core/snap/move.ts` runs `snapSpacing(final, cands, t, round, axes)` from `./spacing` on axes without an
   edge snap and builds lines from the spaced box (equal-gap snap + pink gap labels). Note: no hysteresis yet.
-- todo (WP-70): register `view.minimap` (Shift+KeyM) in `actions/view.ts` and remove the minimap's private window
+- done (wire2) (WP-70): register `view.minimap` (Shift+KeyM) in `actions/view.ts` and remove the minimap's private window
   keydown handler (one key dispatcher, D7).
-- todo (WP-74): `ui/gestures/pipeline.ts` `down()`: `if (p.handle?.startsWith('rot-')) { const m = startRotate(env, p);
+- done (wire2) (WP-74): `ui/gestures/pipeline.ts` `down()`: `if (p.handle?.startsWith('rot-')) { const m = startRotate(env, p);
   if (m) { begin(m, p); return; } }` before `startResize` (+ import). Check `rotate.ts` setting `document.body.style.cursor`
   does not fight the board's cursor handling.
-- todo (WP-77): `core/commands.ts` `BoardKit.reapply(by, txId)` (gate check, `undoManager.reapply`, `afterUndo`), and
+- done (wire2) (WP-77): `core/commands.ts` `BoardKit.reapply(by, txId)` (gate check, `undoManager.reapply`, `afterUndo`), and
   `actions/edit.ts` skips "Nothing to undo" when `undoManager.last()?.outcome.skipped.length` (fields were superseded).
 - WP-65, WP-69, WP-75: no seam.
-- todo (WP-80): `styles/comments.css`: `.pg-pin.hot span{transform:scale(1.15)}`, `.pg-pin-card` (hover card),
+- done (wire2) (WP-80): `styles/comments.css`: `.pg-pin.hot span{transform:scale(1.15)}`, `.pg-pin-card` (hover card),
   `.pg-cl-filters button[aria-pressed=true]`, `.pg-cl-row.resolved{opacity:.5}`, `.pg-cl-row.hot` (tokens only).
-- todo (WP-82): `actions/help.ts`: `import { toggleHelp } from '../ui/HelpOverlay'; export const actions: Action[] = [{ id:
+- done (wire2) (WP-82): `actions/help.ts`: `import { toggleHelp } from '../ui/HelpOverlay'; export const actions: Action[] = [{ id:
   'help.shortcuts', title: 'Keyboard shortcuts', group: 'Help', keys: { all: ['Shift+Slash'] }, contexts: ['canvas',
   'panel','dialog'], run: toggleHelp }];` (remove any private `?` listener).
-- todo (WP-81): `ui/shell/ContextMenu.tsx` `MENU_IDS.layer`: add `'layers.rename'` before `'layers.lock'`.
-- todo (WP-76): `ui/board/TextView.tsx`: `overflow:hidden` on fixed-size boxes, a red bracket when `isOverflowing(shape)`
+- done (wire2) (WP-81): `ui/shell/ContextMenu.tsx` `MENU_IDS.layer`: add `'layers.rename'` before `'layers.lock'`.
+- done (wire2) (WP-76): `ui/board/TextView.tsx`: `overflow:hidden` on fixed-size boxes, a red bracket when `isOverflowing(shape)`
   and selected (from `render/measure`), and re-render on `onFontsLoaded`.
-- todo (WP-83): `agents/runtime.ts` (~line 114): replace `throw new Error('only the scripted driver exists yet')` with
+- done (wire2) (WP-83): `agents/runtime.ts` (~line 114): replace `throw new Error('only the scripted driver exists yet')` with
   `return createLlmDriver({ bridgeUrl: localStorage.getItem('pg.llmBridge') ?? '' })` (try/catch around storage).
-- todo (WP-83): `ui/presence/PresenceList` row chip `formatChip(usageStore.get(id))` from `agents/usage`.
-- todo (WP-84): TopBar "Present" button calls `startPresent()` from `actions/present`.
+- done (wire2) (WP-83): `ui/presence/PresenceList` row chip `formatChip(usageStore.get(id))` from `agents/usage`.
+- done (wire2) (WP-84): TopBar "Present" button calls `startPresent()` from `actions/present`.
 - WP-67, WP-72, WP-78, WP-79: no seam.
+
+Notes from the Waves 2-3 wiring: the inspector's text refit is its own "Fit text" undo entry (not folded); a card
+reapply leaves the selection alone (like revert); the runtime gained `pickSlot`/`freeSlot`/`redirect` for the
+coordinator; the layers-panel hover outline and the WP-76 overflow bracket were applied by the orchestrator.
 
 ## Assignment for the Waves 2-3 wiring agents (file-disjoint)
 - W-board: WP-53, WP-60 (resize/text gestures), WP-73, WP-74, WP-54, WP-76, WP-81. Files: `ui/Cursors.tsx`,

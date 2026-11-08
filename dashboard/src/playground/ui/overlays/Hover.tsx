@@ -86,14 +86,21 @@ function SelectHover() {
     if (!el) return;
     const u = ui.get();
     const hide = () => { el.style.display = 'none'; };
-    if (u.tool !== 'select' || u.space || u.panning || u.editing || u.pop || pressed.current
-      || overHandle.current || !env.pointer.inside) return hide();
+    if (u.tool !== 'select' || u.space || u.panning || u.editing || u.pop || pressed.current) return hide();
     const view = board.doc.getState();
-    const world = { x: (env.pointer.x - cam.x) / cam.z, y: (env.pointer.y - cam.y) / cam.z };
-    const leaf = hitTest(view, board.index, world, { z: cam.z, deep: true });
-    if (!leaf) return hide();
     const sel = board.selection.get(board.me);
-    const id = mod.current ? leaf : clickTarget(view, leaf, sel.scope).id;
+    let id: string;
+    if (!env.pointer.inside) {
+      // pointer is off the canvas: outline the layer hovered in the layers panel (WP-54)
+      if (!u.hover) return hide();
+      id = u.hover;
+    } else {
+      if (overHandle.current) return hide();
+      const world = { x: (env.pointer.x - cam.x) / cam.z, y: (env.pointer.y - cam.y) / cam.z };
+      const leaf = hitTest(view, board.index, world, { z: cam.z, deep: true });
+      if (!leaf) return hide();
+      id = mod.current ? leaf : clickTarget(view, leaf, sel.scope).id;
+    }
     const s = view.shapes.get(id);
     const r = s && !s.deleted ? absRect(view, id) : null;
     if (!s || !r || sel.ids.includes(id)) return hide();

@@ -21,3 +21,5 @@
 .pg-dims { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); background: var(--pg-sel); color: var(--pg-white); white-space: nowrap; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-variant-numeric: tabular-nums; }
 .pg-target { position: absolute; left: 0; top: 0; border: 2px solid var(--c); box-sizing: border-box; pointer-events: none; background: color-mix(in srgb, var(--c) 6%, transparent); }
 .pg-target span { position: absolute; left: -2px; top: -21px; background: var(--c); color: var(--pg-white); white-space: nowrap; font-weight: 600; font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+/* fixed text that overflows its box (TEXT-21): a red bracket at the bottom right while selected */
+.pg-text-over { position: absolute; right: calc(-6px * var(--pg-zi)); bottom: calc(-6px * var(--pg-zi)); width: calc(10px * var(--pg-zi)); height: calc(10px * var(--pg-zi)); border-right: calc(2px * var(--pg-zi)) solid var(--pg-danger); border-bottom: calc(2px * var(--pg-zi)) solid var(--pg-danger); pointer-events: none; }
