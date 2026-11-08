@@ -228,6 +228,34 @@ describe('Rule 1 pushes end to end', () => {
   });
 });
 
+describe('Rule 2 over the wire', () => {
+  it("B's planned date formatter is flagged against A's, visible to the coordinator", async () => {
+    // Arrange
+    const aDate = `src/utils/date_${RUN}.ts#formatDate`;
+    const bDate = `src/checkout/receipt_${RUN}.ts#format_date`;
+    await a.conn.reducers.publishPlan({
+      agentId: id('agent-a'),
+      taskId: 1n,
+      summary: 'due date',
+      items: [{ symbolId: aDate, intent: 'create' }],
+    });
+
+    // Act
+    await b.conn.reducers.publishPlan({
+      agentId: id('agent-b'),
+      taskId: 2n,
+      summary: 'receipt date',
+      items: [{ symbolId: bDate, intent: 'create' }],
+    });
+
+    // Assert
+    const dup = await waitFor(() =>
+      rows(coord.conn.db.conflict.iter()).find((c) => c.kind === 'duplicate' && c.symbolId === aDate),
+    );
+    expect(dup).toMatchObject({ agentA: id('agent-a'), agentB: id('agent-b'), status: 'open' });
+  });
+});
+
 describe('transactions over the wire', () => {
   it('a rejected reducer leaves no partial rows', async () => {
     // Arrange
