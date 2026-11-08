@@ -14,3 +14,11 @@
 .pg-pop textarea:focus { border-color: var(--c); }
 .pg-pop-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; color: var(--pg-muted); font-size: 11px; }
 .pg-pop button[type=submit] { width: 30px; height: 30px; border-radius: 9px; border: 0; background: var(--pg-accent); color: var(--pg-white); font-size: 15px; font-weight: 700; }
+
+/* Thread pins: orphan ghost, thread popover */
+.pg-pin.orphan span { background: var(--pg-panel); color: var(--c); border: 2px dashed var(--c); }
+.pg-thread-actions { margin-left: auto; display: flex; gap: 4px; }
+.pg-thread-actions button { border: 0; background: none; color: var(--pg-muted); font-size: 12px; cursor: pointer; }
+.pg-thread-actions button:hover { color: var(--pg-accent); }
+.pg-thread-msgs { max-height: 180px; overflow: auto; margin: 6px 0; font-size: 12px; }
+.pg-thread-msgs p { margin: 0 0 4px; }
