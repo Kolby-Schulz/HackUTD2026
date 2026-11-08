@@ -52,6 +52,7 @@ All run as `npm run <name> -- <args>` from the root `package.json:13-28`, or `np
 ## Gotchas, TODOs, spec deviations
 
 - **Spec 13 layout**: spec asks for one page (code map center, agents left, feed right, meter and scoreboard bottom). The build uses tabs (`App.tsx:16`). Inferred from code; the storyboard in spec 13 is not fully in view here.
+- **Reconnect is in the SDK**: `SpacetimeDBProvider` (spacetimedb 2.14) builds the connection with `withAutomaticReconnect()` and 1 to 30 s backoff, and `App.tsx:104` shows the "Not connected... Retrying" banner from `conn.isActive`. Issue #54's "no reconnect" item is stale; what it still lacks is the offline/local mode.
 - **Extra subscriptions**: `task` and `fileEdit` are subscribed (`data.ts:36,50`) but not in spec 13's table list. Harmless, but the spec table is out of date.
 - **Savings**: the ticker is only on the Tokens tab, not a persistent panel. `ScoreboardTab.tsx:93` labels per-feature savings as estimates, matching spec 15.
 - **Bench runs**: `bench.ts` defaults to `--runs 1`, while spec 15 says to run each mode at least 3 times and average. Use `--runs 3` for the headline numbers (unverified what the committed `bench.json` used).
