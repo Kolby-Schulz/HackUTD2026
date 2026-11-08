@@ -11,12 +11,17 @@ export function TextView({ shape }: { shape: Shape }) {
   const env = useBoardEnv();
   const id = shape.id;
   const editing = useStoreValue(env.ui.subscribe, useCallback(() => env.ui.get().editing === id, [env, id]));
-  if (!editing) return <>{shape.text}</>;
+  const wrap = shape.textMode === 'auto-w' ? 'pre' : 'pre-wrap';
+  if (!editing) {
+    if (shape.text) return <span style={{ whiteSpace: wrap, overflowWrap: 'anywhere' }}>{shape.text}</span>;
+    return <span className="pg-text-ph" data-export-ignore="" style={{ color: 'var(--pg-muted)', fontStyle: 'italic', whiteSpace: 'pre', pointerEvents: 'none' }}>Type something</span>;
+  }
   return (
     <textarea
       autoFocus
       defaultValue={shape.text}
       spellCheck={false}
+      placeholder="Type something"
       onFocus={(e) => e.currentTarget.select()}
       onBlur={(e) => commitText(env, id, e.currentTarget.value)}
       onKeyDown={(e) => {
