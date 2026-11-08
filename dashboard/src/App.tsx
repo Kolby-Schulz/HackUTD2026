@@ -3,7 +3,7 @@
 // Agents side bar, editor groups holding the Code map, Control and Chat tabs (drag to reorder,
 // move or split; Dock.tsx), Savings panel, status bar. Tables come from live subscriptions; Control and the chat's
 // assistant talk to the local control server (npm run control). ReplayTab.tsx stays, unmounted.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
 import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
@@ -67,6 +67,20 @@ export function App() {
   const { open, size } = layout;
   const flip = (v: ViewId) => (dock.isOpen(v) ? dock.close(v) : dock.open(v));
 
+  // The Savings panel sits under the code map's editor group, only as wide as the map, so the
+  // columns beside it (Chat, Changes) run full height; with the code map closed it spans the editor.
+  const mapOpen = dock.isOpen('map');
+  const panel = open.panel && (
+    <>
+      <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
+      <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings">
+        <Boundary name="Panel">
+          <BottomPanel savings={view.savings} cases={view.cases} onClose={() => toggle('panel', false)} />
+        </Boundary>
+      </section>
+    </>
+  );
+
   return (
     <div className="wb">
       <AnimatePresence>{intro && <Intro key="intro" onDone={endIntro} />}</AnimatePresence>
@@ -78,17 +92,21 @@ export function App() {
         </div>
         <CommandCenter repoLabel={repoLabel} runs={runs} run={run} runPick={runPick} openRun={openRun} modeName={modeName}
           onPickRun={(v) => { setRunPick(v); setPicked(undefined); }} />
-        <div className="tb-right">
-          <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" data-tip="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
-          <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" data-tip="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('map')} aria-label="Toggle code map" data-tip="Code map" onClick={() => flip('map')}>{ICON.map}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('changes')} aria-label="Toggle changes" data-tip="Changes" onClick={() => flip('changes')}>{ICON.changes}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('control')} aria-label="Toggle control" data-tip="Control" onClick={() => flip('control')}>{ICON.control}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('chat')} aria-label="Toggle chat" data-tip="Chat" onClick={() => flip('chat')}>{ICON.chat}</button>
-        </div>
+        {/* balances the brand so the command center stays centred */}
+        <div className="tb-right" />
       </header>
 
       <div className="main">
+        <nav className="activitybar" aria-label="Views">
+          <div className="ab-group">
+            <ActivityButton label="Agents" on={open.side} onClick={() => toggle('side')} badge={view.agents.filter((a) => a.status === 'Working').length} badgeTitle="working">{ICON.agents}</ActivityButton>
+            <ActivityButton label="Code map" on={dock.isOpen('map')} onClick={() => flip('map')}>{ICON.map}</ActivityButton>
+            <ActivityButton label="Changes" on={dock.isOpen('changes')} onClick={() => flip('changes')} badge={view.edits.length} badgeTitle="edits this run">{ICON.changes}</ActivityButton>
+            <ActivityButton label="Control" on={dock.isOpen('control')} onClick={() => flip('control')}>{ICON.control}</ActivityButton>
+            <ActivityButton label="Chat" on={dock.isOpen('chat')} onClick={() => flip('chat')}>{ICON.chat}</ActivityButton>
+            <ActivityButton label="Savings panel" on={open.panel} onClick={() => toggle('panel')} badge={openCount} badgeTitle="open conflicts" alert>{ICON.panel}</ActivityButton>
+          </div>
+        </nav>
         {open.side && (
           <>
             <aside className="pane side" style={{ width: size.side }} aria-label="Agents">
@@ -149,18 +167,9 @@ export function App() {
                   </Boundary>
                 </div>
               ) },
-            }} />
+            }} below={panel && mapOpen ? { view: 'map', node: panel } : undefined} />
           </main>
-          {open.panel && (
-            <>
-              <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
-              <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings">
-                <Boundary name="Panel">
-                  <BottomPanel savings={view.savings} cases={view.cases} onClose={() => toggle('panel', false)} />
-                </Boundary>
-              </section>
-            </>
-          )}
+          {panel && !mapOpen && panel}
         </div>
 
       </div>
@@ -176,5 +185,20 @@ export function App() {
         <span>Stage: {view.stage}</span>
       </footer>
     </div>
+  );
+}
+
+/** One icon in the activity bar, styled like VS Code's: grey when its view is hidden, bright with a
+ *  full-height bar on the left edge while open, an optional count badge, and a tooltip. */
+function ActivityButton({ label, on, onClick, badge, badgeTitle, alert, children }: {
+  label: string; on: boolean; onClick: () => void; badge?: number; badgeTitle?: string; alert?: boolean; children: ReactNode;
+}) {
+  const count = badge && badge > 0 ? (badge > 99 ? '99+' : String(badge)) : undefined;
+  return (
+    <button type="button" className="ab-btn" aria-pressed={on} aria-label={`${on ? 'Hide' : 'Show'} ${label}${count ? `, ${count} ${badgeTitle ?? ''}` : ''}`} onClick={onClick}>
+      {children}
+      {count && <span className={'ab-badge' + (alert ? ' alert' : '')} aria-hidden="true">{count}</span>}
+      <span className="ab-tip" role="tooltip">{label}{count && badgeTitle ? ` · ${count} ${badgeTitle}` : ''}</span>
+    </button>
   );
 }

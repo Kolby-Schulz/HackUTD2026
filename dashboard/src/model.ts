@@ -95,7 +95,8 @@ export function people(agents: Rows<R.Agent>): Map<string, Person> {
   const map = new Map<string, Person>();
   const workers = agents.filter((a) => !SYSTEM_IDS.has(a.id)).slice().sort((a, b) => a.id.localeCompare(b.id));
   workers.forEach((a, i) => {
-    const tail = a.name.replace(/^agent\s+/i, '').trim();
+    // "Agent B", "agent-b" and "agent_b" are all B (not A); "agent-judge" is J
+    const tail = (a.name || a.id).replace(/^agent[\s_-]*/i, '').trim();
     map.set(a.id, { id: a.id, name: a.name || a.id, letter: (tail[0] || a.id[0] || '?').toUpperCase(), color: AGENT_COLORS[i % AGENT_COLORS.length] });
   });
   map.set('coordinator', { id: 'coordinator', name: 'Coordinator', letter: 'C', color: COORD_COLOR });
