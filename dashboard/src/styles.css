@@ -114,6 +114,8 @@ button { cursor: pointer; }
 .agent.resumed { animation: resumed 2.4s ease-out; }
 .agent.offline { opacity: 0.6; }
 @keyframes resumed { from { background: var(--ok-soft); border-left-color: var(--ok); } to { background: transparent; border-left-color: transparent; } }
+.waiting-toggle { border: none; background: none; color: var(--text2); font-size: 12px; padding: 4px 12px 8px 30px; text-align: left; }
+.waiting-toggle:hover { color: var(--accent); }
 .chev { transition: transform 0.15s ease; flex: none; }
 .chev.closed { transform: rotate(-90deg); }
 .spend { height: 4px; border-radius: 2px; background: var(--soft); display: flex; overflow: hidden; margin: 2px 0 0 10px; }

@@ -6,7 +6,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
-import { agentCards, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
+import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
 import { APP_NAME, Intro, LanesMark, shouldPlayIntro } from './Intro.tsx';
 import { CodeMap } from './CodeMap.tsx';
 import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
@@ -36,6 +36,7 @@ export function App() {
 
   const view = useMemo(() => ({
     agents: agentCards(live, run, now),
+    called: calledAgents(live, run, now),
     coord: coordinator(live, run, now),
     cases: cases(live, w),
     events: feed(live, w),
@@ -85,7 +86,7 @@ export function App() {
               <PaneHead title="Agents" onClose={() => toggle('side', false)} />
               <div className="pane-body">
                 <Boundary name="Agents">
-                  <AgentsView agents={view.agents} coord={view.coord} events={view.events} runLabel={run ? `RUN #${run.id}` : 'NO RUN YET'} />
+                  <AgentsView agents={view.agents.filter((a) => view.called.has(a.id))} waiting={view.agents.filter((a) => !view.called.has(a.id))} coord={view.coord} events={view.events} runLabel={run ? `RUN #${run.id}` : 'NO RUN YET'} />
                 </Boundary>
               </div>
             </aside>
@@ -135,7 +136,7 @@ export function App() {
               chat: { title: 'Chat', icon: ICON.chat, render: () => (
                 <div className="view chat-view">
                   <Boundary name="Chat">
-                    <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
+                    <ChatView events={view.events} agents={view.agents.filter((a) => view.called.has(a.id) || !a.offline)} openRun={openRun} connected={live.connected} runStart={w.start} machine={machine} />
                   </Boundary>
                 </div>
               ) },
@@ -157,7 +158,7 @@ export function App() {
 
       <footer className="statusbar" aria-label="Status bar">
         {run ? <><span>Run #{String(run.id)}</span><span>{modeName(run.mode)}</span><span>seed {run.seed}</span></> : <span>Start a run: npm run demo -- --mode with_contract</span>}
-        <span>{view.agents.length} agent{view.agents.length === 1 ? '' : 's'}</span>
+        <span>{view.called.size} agent{view.called.size === 1 ? '' : 's'} in this run</span>
         <span className="grow" />
         <button type="button" onClick={() => { toggle('panel', true); setPanelTab('problems'); }} aria-label="Show problems">
           <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2L14.5 13.5h-13z M8 6.5v3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>

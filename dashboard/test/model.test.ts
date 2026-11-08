@@ -295,3 +295,14 @@ describe('changes tab', () => {
     expect(l[0].text).toBe('export function fee()');
   });
 });
+
+describe('called agents', () => {
+  it('lists agents with work in the run and leaves registered idle workers out', async () => {
+    const { calledAgents } = await import('../src/model.ts');
+    const t = story();
+    const c = { ...t.agents[0], id: 'agent-c', name: 'Agent C', status: 'idle', currentTaskId: undefined };
+    const withC = { ...t, agents: [...t.agents, c] } as unknown as Tables;
+    expect([...calledAgents(withC, withC.runs[1], NOW)].sort()).toEqual(['agent-a', 'agent-b']);
+    expect(calledAgents(withC, undefined, NOW).size).toBe(0);
+  });
+});

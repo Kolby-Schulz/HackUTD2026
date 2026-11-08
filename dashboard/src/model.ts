@@ -712,3 +712,21 @@ export function coordFocus(t: Tables, w: Window): { symbolId: string; conflict: 
     .sort((a, b) => Number(b.id - a.id))[0];
   return c ? { symbolId: c.symbolId, conflict: String(c.id), resolving: c.status === 'resolving' } : undefined;
 }
+
+/** Agents that have been called in this run: given a task in it, did anything in it (a plan,
+ *  claim, change, edit, token row), or are working / paused right now. Registered workers that
+ *  are just waiting stay out of the side bar until they get work. */
+export function calledAgents(t: Tables, run: R.Run | undefined, now: number): Set<string> {
+  const out = new Set<string>();
+  if (!run) return out;
+  const w = runWindow(run, now);
+  for (const x of t.tasks) if (x.runId === run.id && x.agentId) out.add(x.agentId);
+  for (const u of t.usage) if (u.runId === run.id) out.add(u.agentId);
+  for (const p of t.plans) if (inWin(w, ms(p.createdAt))) out.add(p.agentId);
+  for (const c of t.claims) if (inWin(w, ms(c.claimedAt))) out.add(c.agentId);
+  for (const c of t.changes) if (inWin(w, ms(c.createdAt))) out.add(c.agentId);
+  for (const e of t.fileEdits ?? []) if (inWin(w, ms(e.createdAt))) out.add(e.agentId);
+  if (w.live) for (const a of t.agents) if (a.status === 'working' || a.status === 'paused') out.add(a.id);
+  for (const id of SYSTEM_IDS) out.delete(id);
+  return out;
+}
