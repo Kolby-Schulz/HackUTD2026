@@ -14,6 +14,7 @@ import type { FrameSub } from '../../core/raf';
 import { useChildren } from '../../core/react';
 import type { Cam } from '../../core/types';
 import { createPipeline, shapeAt } from '../gestures/pipeline';
+import { enterAt } from '../gestures/select';
 import type { PointerInfo } from '../gestures/pipeline';
 import { trackSpace } from '../gestures/pan';
 import { startEditing } from '../gestures/text';
@@ -170,6 +171,7 @@ export function Board(props: {
           const id = shapeAt(env, info(e).world, true);
           const s = id ? env.board.doc.getState().shapes.get(id) : undefined;
           if (s?.kind === 'text') startEditing(env, s.id);
+          else enterAt(env, info(e));
         }}
       >
         <DotGrid />

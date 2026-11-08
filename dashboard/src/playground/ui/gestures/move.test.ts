@@ -6,6 +6,7 @@ import { opId } from '../../core/ids';
 import { createFakeFrameSource, createScheduler } from '../../core/raf';
 import { createUiStore } from '../board/state';
 import type { BoardEnv } from '../board/state';
+import { attachLocks } from '../../presence/locks';
 import { lockAxis, startMove } from './move';
 import type { PointerInfo } from './pipeline';
 
@@ -90,12 +91,20 @@ describe('move reparent and axis lock', () => {
     expect(get(env, rect)).toMatchObject({ x: 70, y: 0 });
   });
 
-  it('a human drag takes over an agent soft lock', () => {
+  it('a human drag takes over an agent soft lock on the first drag frame (a plain click does not)', () => {
     const env = makeEnv();
+    attachLocks(env.board); // the page attaches the lock layer in ui/kit.ts
+    const revoked: unknown[] = [];
+    env.board.subscribe({ kinds: ['lock.revoked'] }, (e) => revoked.push(e));
     const rect = looseRect(env);
     env.board.locks.acquire(rect, 'agent-a');
     env.board.selection.set('human-test', [rect]);
     startMove(env, pi(10, 10))!.cancel();
-    expect(env.board.locks.list()).toEqual([]);
+    expect(env.board.locks.list().map((l) => l.holder)).toEqual(['agent-a']); // pressing alone keeps the agent's lock
+    const m = startMove(env, pi(10, 10))!;
+    m.move(pi(40, 40));
+    expect(env.board.locks.list().some((l) => l.holder === 'agent-a')).toBe(false);
+    expect(revoked).toHaveLength(1);
+    m.cancel();
   });
 });

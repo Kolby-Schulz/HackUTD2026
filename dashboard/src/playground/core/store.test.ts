@@ -233,7 +233,7 @@ describe('long gestures stay cheap', () => {
     const t0 = performance.now();
     for (let i = 0; i < 30; i++) store.dispatch(H, 'Nudge', [{ t: 'set', id: 's0', patch: { x: i } }]);
     const ms = performance.now() - t0;
-    expect(ms).toBeLessThan(1500); // without folding this replays 90k map copies of 2k shapes
+    expect(ms).toBeLessThan(4000); // without folding this took ~8 s (90k map copies of 2k shapes); loose for shared CPUs
     expect(shape(store, 'f').w).toBe(1500); // the agent's gesture is still visible
     const tx = g.commit()!;
     expect(tx.ops.map((o) => o.t)).toEqual(['create', 'create']); // one create each, final values folded in

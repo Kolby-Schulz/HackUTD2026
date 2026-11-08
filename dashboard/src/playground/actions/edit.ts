@@ -7,6 +7,7 @@ import { opId } from '../core/ids';
 import { toast } from '../core/toast';
 import type { Action, Shape, ShapeId } from '../core/types';
 import { activeBoard, selectIds, selectedIds } from '../ui/board/state';
+import { escapeLadder } from '../ui/gestures/pipeline';
 
 export const DUP_OFFSET = 16;
 
@@ -133,10 +134,9 @@ export const actions: Action[] = [
     id: 'edit.escape', title: 'Cancel / deselect', group: 'Edit', keys: { all: ['Escape'] }, contexts: ['canvas', 'panel'],
     run() {
       const env = activeBoard();
-      if (!env || env.cancelGesture()) return;           // Escape mid-drag only cancels the drag
-      env.ui.set({ pop: null, hover: null, tool: 'select' });
-      env.ui.emitEscape();
-      selectIds(env.board, []);
+      if (!env) return;
+      // one step per press: cancel drag, close popover, leave text edit, select parent, clear selection, Move tool
+      if (!escapeLadder(env)) env.ui.emitEscape(); // nothing left on the board: shell menus close themselves
     },
   },
 ];

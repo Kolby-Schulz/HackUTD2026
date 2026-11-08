@@ -23,10 +23,15 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     // core/keys install() types its target with `(e: never)` listeners, which Window does not satisfy
     const offKeys = installKeys(window as unknown as Parameters<typeof installKeys>[0]);
     const offView = registerViewFallbacks();
+    // restore the saved board and chat before agents start (here, not in createKit, so a StrictMode remount's
+    // teardown cannot wipe what was just restored)
+    const restored = sink.persistence?.load() ?? false;
     const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text) });
     rtRef.current = r;
     setRt(r);
     for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
+    // the runtime cannot yet tell which slots a restored board occupies: start idle instead of building over it
+    if (restored) r.setAllPaused(true);
 
     const apiCursors = new Map<string, Choreographer>();
     const choreo = (id: string) => r.choreographer(id) ?? apiCursors.get(id) ?? (apiCursors.set(id, createChoreographer({ actor: id, presence: board.presence })), apiCursors.get(id)!);

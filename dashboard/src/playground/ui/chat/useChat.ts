@@ -25,7 +25,7 @@ export type SendOpts = { thread?: string; shapeId?: string; at?: { x: number; y:
 export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject<AgentRuntime | null>, cursors: Meta[], onOpenChat: () => void) {
   const me = board.me;
   /** The framework-free store; `store.toJSON()` / `store.load()` let persistence save and restore it. */
-  const [store] = useState(createChatStore);
+  const [store] = useState(() => sink.chat ?? createChatStore());
   const messages = useSyncExternalStore(store.subscribe, store.messages);
   const unread = useSyncExternalStore(store.subscribe, store.unread);
   const [thread, setThread] = useState('general');

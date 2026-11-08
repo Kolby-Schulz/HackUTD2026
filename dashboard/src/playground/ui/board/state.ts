@@ -16,6 +16,8 @@ export interface UiState {
   pop: Popover | null;
   space: boolean;      // Space held: drags pan
   panning: boolean;    // a pan drag is in progress
+  /** Autosave handle (`core/persist.ts`), set once by the kit; the top bar shows its status. */
+  persistence: import('../../core/persist').Persistence | null;
 }
 
 export interface UiStore {
@@ -28,7 +30,7 @@ export interface UiStore {
 }
 
 export function createUiStore(): UiStore {
-  let s: UiState = { tool: 'select', editing: null, hover: null, pop: null, space: false, panning: false };
+  let s: UiState = { tool: 'select', editing: null, hover: null, pop: null, space: false, panning: false, persistence: null };
   const subs = new Set<() => void>();
   const esc = new Set<() => void>();
   return {

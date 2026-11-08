@@ -50,7 +50,7 @@ export function startMove(env: BoardEnv, p0: PointerInfo): Mode | null {
   ids.forEach((id) => descendants(start, id).forEach((d) => ignore.add(d)));
 
   // human wins: take over any soft lock an agent holds on what is being dragged
-  for (const l of board.locks.list()) if (ignore.has(l.shapeId) && l.holder !== board.me) board.locks.release(l.shapeId, l.holder);
+  // agent locks on these shapes are revoked by the lock-aware board.gesture (presence/locks.ts attachLocks)
 
   let g: Gesture | null = null;
 

@@ -261,8 +261,10 @@ export function createRuntime(opts: RuntimeOpts) {
     }
     if (e.t !== 'lock.revoked') return;
     // the victim is the agent named on the event, else any agent that has the shapes selected
-    const named = agents.get(e.actor);
-    const victims = named && e.actor !== e.by ? [named]
+    // presence/locks.ts names the revoked agent as `holder` (the human is `actor`/`by`)
+    const holder = (e as { holder?: ActorId }).holder;
+    const named = agents.get(holder ?? e.actor);
+    const victims = named && named.actor.id !== e.by ? [named]
       : agents.get(e.by) ? []
       : [...agents.values()].filter((a) => (board.presence.get(a.actor.id)?.selection ?? []).some((s) => e.ids.includes(s)));
     for (const a of victims) interrupt(a, TAKEOVER_LINE);
