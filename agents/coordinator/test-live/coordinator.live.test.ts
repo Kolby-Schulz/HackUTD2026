@@ -152,6 +152,49 @@ describe.skipIf(!hasKey)('coordinator on Nemotron, end to end through SpacetimeD
   });
 });
 
+describe.skipIf(!hasKey)('mirror duplicates get one consistent ruling', () => {
+  // The first two-laptop maincloud run: both agents planned a formatDate at once, the server
+  // opened a duplicate conflict each way, and Nemotron gave them to different owners.
+  it('both agents planning the same formatter end with one owner and one model call', async () => {
+    startCoordinator({ COORDINATOR_PROVIDER: 'nemotron', LLM_PROVIDER: 'claude-code' });
+    await waitFor('the coordinator to register', () => watcher.db.agent.id.find('coordinator')?.model.startsWith('nemotron:'));
+    const [a, b] = await Promise.all([connect(), connect()]);
+    const ids = { a: `agent-a-mirror-${RUN}`, b: `agent-b-mirror-${RUN}` };
+    const dates = `src/billing/dates-${RUN}.ts#formatDate`;
+    const format = `src/format-${RUN}.ts#formatDate`;
+    for (const [conn, id] of [[a, ids.a], [b, ids.b]] as const) {
+      await conn.reducers.registerAgent({ id, name: id, ownerDev: 'live-test', machine: 'ci', model: 'claude-code', tokenBudget: 100_000n });
+    }
+    const tokensBefore = [...watcher.db.tokenUsage.iter()].filter((t) => t.agentId === 'coordinator').length;
+    const sig = 'formatDate(d: Date): string';
+
+    // Both plan at once, then each re-publishes (as a resumed worker does): the server opens a
+    // conflict each way.
+    await Promise.all([
+      b.reducers.publishPlan({ agentId: ids.b, taskId: 2n, summary: 'Receipt with order date', items: [{ symbolId: format, intent: 'create', signature: sig }] }),
+      a.reducers.publishPlan({ agentId: ids.a, taskId: 1n, summary: 'Invoice with due date', items: [{ symbolId: dates, intent: 'create', signature: sig }] }),
+    ]);
+    await a.reducers.publishPlan({ agentId: ids.a, taskId: 1n, summary: 'Invoice with due date', items: [{ symbolId: dates, intent: 'create', signature: sig }] }).catch(() => {});
+    await b.reducers.publishPlan({ agentId: ids.b, taskId: 2n, summary: 'Receipt with order date', items: [{ symbolId: format, intent: 'create', signature: sig }] }).catch(() => {});
+
+    const mine = () => [...watcher.db.conflict.iter()].filter((c) => c.kind === 'duplicate' && [ids.a, ids.b].includes(c.agentA));
+    await waitFor('a duplicate conflict', () => mine().length > 0);
+    await new Promise((r) => setTimeout(r, 1_000)); // let any mirror conflict arrive
+    await waitFor('every duplicate to be resolved', () => mine().every((c) => c.status === 'resolved'));
+
+    const conflicts = mine();
+    const decisions = conflicts.map((c) => [...watcher.db.decision.iter()].find((d) => d.conflictId === c.id)!);
+    console.log(
+      `[mirror] ${conflicts.length} conflict(s):`,
+      conflicts.map((c, i) => `#${c.id} ${c.agentA}->${c.symbolId}: owner ${decisions[i].ownerAgent} | ${decisions[i].reason}`),
+    );
+    expect(new Set(decisions.map((d) => d.ownerAgent)).size).toBe(1);
+    const modelCalls = [...watcher.db.tokenUsage.iter()].filter((t) => t.agentId === 'coordinator').length - tokensBefore;
+    expect(modelCalls).toBe(1);
+    if (conflicts.length > 1) expect(coordinatorLog).toMatch(/prior_decision/);
+  });
+});
+
 describe('coordinator fallback when Nemotron is unreachable', () => {
   it('still resolves with the first-claimant rule so workers never stay paused', async () => {
     startCoordinator({ COORDINATOR_PROVIDER: 'nemotron', NVIDIA_API_KEY: 'nvapi-invalid-for-test' });
