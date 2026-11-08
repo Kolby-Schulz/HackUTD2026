@@ -11,6 +11,9 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
 ## Done (see [[history]])
 - MVP, two-laptop shared Maincloud DB, any-agent join, replay, benchmark, Nemotron coordinator (#43), coordinator duplicate reuse (#44). 25 PRs merged.
 
+## In flight (local, not on GitHub)
+- Playground design board (`#/playground`, branch `feat/dashboard-playground`): board + agents committed (6ecef41), chat + comment tool uncommitted. Full plan in [[playground-plan]]: 411 features, 84 work packages. Wave 0: WP-01 done and reviewed (`dashboard/src/playground/core/`, 42 tests pass, uncommitted); next is stage B (WP-02, 03, 05, 06, 07, 09 in parallel worktrees), which needs a commit first so worktrees branch from it.
+
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
 - #26: submission package (README, diagram, demo video, Devpost)
 - #17: dashboard polish for judges

@@ -8,6 +8,8 @@ Summary: The dashboard is a React 19 + Vite single page that reads 15 SpacetimeD
 
 ## Dashboard
 
+- **Playground** (`#/playground`, `dashboard/src/playground/`): standalone design board that skips the SpacetimeDB provider (`main.tsx` routes on the hash). Plan and decisions: [[playground-plan]].
+
 - **Framework**: React 19, Vite 8 (`dashboard/package.json`), `@xyflow/react` (React Flow) for the code map (`dashboard/src/CodeMap.tsx`), `spacetimedb/react` hooks. Entry: `dashboard/src/main.tsx:8-12` wraps `<App/>` in `SpacetimeDBProvider`.
 - **Connection**: `dashboard/src/data.ts:22-31` builds `DbConnection` with `withUri(SPACETIME_HOST)`, `withDatabaseName`, and a token saved in localStorage per server (`data.ts:18-19`, `onConnect` at `:26`). Host comes from `vite.config.ts:14-19` (root `.env`, `VITE_SPACETIME_HOST` or `SPACETIME_HOST`). A localhost host falls back to `ws://<page hostname>:3000` (`data.ts:12`), so a second laptop can open `http://<demo-laptop>:5173`.
 - **Bindings**: imported only from `@bindings/*`, aliased to `packages/client/src/bindings` (`vite.config.ts:9,18`). Spec section 18 rule respected.

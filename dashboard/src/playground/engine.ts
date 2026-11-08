@@ -20,7 +20,13 @@ export type Shape = {
   weight?: number;
   radius?: number;
   owner?: string; // cursor id currently editing it (multiplayer outline)
+  author?: string; // cursor id that made it (or was assigned it); requests route to its chat
 };
+
+/** One chat line. `thread` is an agent id (one chat per agent) or 'general'. */
+export type Msg = { id: string; thread: string; from: string; name: string; color: string; text: string; ctx?: string; pin?: string; shapeId?: string; t: number };
+/** A note sent to an agent, optionally pointing at a layer. */
+export type Req = { text: string; shapeId?: string; ctx?: string; pin?: string };
 
 export type CursorKind = 'human' | 'agent' | 'api';
 export type CursorMeta = { id: string; name: string; color: string; kind: CursorKind; status: string; paused: boolean };
@@ -108,6 +114,56 @@ const TEMPLATES: Tpl[] = [
   },
 ];
 
+// ---- tiny intent parser: the scripted agents understand a handful of edits ----
+const HELP = "I'm a scripted demo agent. Point at a layer and try: make it blue, bigger, smaller, rounder, bold, delete, or say \"New text\". Without a layer, ask me to build a card, mobile screen, stat widget or hero.";
+
+const NAMED: Record<string, string> = {
+  red: '#ef4444', orange: '#f97316', yellow: '#facc15', green: '#22c55e', teal: '#14b8a6', blue: '#3b82f6',
+  purple: '#a855f7', pink: '#ec4899', black: '#1c1917', white: '#ffffff', gray: '#9ca3af', grey: '#9ca3af', brown: '#92400e',
+};
+
+function pickTemplate(text: string) {
+  const t = text.toLowerCase();
+  if (/\b(card|profile)\b/.test(t)) return TEMPLATES[0];
+  if (/\b(mobile|phone|app|tasks?)\b/.test(t)) return TEMPLATES[1];
+  if (/\b(stat|stats|chart|widget|revenue)\b/.test(t)) return TEMPLATES[2];
+  if (/\b(hero|landing)\b/.test(t)) return TEMPLATES[3];
+  return undefined;
+}
+
+export function parseEdit(text: string, s: Shape): { remove?: boolean; patch: Partial<Shape>; summary: string[] } | null {
+  const t = text.toLowerCase();
+  if (/\b(delete|remove)\b/.test(t)) return { remove: true, patch: {}, summary: [`removed ${s.name}`] };
+  const p: Partial<Shape> = {};
+  const sum: string[] = [];
+  const hex = text.match(/#(?:[0-9a-f]{6}|[0-9a-f]{3})\b/i)?.[0];
+  const cname = Object.keys(NAMED).find((c) => new RegExp(`\\b${c}\\b`).test(t));
+  const col = hex ?? (cname ? NAMED[cname] : undefined);
+  if (col) {
+    if (s.kind === 'text') p.color = col; else p.fill = col;
+    sum.push(`${s.kind === 'text' ? 'text color' : 'fill'} is now ${cname ?? hex}`);
+  }
+  const k = /\b(bigger|larger|grow|increase|huge)\b/.test(t) ? 1.25 : /\b(smaller|shrink|tiny|decrease)\b/.test(t) ? 0.8 : 1;
+  if (k !== 1) {
+    if (s.kind === 'text') { p.fontSize = Math.round((s.fontSize ?? 14) * k); p.w = s.w * k; p.h = s.h * k; }
+    else { p.w = s.w * k; p.h = s.h * k; p.x = s.x - (s.w * k - s.w) / 2; p.y = s.y - (s.h * k - s.h) / 2; }
+    sum.push(k > 1 ? 'made it bigger' : 'made it smaller');
+  }
+  if (s.kind !== 'text' && /\b(round|rounder|rounded|pill|circle)\b/.test(t)) {
+    p.radius = /\b(pill|circle)\b/.test(t) ? Math.min(s.w, s.h) / 2 : (s.radius ?? 0) + 12;
+    sum.push('rounded the corners');
+  }
+  if (/\b(square|sharp)\b/.test(t)) { p.radius = 0; sum.push('squared the corners'); }
+  if (s.kind === 'text' && /\bbold\b/.test(t)) { p.weight = 700; sum.push('made it bold'); }
+  const quoted = text.match(/["“]([^"”]+)["”]/)?.[1];
+  if (quoted) {
+    if (s.kind === 'text') p.text = quoted;
+    p.name = quoted.slice(0, 24);
+    sum.push(`${s.kind === 'text' ? 'text' : 'name'} is now “${quoted}”`);
+  }
+  return sum.length ? { patch: p, summary: sum } : null;
+}
+
 const COLS = 5, CELL_W = 500, CELL_H = 620, MAX_SLOTS = 30;
 
 export type Engine = ReturnType<typeof createEngine>;
@@ -115,7 +171,14 @@ export type Engine = ReturnType<typeof createEngine>;
 export function createEngine(h: {
   setShapes: Dispatch<SetStateAction<Shape[]>>;
   setCursors: Dispatch<SetStateAction<CursorMeta[]>>;
+  getShapes: () => Shape[];
+  post: (m: Msg) => void;
+  resolvePin: (pinId: string) => void;
 }) {
+  const names = new Map<string, string>();
+  const inbox = new Map<string, Req[]>();
+  const serving = new Set<string>();
+  const nextTpl = new Map<string, Tpl>();
   const pos = new Map<string, Pos>();
   const tokens = new Map<string, Token>();
   const colors = new Map<string, string>();
@@ -133,6 +196,7 @@ export function createEngine(h: {
   function addCursor(meta: { id: string; name: string; color: string; kind: CursorKind; status?: string }, x = 0, y = 0) {
     pos.set(meta.id, { id: meta.id, x, y, down: false, paused: false, human: meta.kind === 'human', anim: null });
     colors.set(meta.id, meta.color);
+    names.set(meta.id, meta.name);
     h.setCursors((cs) => [...cs.filter((c) => c.id !== meta.id), { status: 'idle', paused: false, ...meta }]);
     return meta.id;
   }
@@ -149,6 +213,7 @@ export function createEngine(h: {
 
   function removeCursor(id: string) {
     stopScript(id);
+    inbox.delete(id);
     pos.delete(id);
     h.setCursors((cs) => cs.filter((c) => c.id !== id));
   }
@@ -185,9 +250,14 @@ export function createEngine(h: {
   }
 
   // ---- scripted agents ----
-  async function gate(tok: Token) {
+  async function hold(tok: Token) {
     while (tok.paused && tok.alive) await sleep(80);
     if (!tok.alive) throw CANCEL;
+  }
+  /** Between steps: wait out a pause, then handle any notes people sent this agent. */
+  async function gate(id: string, tok: Token) {
+    await hold(tok);
+    await serve(id, tok);
   }
   async function wait(tok: Token, ms: number) {
     let left = ms / speed;
@@ -209,9 +279,9 @@ export function createEngine(h: {
   }
 
   async function drag(id: string, tok: Token, s: Shape, toX: number, toY: number) {
-    await gate(tok);
+    await gate(id, tok);
     press(id, true);
-    addShape({ ...s, w: 1, h: 1 });
+    addShape({ ...s, w: 1, h: 1, author: id });
     await moveTo(id, toX, toY, { straight: true, step: (x, y) => patch(s.id, { w: Math.max(1, x - s.x), h: Math.max(1, y - s.y) }) });
     patch(s.id, { w: toX - s.x, h: toY - s.y });
     press(id, false);
@@ -219,6 +289,7 @@ export function createEngine(h: {
 
   async function build(id: string, tok: Token, tpl: Tpl, ox: number, oy: number) {
     const color = colors.get(id) ?? '#000';
+    say(id, `Starting a ${tpl.name}.`);
     const res = (f?: string) => (f === 'A' ? color : f === 'a' ? color + '29' : f);
     const frameId = uid('f');
     status(id, `framing ${tpl.name}`);
@@ -226,14 +297,14 @@ export function createEngine(h: {
     await drag(id, tok, { id: frameId, kind: 'frame', name: tpl.name, x: ox, y: oy, w: tpl.w, h: tpl.h, fill: '#ffffff', radius: tpl.radius, owner: id }, ox + tpl.w, oy + tpl.h);
 
     for (const el of tpl.children) {
-      await gate(tok);
+      await gate(id, tok);
       status(id, `${el.kind === 'text' ? 'typing' : 'drawing'} ${el.name.toLowerCase()}`);
       const sx = ox + el.x, sy = oy + el.y, sid = uid();
       if (el.kind === 'text') {
         const fs = el.fontSize ?? 14;
         await moveTo(id, sx, sy + fs * 0.6);
         press(id, true); await wait(tok, 90); press(id, false);
-        addShape({ id: sid, kind: 'text', name: el.name, x: sx, y: sy, w: el.w, h: el.h, fill: 'transparent', text: '', fontSize: fs, weight: el.weight, color: res(el.color) ?? INK, owner: id });
+        addShape({ id: sid, kind: 'text', name: el.name, x: sx, y: sy, w: el.w, h: el.h, fill: 'transparent', text: '', fontSize: fs, weight: el.weight, color: res(el.color) ?? INK, owner: id, author: id });
         const full = el.text ?? '';
         for (let k = 1; k <= full.length; k++) {
           await wait(tok, 25 + Math.random() * 45);
@@ -248,27 +319,95 @@ export function createEngine(h: {
       patch(sid, { owner: undefined });
     }
     patch(frameId, { owner: undefined });
+    say(id, `Finished the ${tpl.name} (${tpl.children.length + 1} layers). Click any part of it with the comment tool to ask for changes.`);
   }
 
   async function runAgent(id: string, tok: Token) {
     await wait(tok, 200 + Math.random() * 800);
     while (tok.alive) {
+      await gate(id, tok);
       const slot = claimSlot();
       if (slot < 0) {
         // board is full: wander and "review" other designs
         status(id, 'reviewing');
         const k = Math.floor(Math.random() * MAX_SLOTS);
         await moveTo(id, (k % COLS) * CELL_W + 100 + Math.random() * 300, Math.floor(k / COLS) * CELL_H + 60 + Math.random() * 400);
-        await wait(tok, 800 + Math.random() * 1500);
+        await idle(id, tok, 800 + Math.random() * 1500);
         continue;
       }
-      const tpl = TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)];
+      const tpl = nextTpl.get(id) ?? TEMPLATES[Math.floor(Math.random() * TEMPLATES.length)];
+      nextTpl.delete(id);
       const ox = (slot % COLS) * CELL_W + Math.round((CELL_W - tpl.w) / 2);
       const oy = Math.floor(slot / COLS) * CELL_H + 40;
       await build(id, tok, tpl, ox, oy);
       status(id, 'idle');
-      await wait(tok, 500 + Math.random() * 1200);
+      await idle(id, tok, 500 + Math.random() * 1200);
     }
+  }
+  /** Idle wait that still answers notes promptly. */
+  async function idle(id: string, tok: Token, ms: number) {
+    const end = performance.now() + ms / speed;
+    while (performance.now() < end) {
+      await wait(tok, 60);
+      if (inbox.get(id)?.length) await gate(id, tok);
+    }
+  }
+
+  // ---- chat: notes sent to agents ----
+  function say(id: string, text: string, ctx?: string, shapeId?: string) {
+    h.post({ id: uid('m'), thread: id, from: id, name: names.get(id) ?? id, color: colors.get(id) ?? '#000', text, ctx, shapeId, t: Date.now() });
+  }
+
+  function request(agentId: string, r: Req) {
+    if (!tokens.has(agentId)) {
+      // API cursors and removed agents have no script to act on it
+      if (r.pin) h.resolvePin(r.pin);
+      return;
+    }
+    const q = inbox.get(agentId) ?? [];
+    q.push(r);
+    inbox.set(agentId, q);
+  }
+
+  async function serve(id: string, tok: Token) {
+    const q = inbox.get(id);
+    if (!q?.length || serving.has(id)) return;
+    serving.add(id);
+    try {
+      while (q.length) {
+        await hold(tok);
+        await handle(id, tok, q.shift()!);
+      }
+    } finally {
+      serving.delete(id);
+    }
+  }
+
+  async function handle(id: string, tok: Token, r: Req) {
+    status(id, 'reading your note');
+    await wait(tok, 350);
+    const shape = r.shapeId ? h.getShapes().find((s) => s.id === r.shapeId) : undefined;
+    const done = () => { if (r.pin) h.resolvePin(r.pin); };
+    if (r.shapeId && !shape) { say(id, 'That layer is gone now, so there is nothing to change.'); return done(); }
+    if (!shape) {
+      const tpl = pickTemplate(r.text);
+      say(id, tpl ? `Sure, I'll build a ${tpl.name} next.` : HELP);
+      if (tpl) nextTpl.set(id, tpl);
+      return done();
+    }
+    const edit = parseEdit(r.text, shape);
+    if (!edit) { say(id, HELP, r.ctx, r.shapeId); return done(); }
+    say(id, `On it: ${shape.name}.`, r.ctx, shape.id);
+    status(id, `editing ${shape.name.toLowerCase()}`);
+    await moveTo(id, shape.x + shape.w / 2, shape.y + shape.h / 2);
+    press(id, true);
+    patch(shape.id, { owner: id });
+    await wait(tok, 220);
+    if (edit.remove) h.setShapes((ss) => ss.filter((s) => s.id !== shape.id));
+    else patch(shape.id, { ...edit.patch, owner: undefined });
+    press(id, false);
+    say(id, `Done: ${edit.summary.join(', ')}.`, r.ctx, edit.remove ? undefined : shape.id);
+    done();
   }
 
   function startScript(id: string) {
@@ -310,6 +449,7 @@ export function createEngine(h: {
   function reset() {
     [...pos.keys()].forEach((id) => { stopScript(id); pos.delete(id); });
     slots.clear();
+    inbox.clear();
     spawned = 0;
     h.setShapes([]);
     h.setCursors([]);
@@ -318,6 +458,8 @@ export function createEngine(h: {
   return {
     pos, human, addCursor, removeCursor, moveTo, tick, spawnAgent, setPaused, clearBoard, reset,
     patch, addShape,
+    request, say,
+    names: () => names,
     get speed() { return speed; },
     setSpeed(s: number) { speed = s; },
     press,
