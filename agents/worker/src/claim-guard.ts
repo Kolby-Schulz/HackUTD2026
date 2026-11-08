@@ -10,6 +10,13 @@
 // With CONTRACT_ALLOWED_PATHS (comma-separated folder prefixes, issue #29 judge tasks) it
 // also refuses edits to any file outside those folders.
 //
+// Protocol enforcement (spec section 11, found running Contract on itself: an agent with a
+// one-file task skipped declare_plan and claim_symbol entirely, so Rule 1 had nothing to
+// match): an edit to a mapped source file needs an active plan from this agent, and an edit
+// that touches a symbol in the shared code map needs this agent's own live claim on it.
+// Both block with a message that names the tool to call. CONTRACT_PROTOCOL=off turns this
+// part off (the other-agent claim and pause checks stay).
+//
 // Fails open: no Contract env, a parse error or a server problem lets the edit through.
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
@@ -108,6 +115,29 @@ export function blockMessage(blocks: ClaimRow[], owners: Map<string, string>): s
   ].join('\n');
 }
 
+/** Touched symbols that are in the shared code map (`mapped`) without a live claim by `me`. */
+export function unclaimedByMe(claims: ClaimRow[], touched: string[], mapped: Set<string>, me: string, nowMs: number): string[] {
+  const mine = new Set(claims.filter((c) => c.agentId === me && c.expiresAtMs > nowMs).map((c) => c.symbolId));
+  return touched.filter((id) => mapped.has(id) && !mine.has(id));
+}
+
+export function planFirstMessage(rel: string): string {
+  return [
+    `Contract: declare your plan before editing ${rel}.`,
+    'Call get_context on the functions your task names, find_existing before writing a new helper, then declare_plan',
+    "with every function you will modify, create or depend on (intent 'depend' for code you call but don't change).",
+    'Then claim_symbol each function you will change, and retry this edit.',
+  ].join('\n');
+}
+
+export function claimFirstMessage(ids: string[]): string {
+  return [
+    'Contract: claim before you change it. This edit changes:',
+    ...ids.map((id) => `- ${id}`),
+    'Call claim_symbol for each of these, then retry the edit. If a claim fails, call get_instructions and follow them.',
+  ].join('\n');
+}
+
 const sql = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 async function main(): Promise<number> {
@@ -131,13 +161,17 @@ async function main(): Promise<number> {
   const rel = path ? repoFile(path, input.cwd, repoDir) : undefined;
   if (!rel) return 0;
 
+  const { isMappable, symbolRangesAsync, symbolsTouched, useMapPolicy } = await import('@contract/mapper');
+  useMapPolicy(repoDir); // the target's contract.json "map"
+  const enforce = (process.env.CONTRACT_PROTOCOL ?? 'enforce') !== 'off';
+  const sourceFile = isMappable(rel);
   let touched: string[] = [];
   if (existsSync(resolve(repoDir, rel))) { // new files have no claims
-    const { symbolRangesAsync, symbolsTouched } = await import('@contract/mapper');
     const current = readFileSync(resolve(repoDir, rel), 'utf8');
     const ranges: SymbolRange[] = await symbolRangesAsync(rel, current);
     touched = symbolsTouched(ranges, pendingLines(input, current));
   }
+  if (!sourceFile && !touched.length) return 0;
 
   const { DbConnection } = await import('@contract/client');
   const conn = await new Promise<InstanceType<typeof DbConnection>>((ok, fail) => {
@@ -151,6 +185,8 @@ async function main(): Promise<number> {
           .onError((ctx) => fail(new Error(`subscription failed: ${String(ctx.event ?? 'unknown error')}`)))
           .subscribe([
             ...touched.map((id) => `SELECT * FROM claim WHERE symbol_id = ${sql(id)}`),
+            ...touched.map((id) => `SELECT * FROM symbol WHERE id = ${sql(id)}`),
+            `SELECT * FROM plan WHERE agent_id = ${sql(agentId)}`,
             'SELECT * FROM agent',
             `SELECT * FROM conflict WHERE agent_b = ${sql(agentId)}`,
           ]);
@@ -170,10 +206,23 @@ async function main(): Promise<number> {
       expiresAtMs: Number(c.expiresAt.microsSinceUnixEpoch / 1000n),
     }));
     const blocks = blockingClaims(claims, touched, agentId, Date.now());
-    if (!blocks.length) return 0;
-    const owners = new Map([...conn.db.agent.iter()].map((a) => [a.id, [a.ownerDev, a.machine].filter(Boolean).join(', ')]));
-    process.stderr.write(blockMessage(blocks, owners) + '\n');
-    return 2;
+    if (blocks.length) {
+      const owners = new Map([...conn.db.agent.iter()].map((a) => [a.id, [a.ownerDev, a.machine].filter(Boolean).join(', ')]));
+      process.stderr.write(blockMessage(blocks, owners) + '\n');
+      return 2;
+    }
+    if (!enforce) return 0;
+    if (sourceFile && ![...conn.db.plan.iter()].some((p) => p.agentId === agentId && p.active)) {
+      process.stderr.write(planFirstMessage(rel) + '\n');
+      return 2;
+    }
+    const mapped = new Set([...conn.db.symbol.iter()].map((s) => s.id));
+    const unclaimed = unclaimedByMe(claims, touched, mapped, agentId, Date.now());
+    if (unclaimed.length) {
+      process.stderr.write(claimFirstMessage(unclaimed) + '\n');
+      return 2;
+    }
+    return 0;
   } finally {
     conn.disconnect();
   }

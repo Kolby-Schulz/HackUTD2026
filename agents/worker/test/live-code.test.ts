@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { symbolRanges, symbolsTouched } from '@contract/mapper';
 import { changedLines, fileDiff } from '../src/hook.ts';
-import { blockingClaims, blockMessage, pendingLines } from '../src/claim-guard.ts';
+import { blockingClaims, blockMessage, claimFirstMessage, pendingLines, planFirstMessage, unclaimedByMe } from '../src/claim-guard.ts';
 
 const SRC = [
   'export function a(): number {', // 1
@@ -62,6 +62,31 @@ describe('claim guard', () => {
     const blocks = blockingClaims(claims, ['src/x.ts#a', 'src/x.ts#b'], 'agent-b', now);
     expect(blocks.map((c) => c.symbolId)).toEqual(['src/x.ts#b']);
     expect(blockMessage(blocks, new Map([['agent-a', 'Alice, laptop-1']]))).toMatch(/b \(src\/x.ts#b\) is claimed by agent-a \(Alice, laptop-1\)/);
+  });
+});
+
+describe('protocol enforcement (plan and own claim before editing)', () => {
+  const now = 1_000_000;
+  const claims = [
+    { symbolId: 'src/a.ts#f', agentId: 'me', expiresAtMs: now + 60_000 },
+    { symbolId: 'src/a.ts#g', agentId: 'me', expiresAtMs: now - 1 }, // expired
+    { symbolId: 'src/a.ts#h', agentId: 'other', expiresAtMs: now + 60_000 },
+  ];
+  const mapped = new Set(['src/a.ts#f', 'src/a.ts#g', 'src/a.ts#h']);
+
+  it('wants a live claim of mine on every touched symbol that is in the shared map', () => {
+    expect(unclaimedByMe(claims, ['src/a.ts#f'], mapped, 'me', now)).toEqual([]);
+    expect(unclaimedByMe(claims, ['src/a.ts#f', 'src/a.ts#g', 'src/a.ts#h'], mapped, 'me', now)).toEqual(['src/a.ts#g', 'src/a.ts#h']);
+    // a symbol the agent just created is not in the map yet: no claim needed
+    expect(unclaimedByMe(claims, ['src/a.ts#brandNew'], mapped, 'me', now)).toEqual([]);
+  });
+
+  it('tells the model which tool to call', () => {
+    expect(planFirstMessage('scripts/run-demo.ts')).toMatch(/declare_plan/);
+    expect(planFirstMessage('scripts/run-demo.ts')).toMatch(/scripts\/run-demo\.ts/);
+    const m = claimFirstMessage(['src/a.ts#g']);
+    expect(m).toMatch(/claim_symbol/);
+    expect(m).toMatch(/- src\/a\.ts#g/);
   });
 });
 

@@ -15,6 +15,8 @@
 // (src/polyglot.ts); their edges are name-based and approximate.
 // Repos over CONTRACT_MAPPER_MAX_FILES source files (default 5000) are refused: point
 // --repo at a subfolder instead.
+// Tests and tooling folders (test/, tests/, __tests__/, scripts/) are never mapped unless the
+// repo's contract.json says so: "map": { "include": ["scripts"], "exclude": ["demo-repo"] }.
 //
 // Run ONE mapper, against the main demo-repo checkout. Never point it at a worker's
 // worktree: the code map is shared, and agents' in-progress edits reach it through

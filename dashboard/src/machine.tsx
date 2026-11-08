@@ -5,12 +5,14 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import { useSpacetimeDB, useTable } from 'spacetimedb/react';
 import { tables } from '@bindings/index.ts';
 import type * as R from '@bindings/types.ts';
-import { useNow } from './data.ts';
+import { SPACETIME_DB_NAME, SPACETIME_HOST, useNow } from './data.ts';
 import { pairProof } from './sha256.ts';
 
 /** A daemon that hasn't sent its heartbeat (every 10 s) for this long counts as offline. */
 const ONLINE_MS = 30_000;
 const PICK_KEY = 'contract.dashboard.machine';
+/** How long a pairing link waits for its machine's row before it says why it can't pair. */
+const LINK_WAIT_MS = 15_000;
 
 export interface Proc {
   key: string;
@@ -162,6 +164,23 @@ export function MachineProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (link && !linkUsed.current) setPairing({ machine: link.machine, state: 'working' });
   }, [link]);
+  // A link for a machine this dashboard never sees (another database, or a server without the
+  // machine tables) would otherwise say "Pairing…" forever. If the row shows up later, it still pairs.
+  const active = conn.isActive;
+  useEffect(() => {
+    if (!link || ready) return;
+    const timer = setTimeout(() => {
+      if (linkUsed.current) return;
+      setPairing({
+        machine: link.machine,
+        state: 'failed',
+        error: active
+          ? `this dashboard can't see a laptop named ${link.machine} on ${SPACETIME_HOST} (database ${SPACETIME_DB_NAME}). The dashboard and npm run control must use the same SPACETIME_HOST and SPACETIME_DB_NAME, and the daemon must still be running`
+          : `not connected to SpacetimeDB at ${SPACETIME_HOST} yet`,
+      });
+    }, LINK_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [link, ready, active]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

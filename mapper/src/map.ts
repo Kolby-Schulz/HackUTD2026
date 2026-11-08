@@ -26,7 +26,7 @@
 // and functions passed as values (`items.map(formatLine)`). Type-only references
 // (`x: Invoice`, `implements`, `typeof`) are not edges.
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Node, Project, SyntaxKind, ts, type SourceFile } from 'ts-morph';
 import { grammarFor, isPolyTestFile, TS_SOURCE } from './lang.ts';
@@ -395,11 +395,78 @@ export const SKIP_DIRS: ReadonlySet<string> = new Set([
 /**
  * Folders that hold tests and tooling, not app code. Their helpers (test fixtures,
  * demo-repo's check-dupes script) would clutter the shared code map and could trip
- * Rule 2 with false duplicates, so they are never mapped.
+ * Rule 2 with false duplicates, so they are never mapped, unless the repo's contract.json
+ * `map.include` names the folder (see MapPolicy).
  */
 const NON_SOURCE_DIRS: ReadonlySet<string> = new Set(['test', 'tests', '__tests__', 'scripts']);
 
-const inSkippedDir = (parts: string[]) => parts.some((p) => SKIP_DIRS.has(p) || NON_SOURCE_DIRS.has(p));
+// --- Per-repo map policy (contract.json "map") ---------------------------------------
+
+/**
+ * `<repo>/contract.json` -> `"map": { "include": ["scripts"], "exclude": ["demo-repo"] }`.
+ * `include`: repo-relative folders mapped although a test/tooling folder name is on the
+ * path (a repo whose app code lives in scripts/); test files, configs and SKIP_DIRS inside
+ * them stay out. `exclude`: repo-relative folders never mapped (a vendored demo app).
+ * One repo per process: the mapper, the hooks and the watcher each work on one repo, so the
+ * policy is module state, set from `repoDir` by listMappableFiles / mapFile / useMapPolicy.
+ */
+export interface MapPolicy {
+  include: string[];
+  exclude: string[];
+}
+
+const NO_POLICY: MapPolicy = { include: [], exclude: [] };
+let policy: MapPolicy = NO_POLICY;
+const policyCache = new Map<string, MapPolicy>();
+
+const folderList = (v: unknown): string[] =>
+  Array.isArray(v)
+    ? v
+        .filter((x): x is string => typeof x === 'string')
+        .map((x) => x.replace(/\\/g, '/').replace(/^\.?\/+|\/+$/g, ''))
+        .filter(Boolean)
+    : [];
+
+/** The map policy in `repoDir`'s contract.json (none = map everything but tests and tooling). */
+export function readMapPolicy(repoDir: string): MapPolicy {
+  const root = resolve(repoDir);
+  const cached = policyCache.get(root);
+  if (cached) return cached;
+  let p = NO_POLICY;
+  const file = join(root, 'contract.json');
+  if (existsSync(file)) {
+    try {
+      const cfg = JSON.parse(readFileSync(file, 'utf8')) as { map?: { include?: unknown; exclude?: unknown } };
+      p = { include: folderList(cfg.map?.include), exclude: folderList(cfg.map?.exclude) };
+    } catch (e) {
+      throw new Error(`${file}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  policyCache.set(root, p);
+  return p;
+}
+
+/** Makes `repoDir`'s contract.json map policy the one isMappable & co. apply. */
+export function useMapPolicy(repoDir: string): MapPolicy {
+  policy = readMapPolicy(repoDir);
+  return policy;
+}
+
+/** Sets the policy directly (tests); `{}` restores the default. */
+export function setMapPolicy(p: Partial<MapPolicy> = {}): void {
+  policy = { include: p.include ?? [], exclude: p.exclude ?? [] };
+}
+
+const underFolder = (rel: string, folder: string) => rel === folder || rel.startsWith(`${folder}/`);
+
+function inSkippedDir(parts: string[]): boolean {
+  if (parts.some((p) => SKIP_DIRS.has(p))) return true;
+  const rel = parts.join('/');
+  if (policy.exclude.some((f) => underFolder(rel, f))) return true;
+  const included = policy.include.find((f) => underFolder(rel, f));
+  const rest = included ? parts.slice(included.split('/').length) : parts;
+  return rest.some((p) => NON_SOURCE_DIRS.has(p));
+}
 
 /**
  * Whether a repo-relative path is TypeScript/JavaScript app source that ts-morph maps:
@@ -456,6 +523,7 @@ const toRel = (root: string, abs: string) => relative(root, abs).split(sep).join
 /** Repo-relative paths of every file the mapper would map in `repoDir` (no parsing). */
 export function listMappableFiles(repoDir: string): string[] {
   const root = resolve(repoDir);
+  useMapPolicy(root);
   const out: string[] = [];
   walk(root, root, out);
   return out.sort();
@@ -706,6 +774,7 @@ export class RepoMapper {
  */
 export function mapFile(path: string, opts: { repoDir?: string; edges?: boolean } = {}): FileMap {
   const repoDir = resolve(opts.repoDir ?? process.cwd());
+  useMapPolicy(repoDir);
   if (opts.edges ?? true) return new RepoMapper(repoDir).mapFile(path);
   const abs = isAbsolute(path) ? path : join(repoDir, path);
   const file = toRel(repoDir, abs);

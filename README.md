@@ -96,7 +96,7 @@ them as messages. It needs one daemon running on the laptop
 that does the work:
 
 ```bash
-npm run control     # prints a pairing link: click it (or type its code on the Control tab)
+npm run control     # first run: opens the dashboard in your browser, already linked to this laptop
 ```
 
 The daemon connects out to SpacetimeDB as this laptop's `machine` row; nothing listens on a port,
@@ -104,7 +104,8 @@ so the hosted dashboard drives it the same as a local one. Set `CONTRACT_DASHBOA
 hosted dashboard so the link points there (default `http://localhost:5173`). Pairing is once per
 browser: the code works once, expires after 10 minutes, and never reaches the database (the
 browser sends a hash of it with its own identity). Press Enter in the daemon's terminal for a new
-code. The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
+code. When no browser is paired yet, the daemon opens the link itself (`--no-open` to skip,
+`--open` to force). The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
 **Manual controls** under the chat start and stop each piece yourself (coordinator, session,
 workers, judge, merge, reset) and show each process's output. Only paired browsers can send it
 commands, every command goes through a fixed allowlist, and it runs things only on the laptop
@@ -154,6 +155,12 @@ npm run reset -- --repo ../my-app
   `.worktrees/<name>-<hash>/<id>`, so switching repos never reuses a folder.
 - **Push access.** The repo needs an `origin` you can push to for the two-laptop flow
   (workers push `agent/<id>` there); a local-only repo works on one laptop.
+- **Code map folders.** Tests and tooling folders (`test/`, `tests/`, `__tests__/`, `scripts/`)
+  are left out of the code map. If your app's code lives in one, or a folder should never be
+  mapped, say so in `contract.json`: `"map": { "include": ["scripts"], "exclude": ["demo-repo"] }`.
+  This monorepo's own `contract.json` does exactly that, so Contract can run on itself
+  (`--repo .`); keep agents out of `server/` there, since a schema change needs
+  `npm run generate -w @contract/server` and a publish, which no agent should do.
 - **Languages.** The code map reads TypeScript and JavaScript (ES modules), plus Python, Go,
   Java, Rust, Ruby, PHP, C# and C/C++ through tree-sitter. For those, call edges are matched by
   name, so they're approximate.

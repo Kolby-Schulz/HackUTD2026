@@ -25,7 +25,7 @@ import { createLLM } from '@contract/llm';
 import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingTool } from '@contract/client';
 import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
-import { Daemon, Pairer, type MachinePort } from './daemon.ts';
+import { browserCommand, Daemon, Pairer, type MachinePort } from './daemon.ts';
 import { REPO, savedToken, saveToken, TSX } from './lib.ts';
 
 const LOG_LINES = 300;
@@ -372,7 +372,7 @@ function machinePort(conn: DbConnection, id: string): MachinePort {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'control.ts')) {
-  const { values } = parseArgs({ options: { repo: { type: 'string' }, machine: { type: 'string' }, pair: { type: 'string', multiple: true } } });
+  const { values } = parseArgs({ options: { repo: { type: 'string' }, machine: { type: 'string' }, pair: { type: 'string', multiple: true }, open: { type: 'boolean' }, 'no-open': { type: 'boolean' } } });
   const id = machineId(values.machine ?? process.env.CONTRACT_MACHINE);
   const reg = new Registry();
   reg.stateFile = join(REPO, '.contract', 'control.json');
@@ -421,13 +421,29 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   // Pairing: a one-time code, shown as a link (one click) and as text (type it on the Control tab).
   const dashboardUrl = process.env.CONTRACT_DASHBOARD_URL || 'http://localhost:5173';
   const pairer = new Pairer();
-  const showPairing = () => {
+  const showPairing = (open: boolean) => {
     const shown = pairer.fresh();
-    console.log(`[control] pair a browser (works once, for 10 minutes): ${pairer.link(dashboardUrl, id, shown)}`);
+    const link = pairer.link(dashboardUrl, id, shown);
+    console.log(`[control] pair a browser (works once, for 10 minutes): ${link}`);
     console.log(`[control]   or enter code ${shown} on the dashboard's Control tab. Press Enter here for a new code.`);
+    if (!open) return;
+    // No browser paired yet (or --open): open the link, so the dashboard comes up already linked to this laptop.
+    const [bin, args] = browserCommand(process.platform, link);
+    // Report the outcome, not the attempt: a missing opener errors, a failed one exits non-zero.
+    // Node can fire both 'error' and 'exit' for a missing opener, so only the first one reports.
+    let told = false;
+    const tell = (opened: boolean) => {
+      if (told) return;
+      told = true;
+      console.log(opened ? '[control] opened it in your browser.' : '[control]   (couldn\'t open a browser; click the link above)');
+    };
+    const child = spawn(bin, args, { stdio: 'ignore', detached: true });
+    child.on('error', () => tell(false));
+    child.on('exit', (code) => tell(code === 0));
+    child.unref();
   };
-  showPairing();
-  process.stdin.on('data', () => showPairing());
+  showPairing(!values['no-open'] && (values.open === true || paired === 0));
+  process.stdin.on('data', () => showPairing(false));
   const answer = (row: { id: bigint; identity: Identity; proof: string }) => {
     const ok = pairer.check(row.identity.toHexString(), row.proof);
     conn.reducers.resolveMachinePairing({ requestId: row.id, accept: ok, label: 'paired with a code' })

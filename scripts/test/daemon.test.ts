@@ -3,7 +3,7 @@
 import { EventEmitter } from 'node:events';
 import { describe, expect, it } from 'vitest';
 import { Registry } from '../control.ts';
-import { Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, type MachineCommand, type MachinePort } from '../daemon.ts';
+import { browserCommand, Daemon, MAX_PAIR_FAILURES, PAIR_CODE_TTL_MS, Pairer, pairProof, STALE_COMMAND_MS, type MachineCommand, type MachinePort } from '../daemon.ts';
 
 function fakeSpawn() {
   const calls: string[][] = [];
@@ -105,5 +105,14 @@ describe('Pairer', () => {
   });
   it('builds a link with the code after the #', () => {
     expect(new Pairer().link('https://insync.vercel.app/', 'ethan-mbp', 'K7Q-4XM')).toBe('https://insync.vercel.app/#/pair?machine=ethan-mbp&code=K7Q-4XM');
+  });
+});
+
+describe('browserCommand', () => {
+  it('opens a URL without a shell on each platform', () => {
+    const url = 'http://localhost:5173/#/pair?machine=a&code=K7Q-4XM';
+    expect(browserCommand('darwin', url)).toEqual(['open', [url]]);
+    expect(browserCommand('linux', url)).toEqual(['xdg-open', [url]]);
+    expect(browserCommand('win32', url)).toEqual(['rundll32', ['url.dll,FileProtocolHandler', url]]);
   });
 });

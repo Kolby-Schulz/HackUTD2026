@@ -2,10 +2,12 @@
 title: Agents and shared packages
 area: agents
 sources: [packages/client, packages/mcp, packages/llm, agents/worker]
-verified: 87debe9
+verified: self-run-checkpoint
 ---
 Summary: `packages/llm` is the only model gateway (`decide` for one structured answer, `runWorker` for a Claude Code run). `packages/client` wraps SpacetimeDB and is the only way a process joins Contract. `packages/mcp` exposes nine tools to workers, and `agents/worker` runs a headless Claude Code session in a git worktree with hooks for claims, change reports and summary caching.
 Spec basis: docs/SPEC.md sections 4, 10, 11, 12, plus docs/spec-additions-live-code.md and docs/spec-additions-summary-tools.md (both already built, per their status lines).
+
+Claim guard (`agents/worker/src/claim-guard.ts`) also enforces the protocol since the self-run: no plan -> no edits to mapped source; no own claim -> no edit to a mapped symbol. `CONTRACT_PROTOCOL=off` disables that part.
 
 ## packages/llm (sections 4, 12)
 

@@ -79,6 +79,11 @@ const timeoutMs = Number(values['timeout-min']) * 60_000;
 for (let i = 1; i <= runs; i++) {
   if (runs > 1) log('demo', `=== ${mode} run ${i}/${runs} ===`);
   if (i > 1 || hasLeftovers()) {
+    // resetFiles() refuses to discard uncommitted edits; say which files instead of failing generically.
+    const dirty = demoRepoChanges();
+    if (dirty.length) {
+      die(`demo-repo has uncommitted changes; commit or discard them first (npm run reset -- --force):\n${dirty.join('\n')}`);
+    }
     if (i === 1) log('demo', 'leftovers from an earlier run; resetting first');
     resetFiles();
     await resetRuns();
