@@ -76,7 +76,10 @@ humanEdited rule, palette.open, toast action, share link and URL view.
   `LayerRow`): `<VirtualList className="pg-layers" items={rows} rowHeight={ROW_HEIGHT} getKey={(r) => r.id}
   empty={...} renderRow={(row) => <LayerRow .../>} />`; keep a ref for WP-54's `scrollToIndex`.
 - WP-30: no seam.
-- todo: WP-16, 33, 46, 50 (pending reports).
+- WP-16, WP-50: no seam (WP-50 write-back of measured text sizes is WP-60's job, Wave 2).
+- todo (WP-46): `ui/gestures/pipeline.ts` `down()` ignores `button === 2` so a right-click opens the context menu without
+  starting a select/move gesture.
+- todo: WP-33 (pending report).
 
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).
