@@ -9,10 +9,9 @@ Summary: Live project state as of 87debe9 (2026-11-08). MVP has landed; remainin
 # Status
 
 ## Done (see [[history]])
-- MVP, two-laptop shared Maincloud DB, any-agent join, replay, benchmark, Nemotron coordinator (#43). 24 PRs merged.
+- MVP, two-laptop shared Maincloud DB, any-agent join, replay, benchmark, Nemotron coordinator (#43), coordinator duplicate reuse (#44). 25 PRs merged.
 
 ## Open work (GitHub, Kolby-Schulz/HackUTD2026)
-- PR #44: coordinator reuses its first ruling for mirror/repeat duplicates
 - #26: submission package (README, diagram, demo video, Devpost)
 - #17: dashboard polish for judges
 - #20: host Contract (public dashboard, always-on services)
