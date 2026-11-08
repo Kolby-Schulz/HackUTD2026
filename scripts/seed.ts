@@ -5,7 +5,7 @@
 // agent. Prints the run id and task ids; run-demo.ts calls seed() directly.
 import { parseArgs } from 'node:util';
 import type { DbConnection } from '@contract/client';
-import { TASKS } from '../agents/worker/src/tasks.ts';
+import { SCENARIOS } from './scenarios.ts';
 import { adminConnect, AGENTS, endOpenRuns, log, MODES, waitFor, type Mode } from './lib.ts';
 
 export interface Seeded {
@@ -14,7 +14,8 @@ export interface Seeded {
   tasks: Record<string, bigint>;
 }
 
-export async function seed(conn: DbConnection, mode: Mode, seedValue: number): Promise<Seeded> {
+export async function seed(conn: DbConnection, mode: Mode, seedValue: number, scenario = 'planted'): Promise<Seeded> {
+  const sc = SCENARIOS[scenario]!;
   const ended = await endOpenRuns(conn);
   if (ended.length) log('seed', `ended open run(s) ${ended.join(', ')}`);
 
@@ -24,7 +25,8 @@ export async function seed(conn: DbConnection, mode: Mode, seedValue: number): P
 
   const tasks: Record<string, bigint> = {};
   for (const a of AGENTS) {
-    await conn.reducers.createTask({ title: a.title, description: TASKS[a.task]!, agentId: a.id, runId: run.id });
+    const t = a.id === 'agent-a' ? sc.a : sc.b;
+    await conn.reducers.createTask({ title: t.title, description: t.task, agentId: a.id, runId: run.id });
     const row = await waitFor(() => [...conn.db.task.iter()].find((t) => t.runId === run.id && t.agentId === a.id), `${a.id}'s task`);
     tasks[a.id] = row.id;
   }

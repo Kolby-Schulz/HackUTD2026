@@ -1,7 +1,8 @@
 // Code mapper CLI (spec section 9).
 //   npm run mapper -- [--repo ../demo-repo] [--watch] [--dry-run [--json]]
 // --repo     repo to map (relative to the cwd, which is mapper/ under `npm run mapper`);
-//            default: the monorepo's demo-repo/.
+//            default: CONTRACT_TARGET (issue #18), else the monorepo's demo-repo/.
+//            --watch holds the "mapper" service lock: one watching mapper per database.
 // --watch    keep running and re-map files as they change (plus the files importing them).
 //            A big batch of changes (a `git checkout`, a pull) re-maps the whole repo instead.
 // --dry-run  print the map instead of sending it; --json prints it as JSON.
@@ -20,7 +21,9 @@ import { config as loadEnv } from 'dotenv';
 import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { hostname } from 'node:os';
 import { watch } from 'chokidar';
+import { holdService, resolveTarget } from '@contract/client';
 import { isMappable, RepoMapper, SKIP_DIRS, type FileMap } from './map.ts';
 import { MapSync, type Upsert } from './sync.ts';
 
@@ -99,7 +102,8 @@ async function main(): Promise<void> {
       json: { type: 'boolean', default: false },
     },
   });
-  const repoDir = resolve(values.repo ?? resolve(MONOREPO, 'demo-repo'));
+  // --repo, else CONTRACT_TARGET, else demo-repo (issue #18).
+  const repoDir = values.repo ? resolve(values.repo) : resolveTarget(MONOREPO).dir;
   if (`${repoDir}${sep}`.includes(`${sep}.worktrees${sep}`)) {
     throw new Error(`refusing to map a worker worktree (${repoDir}); point --repo at the main demo-repo`);
   }
@@ -127,6 +131,18 @@ async function main(): Promise<void> {
       process.exit(1);
     },
   });
+
+  // A watching mapper is a singleton per database (issue #19): two laptops both watching
+  // would overwrite each other's code map. One-shot mapping (session start) needs no lock.
+  const lock = values.watch
+    ? await holdService(sync.reducers, 'mapper', process.env.CONTRACT_MACHINE || hostname(), (why) => {
+        console.error(`[mapper] lost the mapper lock (${why}); stopping`);
+        process.exit(1);
+      }).catch((e: unknown) => {
+        sync.close();
+        throw e;
+      })
+    : undefined;
 
   const first = await pushSnapshot(sync, maps, dbName);
 
@@ -187,6 +203,7 @@ async function main(): Promise<void> {
   const stop = async () => {
     await watcher.close();
     await queue;
+    await lock?.release();
     sync.close();
     process.exit(0);
   };

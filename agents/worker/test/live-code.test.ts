@@ -64,3 +64,15 @@ describe('claim guard', () => {
     expect(blockMessage(blocks, new Map([['agent-a', 'Alice, laptop-1']]))).toMatch(/b \(src\/x.ts#b\) is claimed by agent-a \(Alice, laptop-1\)/);
   });
 });
+
+describe('allowed paths (issue #29 guard rails)', async () => {
+  const { pathAllowed } = await import('../src/claim-guard.ts');
+  it('allows only files under the listed folders', () => {
+    expect(pathAllowed('src/billing/fees.ts', ['src/', 'tests/'])).toBe(true);
+    expect(pathAllowed('tests/x.test.ts', ['src', 'tests'])).toBe(true);
+    expect(pathAllowed('package.json', ['src/', 'tests/'])).toBe(false);
+    expect(pathAllowed('srcx/a.ts', ['src'])).toBe(false);
+    expect(pathAllowed(undefined, ['src/'])).toBe(false);
+    expect(pathAllowed('anything', [])).toBe(true);
+  });
+});

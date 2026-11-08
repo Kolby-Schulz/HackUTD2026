@@ -1,0 +1,70 @@
+{
+  "generatedAt": "2026-11-08T07:33:30.039Z",
+  "rows": [
+    {
+      "scenario": "claim-contention",
+      "title": "Claim contention (both modify calculateFee)",
+      "without": {
+        "runs": 1,
+        "tokens": 1274056,
+        "fresh": 181077,
+        "cost": 0.8866478999999998,
+        "wasted": 978637,
+        "mergeFix": 295419,
+        "coordination": 0,
+        "brokenAtMerge": 1,
+        "passingFinal": 0
+      },
+      "with": {
+        "runs": 1,
+        "tokens": 931577,
+        "fresh": 40755,
+        "cost": 0.2982068,
+        "wasted": 0,
+        "mergeFix": 0,
+        "coordination": 2992,
+        "brokenAtMerge": 0,
+        "passingFinal": 1
+      },
+      "costSaving": 0.6636694227776324,
+      "tokenSaving": 0.26881000521170184
+    },
+    {
+      "scenario": "control",
+      "title": "Control: unrelated changes",
+      "without": {
+        "runs": 1,
+        "tokens": 906505,
+        "fresh": 42131,
+        "cost": 0.2899454,
+        "wasted": 0,
+        "mergeFix": 0,
+        "coordination": 0,
+        "brokenAtMerge": 0,
+        "passingFinal": 1
+      },
+      "with": {
+        "runs": 1,
+        "tokens": 1147404,
+        "fresh": 45850,
+        "cost": 0.33428139999999995,
+        "wasted": 0,
+        "mergeFix": 0,
+        "coordination": 0,
+        "brokenAtMerge": 0,
+        "passingFinal": 1
+      },
+      "costSaving": -0.15291154817424224,
+      "tokenSaving": -0.2657448111152172
+    }
+  ],
+  "overall": {
+    "runs": 4,
+    "costSaving": 0.2553789373016951,
+    "tokenSaving": 0.0015325970482423235,
+    "brokenWithout": 1,
+    "brokenWith": 0,
+    "runsWithout": 2,
+    "runsWith": 2
+  }
+}

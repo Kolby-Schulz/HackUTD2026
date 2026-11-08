@@ -11,14 +11,18 @@
 //
 // It never calls upsert_symbols (a worktree must not overwrite the shared code map) and
 // never uses the client's getContext (that logs savings). Always exits 0.
+import { config as loadEnv } from 'dotenv';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { signatureHash, type MappedSymbol } from '@contract/mapper';
+import { readSavedToken } from '@contract/client';
 import { repoFile } from './summary-hook.ts';
+
+const MONOREPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
 export interface HookInput {
   session_id?: string;
@@ -125,18 +129,26 @@ function firstRemoval(sessionId: string, symbolId: string): boolean {
   }
 }
 
-async function main() {
-  console.log = console.error; // the SpacetimeDB SDK logs to stdout
-  const input = JSON.parse(readFileSync(0, 'utf8')) as HookInput;
-  const repoDir = process.env.CONTRACT_REPO_DIR ?? input.cwd;
-  const rel = editedFile(input, repoDir);
-  if (!rel) return;
-
+/** Who to report as: env from the worker, or a joined editor's saved identity (issue #22). */
+export function hookAgent(): { agentId: string; token: string; host: string; dbName: string } | undefined {
   const agentId = process.env.CONTRACT_AGENT_ID;
-  const token = process.env.CONTRACT_TOKEN;
+  if (!agentId) return undefined; // not a Contract agent
+  // Joined editors run hooks without the worker's env: take the monorepo's .env and saved token.
+  loadEnv({ path: join(MONOREPO, '.env'), quiet: true });
+  const token = process.env.CONTRACT_TOKEN || readSavedToken(MONOREPO, agentId);
   const host = process.env.SPACETIME_HOST;
-  if (!agentId || !token || !host) return; // not running under a Contract worker
+  if (!token || !host) return undefined;
+  return { agentId, token, host, dbName: process.env.SPACETIME_DB_NAME ?? 'contract' };
+}
 
+/**
+ * Reports one edited file (repo-relative `rel` in `repoDir`): report_change for created,
+ * removed or re-signed symbols, and report_edit with its diff. Used by the PostToolUse hook
+ * and by the watcher sidecar for agents without hooks (agents/worker/src/watch.ts).
+ */
+export async function reportFile(o: { agentId: string; token: string; host: string; dbName: string; repoDir: string; rel: string; sessionKey: string; log?: (m: string) => void }) {
+  const { agentId, repoDir, rel } = o;
+  const say = o.log ?? ((m: string) => console.error(`contract-hook: ${m}`));
   const { mapFile, symbolRanges, symbolsTouched } = await import('@contract/mapper');
   const { symbols } = mapFile(resolve(repoDir, rel), { repoDir, edges: false });
   const diff = fileDiff(repoDir, rel);
@@ -148,9 +160,9 @@ async function main() {
   const { DbConnection } = await import('@contract/client');
   const conn = await new Promise<InstanceType<typeof DbConnection>>((ok, fail) => {
     const c: InstanceType<typeof DbConnection> = DbConnection.builder()
-      .withUri(host)
-      .withDatabaseName(process.env.SPACETIME_DB_NAME ?? 'contract')
-      .withToken(token)
+      .withUri(o.host)
+      .withDatabaseName(o.dbName)
+      .withToken(o.token)
       .onConnect(() => {
         c.subscriptionBuilder()
           .onApplied(() => ok(c))
@@ -162,24 +174,35 @@ async function main() {
   });
   try {
     const rows = [...conn.db.symbol.iter()].filter((r) => r.file === rel);
-    const sessionId = input.session_id ?? agentId;
     for (const ch of detectChanges(symbols, rows)) {
-      if (ch.kind === 'removed' && !firstRemoval(sessionId, ch.symbolId)) continue;
+      if (ch.kind === 'removed' && !firstRemoval(o.sessionKey, ch.symbolId)) continue;
       try {
         await conn.reducers.reportChange({ agentId, ...ch, newSignature: ch.newSignature });
-        console.error(`contract-hook: reported ${ch.kind} ${ch.symbolId}`);
+        say(`reported ${ch.kind} ${ch.symbolId}`);
       } catch (e) {
-        console.error(`contract-hook: report_change ${ch.symbolId} failed: ${e instanceof Error ? e.message : String(e)}`);
+        say(`report_change ${ch.symbolId} failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
     if (diff.trim()) {
       await conn.reducers
         .reportEdit({ agentId, file: rel, diff, symbolIds: touched })
-        .catch((e: unknown) => console.error(`contract-hook: report_edit failed: ${e instanceof Error ? e.message : String(e)}`));
+        .then(() => say(`reported edit ${rel}${touched.length ? ` (${touched.join(', ')})` : ''}`))
+        .catch((e: unknown) => say(`report_edit failed: ${e instanceof Error ? e.message : String(e)}`));
     }
   } finally {
     conn.disconnect();
   }
+}
+
+async function main() {
+  console.log = console.error; // the SpacetimeDB SDK logs to stdout
+  const input = JSON.parse(readFileSync(0, 'utf8')) as HookInput;
+  const agent = hookAgent();
+  if (!agent) return; // not running under a Contract agent
+  const repoDir = process.env.CONTRACT_REPO_DIR ?? input.cwd;
+  const rel = editedFile(input, repoDir);
+  if (!rel) return;
+  await reportFile({ ...agent, repoDir, rel, sessionKey: input.session_id ?? agent.agentId });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

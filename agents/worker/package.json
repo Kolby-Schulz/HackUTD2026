@@ -6,6 +6,7 @@
   "exports": "./src/index.ts",
   "scripts": {
     "start": "tsx src/index.ts",
+    "watch-agent": "tsx src/watch.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -13,6 +14,7 @@
     "@contract/client": "*",
     "@contract/llm": "*",
     "@contract/mapper": "*",
+    "chokidar": "^6.0.0",
     "dotenv": "^18.0.9"
   },
   "devDependencies": {

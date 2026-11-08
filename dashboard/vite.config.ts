@@ -23,5 +23,21 @@ export default defineConfig(({ mode }) => {
       __SPACETIME_DB_NAME__: JSON.stringify(env.VITE_SPACETIME_DB_NAME || env.SPACETIME_DB_NAME || 'contract'),
     },
     server: { host: true }, // reachable from the second demo laptop
+    // Vendor code in its own cacheable chunks so no chunk passes Vite's 500 kB warning
+    // (one 630 kB bundle before). Rolldown's codeSplitting groups; first match wins.
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'react', test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/ },
+              { name: 'flow', test: /node_modules[\\/](@xyflow|d3-[a-z-]+|classcat|zustand)[\\/]/ },
+              { name: 'spacetimedb', test: /node_modules[\\/]spacetimedb[\\/]/ },
+              { name: 'vendor', test: /node_modules[\\/]/ },
+            ],
+          },
+        },
+      },
+    },
   };
 });

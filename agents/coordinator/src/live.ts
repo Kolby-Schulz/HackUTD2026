@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { connect, DbConnection, type rows, type SymbolContext } from '@contract/client';
+import { connect, DbConnection, holdService, type rows, type SymbolContext } from '@contract/client';
 import type { LLM, Usage } from '@contract/llm';
 import { decideConflict, fallbackDecision, type ConflictContext, type Decision } from './decide.ts';
 
@@ -198,6 +198,18 @@ export async function runLive(llm: LLM, opts: { model?: string } = {}): Promise<
     'SELECT * FROM change',
     'SELECT * FROM run',
   ]);
+  // Exactly one coordinator per database (issue #19), even with two laptops.
+  let lock;
+  try {
+    lock = await holdService(conn.reducers, 'coordinator', process.env.CONTRACT_MACHINE || hostname(), (why) => {
+      console.error(`[coordinator] lost the coordinator lock (${why}); stopping`);
+      process.exit(1);
+    });
+  } catch (e) {
+    conn.disconnect();
+    await client.disconnect();
+    throw new Error(`${e instanceof Error ? e.message : String(e)}`);
+  }
 
   const deps: Deps = {
     llm,
@@ -224,6 +236,7 @@ export async function runLive(llm: LLM, opts: { model?: string } = {}): Promise<
 
   process.once('SIGINT', async () => {
     console.log('[coordinator] stopping');
+    await lock.release();
     conn.disconnect();
     await client.disconnect();
     process.exit(0);

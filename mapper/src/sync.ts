@@ -68,6 +68,11 @@ export class MapSync {
 
   private constructor(private readonly conn: DbConnection) {}
 
+  /** The connection's reducers (the CLI uses claim_service through them). */
+  get reducers(): DbConnection['reducers'] {
+    return this.conn.reducers;
+  }
+
   /** Connects anonymously (upsert_symbols needs no agent) and subscribes to the code map. */
   static connect(opts: SyncOptions): Promise<MapSync> {
     const timeoutMs = opts.timeoutMs ?? 10_000;

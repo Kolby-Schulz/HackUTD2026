@@ -19,6 +19,8 @@ export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' 
 export type * as rows from './bindings/types.ts';
 export { DbConnection } from './bindings/index.ts';
 export { estimateTokens } from './context.ts';
+export { identitiesFile, identityKey, readSavedToken, writeSavedToken } from './identity.ts';
+export { holdService, SERVICE_HEARTBEAT_MS, type ServiceLock } from './service.ts';
 export { resolveTarget, checkTools, subdirPrefix, cloneDirFor, DEMO_CHECKS, type Target, type Check } from './target.ts';
 
 export interface AgentInfo {
@@ -49,6 +51,11 @@ export interface ConnectOptions {
   repoDir?: string;
   /** Milliseconds to wait for the connection and first subscription. Default 10 s. */
   timeoutMs?: number;
+  /**
+   * Reconnect after a dropped connection (issue #19): same token, re-register, resubscribe,
+   * listeners kept. Calls fail fast while it's down. Default: on unless noHeartbeat.
+   */
+  reconnect?: boolean;
 }
 
 export interface PlanItem {
@@ -175,7 +182,14 @@ function toInstruction(row: {
 interface ConnState {
   closed: boolean;
   reason?: string;
+  /** disconnect() was called: never reconnect. */
+  stopped?: boolean;
+  /** Called on an unexpected drop. */
+  onDrop?: () => void;
 }
+
+/** Backoff between reconnect attempts: 1 s, 2 s, 4 s … capped at 30 s. */
+export const reconnectDelayMs = (attempt: number) => Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
 
 /** Opens the WebSocket, waits for the identity/token and the first subscription. */
 function openConnection(opts: ConnectOptions, state: ConnState): Promise<{ conn: DbConnection; token: string }> {
@@ -223,6 +237,7 @@ function openConnection(opts: ConnectOptions, state: ConnState): Promise<{ conn:
         state.closed = true;
         state.reason = err ? String(err) : 'connection lost';
         console.warn(`[contract] ${opts.agent.id}: ${state.reason}`);
+        state.onDrop?.();
       })
       .build();
   });
@@ -230,38 +245,84 @@ function openConnection(opts: ConnectOptions, state: ConnState): Promise<{ conn:
 
 /** Calls register_agent, starts a 15 s heartbeat, subscribes to this agent's rows. */
 export async function connect(opts: ConnectOptions): Promise<ContractClient> {
-  const state: ConnState = { closed: false };
-  const { conn, token } = await openConnection(opts, state);
+  let state: ConnState = { closed: false };
+  const first = await openConnection(opts, state);
+  let conn = first.conn;
+  const token = first.token;
   const agentId = opts.agent.id;
   /** Fail fast instead of hanging when the connection is gone. */
   const live = () => {
     if (state.closed) throw new Error(`ContractClient(${agentId}): connection closed (${state.reason ?? 'disconnected'})`);
   };
   const repoDir = opts.repoDir ?? process.cwd();
-  const r = conn.reducers;
-  const db = conn.db;
+  // Reassigned on reconnect; every method below reads these, never a captured copy.
+  let r = conn.reducers;
+  let db = conn.db;
+
+  // Listeners live here, not on the connection's cache, so they survive a reconnect.
+  const instrCbs = new Set<(i: Instruction) => void>();
+  const statusCbs = new Set<(s: AgentStatus) => void>();
+  const bindListeners = (c: DbConnection) => {
+    c.db.instruction.onInsert((_ctx, row) => {
+      if (row.agentId === agentId) for (const cb of instrCbs) cb(toInstruction(row));
+    });
+    c.db.agent.onUpdate((_ctx, oldRow, newRow) => {
+      if (newRow.id === agentId && newRow.status !== oldRow.status) for (const cb of statusCbs) cb(newRow.status as AgentStatus);
+    });
+  };
+  bindListeners(conn);
+
+  const register = () =>
+    r.registerAgent({
+      id: agentId,
+      name: opts.agent.name,
+      ownerDev: opts.agent.ownerDev,
+      machine: opts.agent.machine,
+      model: opts.agent.model,
+      tokenBudget: BigInt(Math.max(0, Math.round(opts.agent.tokenBudget))),
+    });
 
   let heartbeat: ReturnType<typeof setInterval> | undefined;
   if (!opts.noHeartbeat) {
     try {
-      await r.registerAgent({
-        id: agentId,
-        name: opts.agent.name,
-        ownerDev: opts.agent.ownerDev,
-        machine: opts.agent.machine,
-        model: opts.agent.model,
-        tokenBudget: BigInt(Math.max(0, Math.round(opts.agent.tokenBudget))),
-      });
+      await register();
     } catch (e) {
       conn.disconnect();
       throw e;
     }
     heartbeat = setInterval(() => {
-      if (state.closed) return clearInterval(heartbeat);
+      if (state.closed) return; // reconnecting (or stopped): skip this beat
       r.heartbeat({ agentId }).catch((e: unknown) => console.warn(`[contract] heartbeat failed: ${String(e)}`));
     }, HEARTBEAT_MS);
     heartbeat.unref?.();
   }
+
+  // Reconnect loop: same token (same identity), re-register, fresh subscription, listeners rebound.
+  const reconnect = opts.reconnect ?? !opts.noHeartbeat;
+  const scheduleReconnect = (attempt = 0) => {
+    if (!reconnect || state.stopped) return;
+    const timer = setTimeout(async () => {
+      if (state.stopped) return;
+      const next: ConnState = { closed: false };
+      try {
+        const o = await openConnection({ ...opts, token }, next);
+        if (state.stopped) return o.conn.disconnect();
+        conn = o.conn;
+        r = conn.reducers;
+        db = conn.db;
+        bindListeners(conn);
+        if (!opts.noHeartbeat) await register();
+        next.onDrop = () => scheduleReconnect(0);
+        state = next;
+        console.warn(`[contract] ${agentId}: reconnected`);
+      } catch (e) {
+        console.warn(`[contract] ${agentId}: reconnect attempt ${attempt + 1} failed: ${e instanceof Error ? e.message : String(e)}`);
+        scheduleReconnect(attempt + 1);
+      }
+    }, reconnectDelayMs(attempt));
+    timer.unref?.();
+  };
+  state.onDrop = () => scheduleReconnect(0);
 
   /** The open run (or, if none is open, the newest one) that token rows belong to. */
   function currentRunId(): bigint {
@@ -323,19 +384,13 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
     },
 
     onInstruction(cb) {
-      const handler = (_ctx: unknown, row: Parameters<typeof toInstruction>[0]) => {
-        if (row.agentId === agentId) cb(toInstruction(row));
-      };
-      db.instruction.onInsert(handler);
-      return () => db.instruction.removeOnInsert(handler);
+      instrCbs.add(cb);
+      return () => void instrCbs.delete(cb);
     },
 
     onStatusChange(cb) {
-      const handler = (_ctx: unknown, oldRow: { id: string; status: string }, newRow: { id: string; status: string }) => {
-        if (newRow.id === agentId && newRow.status !== oldRow.status) cb(newRow.status as AgentStatus);
-      };
-      db.agent.onUpdate(handler);
-      return () => db.agent.removeOnUpdate(handler);
+      statusCbs.add(cb);
+      return () => void statusCbs.delete(cb);
     },
 
     async ack(instructionId) {
@@ -432,6 +487,7 @@ export async function connect(opts: ConnectOptions): Promise<ContractClient> {
 
     async disconnect() {
       if (heartbeat) clearInterval(heartbeat);
+      state.stopped = true;
       if (state.closed) return;
       state.closed = true;
       state.reason = 'disconnect() called';

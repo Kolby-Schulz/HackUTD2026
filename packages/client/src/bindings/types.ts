@@ -136,6 +136,16 @@ export const Run = __t.object("Run", {
 });
 export type Run = __Infer<typeof Run>;
 
+export const Service = __t.object("Service", {
+  name: __t.string(),
+  identity: __t.identity(),
+  machine: __t.string(),
+  startedAt: __t.timestamp(),
+  heartbeatAt: __t.timestamp(),
+  holder: __t.string(),
+});
+export type Service = __Infer<typeof Service>;
+
 export const SummaryCache = __t.object("SummaryCache", {
   key: __t.string(),
   summary: __t.string(),

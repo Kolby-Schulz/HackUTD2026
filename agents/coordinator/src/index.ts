@@ -30,5 +30,8 @@ if (values.demo) {
   console.log(r.source, `${Date.now() - t0} ms`, JSON.stringify(r.decision, null, 2));
   if (r.decision.owner_agent !== 'agent-a') console.warn('expected owner agent-a');
 } else {
-  await runLive(llm, { model });
+  await runLive(llm, { model }).catch((e: unknown) => {
+    console.error(`[coordinator] ${e instanceof Error ? e.message : String(e)}`);
+    process.exit(1);
+  });
 }

@@ -89,6 +89,19 @@ async function waitFor<T>(check: () => T | undefined | null | false | Promise<T 
 
 const rows = <T>(it: Iterable<T>) => [...it];
 
+/**
+ * The worker's next non-empty get_instructions list, or undefined while there is none yet.
+ * The empty reply is plain text ("No new instructions. Continue your task.") that also contains
+ * the word "instructions", so match the JSON reply, not the word: the MCP server's own cache
+ * can trail the admin connection by a few ms.
+ */
+async function nextInstructions(w: Worker): Promise<{ text: string }[] | undefined> {
+  const g = await w.call('get_instructions');
+  if (g.isError || !g.text.trimStart().startsWith('{')) return undefined;
+  const list = g.json().instructions as { text: string }[] | undefined;
+  return list?.length ? list : undefined;
+}
+
 let admin: DbConnection; // plays the mapper, the seed script and the coordinator
 let a: Worker;
 let b: Worker;
@@ -181,7 +194,11 @@ describe('contract mcp over stdio', () => {
 
     // Assert
     expect(r.isError).toBe(false);
-    expect(r.json().instructions.map((i: { text: string }) => i.text)).toEqual([`${DATE} already does this; reuse it.`]);
+    // formatDate came from the mapper (pre-existing code, no creating agent), so Rule 2 sends a
+    // reuse hint rather than opening a duplicate conflict (server checkDuplicates, PR #12).
+    expect(r.json().instructions.map((i: { text: string }) => i.text)).toEqual([
+      `${DATE} may already do this (same normalized name 'formatdate'); reuse it if it fits instead of writing src/checkout/receipt.ts#format_date.`,
+    ]);
     const plan = rows(admin.db.plan.iter()).find((p) => p.agentId === id('agent-b') && p.active);
     expect(plan?.taskId).toBe(2n);
     // Delivered once: acked, so get_instructions doesn't repeat it.
@@ -212,10 +229,7 @@ describe('contract mcp over stdio', () => {
     // Assert 1
     expect(r.isError).toBe(false);
     await waitFor(() => admin.db.agent.id.find(id('agent-b'))?.status === 'paused');
-    const notice = await waitFor(async () => {
-      const g = await b.call('get_instructions');
-      return g.text.includes('instructions') ? g.json().instructions : undefined;
-    });
+    const notice = await waitFor(() => nextInstructions(b));
     expect(notice.map((i: { text: string }) => i.text)).toEqual([`${FEES} was changed by ${id('agent-a')}. Pause and wait for the coordinator.`]);
     const conflict = rows(admin.db.conflict.iter()).find(
       (c) => c.kind === 'broken_dependency' && c.agentB === id('agent-b') && c.status === 'open',
@@ -235,10 +249,7 @@ describe('contract mcp over stdio', () => {
 
     // Assert 2
     await waitFor(() => admin.db.agent.id.find(id('agent-b'))?.status === 'working');
-    const decision = await waitFor(async () => {
-      const g = await b.call('get_instructions');
-      return g.text.includes('instructions') ? g.json().instructions : undefined;
-    });
+    const decision = await waitFor(() => nextInstructions(b));
     expect(decision.map((i: { text: string }) => i.text)).toEqual(['Do not round again in checkout; use calculateFee as is.']);
     await waitFor(() =>
       rows(admin.db.instruction.iter())
