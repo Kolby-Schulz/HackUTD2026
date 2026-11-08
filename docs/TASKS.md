@@ -38,7 +38,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **CM:** `demo-repo/`: `fees.ts` (rounds down), `invoice.ts`, `checkout.ts`, `models.ts`, unit tests, `integration.test.ts` (half-up, invoice == checkout), `scripts/check-dupes.ts`, own `package.json` with vitest
 - [x] **CM:** mapper: ts-morph parse → symbols (id `file#name`, `file#Class.method`), signature + `signature_hash`, call edges; `upsert_symbols` per file; `--watch` with chokidar. **Done** (`mapper/src`; 42 unit + 9 live tests). Signatures are the declaration as written (no inference; un-annotated returns left out, so give demo-repo functions return types for Rule 2). Edges = every value reference to a mapped symbol (calls, `new`, methods, callbacks, const reads) through imports/barrels/namespaces; type-only refs aren't edges. Only files whose interface or edges changed are sent (restart = no writes); `behavior_note`, and the signature text while the hash is unchanged, are kept from the server. Watch re-maps importers too. Run one mapper, on main `demo-repo/` only (it refuses `.worktrees/`).
 - [x] **CM:** mapper exports `mapFile(path)` for `contract-hook` to reuse. **Done:** `import { mapFile } from '@contract/mapper'`; `mapFile(absPath, { repoDir: <worktree>/demo-repo, edges: false })` parses one file in ~5 ms and gives the same ids/hashes as the main checkout. **Hook note (AG):** `report_change('signature')` updates the row's `signature` but not `signature_hash`, so comparing hashes alone re-reports on every later edit; also compare `signatureHash(row.signature)` (exported) or remember what was already reported.
-- [ ] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables
+- [x] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables (Live, Activity, Tokens, Scoreboard tabs; storyboard rows G/F; `npm test -w @contract/dashboard`)
 - [ ] **DD:** `scripts/seed.ts`: create the two tasks and a run
 
 ## Milestone 3: Rule 1 end to end
@@ -46,9 +46,9 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **BE:** `report_change` with Rule 1 (depend items + `symbol_edge` callers), pause affected agents, insert instructions; dedupe open conflicts **Extended:** a plan that depends on a caller of S is also affected (live demo: B depended on computeTotal, never on calculateFee, so Rule 1 missed it).
 - [x] **BE:** `resolve_conflict` / `dismiss_conflict` (coordinator only), `acknowledge_instruction`
 - [x] **CM:** coordinator decision logic: section 12 prompt, JSON schema, validation, retry once, claimed-first fallback (`agents/coordinator/src/decide.ts`). `npm run coordinator -- --demo` verified: owner agent-a, B told not to round again.
-- [x] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens **Done** (`agents/coordinator/src/live.ts`, 6 tests). Not yet run against a live server.
-- [x] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0 **Done** (`detectChanges` + 6 tests; removed symbols reported once per session). Not yet run against a live server.
-- [ ] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors
+- [x] **CM:** coordinator live loop: connect as `coordinator`, subscribe `conflict WHERE status='open'`, mark `resolving`, gather context, decide, resolve, log `coordination` tokens **Done** (`agents/coordinator/src/live.ts`, 6 tests). Run live in demo runs 2–5.
+- [x] **AG:** `contract-hook` (`agents/worker/src/hook.ts`): read hook stdin, `mapFile`, compare hashes, `reportChange` for signature changes, always exit 0 **Done** (`detectChanges` + 6 tests; removed symbols reported once per session). Run live in demo runs 2–5.
+- [x] **DD:** Code map panel (React Flow): nodes, caller arrows, claimed/changed/conflict colors, planned creates as dashed ghosts
 
 ## Milestone 4: Rule 2 end to end
 
@@ -61,7 +61,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **BE:** `mark_attempt_wasted`, `log_saving`, `cache_summary`/`record_cache_hit`
 - [ ] **DD:** `scripts/run-demo.ts --mode … --seed 7`: run both workers, merge branches, run tests + check-dupes, `merge_fix` pass
 - [ ] **DD:** `scripts/reset.ts`: restore demo-repo, remove `.worktrees/`, clear run data
-- [ ] **DD:** Token meter, Savings ticker, Scoreboard panels
+- [x] **DD:** Token meter, Savings ticker, Scoreboard panels (duplicate helpers + tests passing show "not recorded" until run-demo stores them)
 - [ ] **Everyone:** 3 runs per mode, average, sanity-check numbers
 
 ## Milestone 6: Demo-ready
