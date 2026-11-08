@@ -2,6 +2,7 @@
 // from measured run totals, averaged per mode; nothing estimated feeds them.
 import type { ModeSummary } from './model.ts';
 import { fmtK, fmtUsd } from './model.ts';
+import { BenchTable } from './BenchTable.tsx';
 
 const NOT_RECORDED = 'not recorded';
 
@@ -84,6 +85,8 @@ export function ScoreboardTab({ without, withC }: { without?: ModeSummary; withC
         ))}
         <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>Duplicate helpers and tests passing come from run-demo’s check-dupes and test pass after merge; the tables don’t record them yet.</div>
       </section>
+
+      <BenchTable />
 
       <section className="card notes3" aria-label="How to read this">
         <div><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>What counts</div><div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>Only finished, measured runs. Each mode should be run at least three times and averaged, because model output varies.</div></div>

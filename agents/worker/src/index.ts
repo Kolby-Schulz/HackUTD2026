@@ -45,6 +45,7 @@ const { values } = parseArgs({
   options: {
     id: { type: 'string' },
     task: { type: 'string' },
+    'task-text': { type: 'string' }, // benchmark scenarios (issue #28): the task's text instead of a TASKS key
     'task-id': { type: 'string' },
     prompt: { type: 'string' },
     wait: { type: 'boolean', default: false },
@@ -68,10 +69,10 @@ if (values.prompt !== undefined && values.wait) die('use --prompt or --wait, not
 if (session && mode !== 'with_contract') die('--prompt and --wait need --mode with_contract');
 if (values.prompt !== undefined && !values.prompt.trim()) die('--prompt is empty');
 const taskKey = values.task ?? '1';
-if (!session && !TASKS[taskKey]) die(`unknown --task ${taskKey}`);
+if (!session && !TASKS[taskKey] && !values['task-text']) die(`unknown --task ${taskKey}`);
 const push = session && !values['no-push'];
 let taskId = BigInt(values['task-id'] ?? taskKey);
-let task = TASKS[taskKey] ?? '';
+let task = values['task-text'] ?? TASKS[taskKey] ?? '';
 let attempt = 1;
 
 // 1. Worktree + branch of the target repo (the monorepo for the demo; agents work in the

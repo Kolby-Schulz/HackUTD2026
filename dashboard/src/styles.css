@@ -214,3 +214,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .chip.agent-paused { border-color: var(--warn); color: var(--warn); }
 .chip.agent-working { border-color: var(--ok); }
 .replay-col .map { height: 100%; }
+
+/* Benchmark table (issue #28) */
+table.bench { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.bench th { text-align: left; font-weight: 600; color: var(--text2); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.bench td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }

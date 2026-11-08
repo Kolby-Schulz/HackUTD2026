@@ -114,6 +114,28 @@ else `CONTRACT_TEST_CMD`, else `npm test`; workers may run those without asking.
 needs an `origin` for the two-laptop flow (workers push `agent/<id>` there); a local-only
 repo works on one laptop. The mapper reads TypeScript and JavaScript.
 
+## Benchmark
+
+`npm run bench` runs every scenario in `scripts/scenarios.ts` (the planted rounding +
+duplicate case, a duplicate helper, claim contention, a signature change with several
+callers, and a no-conflict control) in both modes, then rewrites this table
+(`--scenarios a,b --runs N` to narrow it; `--report-only` to rebuild it from recorded runs).
+
+The table below is a first, small sample (1 run per mode, 2 scenarios, generated with
+`npm run bench -- --scenarios claim-contention,control --runs 1`); run the full benchmark
+(`npm run bench -- --runs 3`) before quoting a number.
+
+<!-- bench:begin -->
+Across 2 scenario(s) and 4 runs, Contract saved **26%** of the cost (0% of tokens) and left 0/2 merges broken vs 1/2 without it.
+
+| Scenario | Runs (without / with) | Cost without | Cost with | Saved | Tokens without | Tokens with | Wasted without | Broken merges without | Broken merges with |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Claim contention (both modify calculateFee) | 1 / 1 | $0.89 | $0.30 | 66% | 1274.1k | 931.6k | 978.6k | 1/1 | 0/1 |
+| Control: unrelated changes | 1 / 1 | $0.29 | $0.33 | -15% | 906.5k | 1147.4k | 0 | 0/1 | 0/1 |
+
+_Generated 2026-11-08T07:33:30.039Z by `npm run bench`. Averages per run; tokens include cache reads (cost is what was billed)._
+<!-- bench:end -->
+
 ## Commands
 
 ```bash

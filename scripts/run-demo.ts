@@ -1,6 +1,7 @@
 // scripts/run-demo.ts (spec sections 14, 15). Owner: dashboard + demo.
 // npm run demo -- --mode without_contract|with_contract [--seed 7] [--runs 1]
-//                 [--timeout-min 20] [--no-fix]
+//                 [--timeout-min 20] [--no-fix] [--scenario planted]
+// --scenario picks a task pair from scripts/scenarios.ts (issue #28; `npm run bench` runs them all).
 //
 // One measured run:
 //  1. (with_contract) map demo-repo so the code map is current
@@ -22,6 +23,7 @@ import { connect } from '@contract/client';
 import { checkAll, conflictMarkers, merge, mergeFix, run, warnIfNoCoordinator, type Check, type TestCount } from './merge.ts';
 import { demoRepoChanges, resetFiles, resetRuns } from './reset.ts';
 import { seed } from './seed.ts';
+import { scenarioOrDie } from './scenarios.ts';
 import {
   adminConnect, AGENTS, git, log, MODES, REPO, resetServerState, RESULTS_DIR, savedToken, saveToken, TSX, WORKTREES, type Mode,
 } from './lib.ts';
@@ -34,8 +36,11 @@ const { values } = parseArgs({
     'timeout-min': { type: 'string', default: '20' },
     'no-fix': { type: 'boolean', default: false },
     summary: { type: 'boolean', default: false },
+    scenario: { type: 'string', default: 'planted' },
   },
 });
+const scenarioName = values.scenario!;
+const scenario = scenarioOrDie(scenarioName);
 if (process.env.CONTRACT_TARGET) {
   console.error('[demo] run-demo is the canned with/without experiment on demo-repo/; unset CONTRACT_TARGET, or use `npm run session` for your own repo');
   process.exit(1);
@@ -44,6 +49,8 @@ if (process.env.CONTRACT_TARGET) {
 interface RunResult {
   runId: string;
   mode: Mode;
+  /** scripts/scenarios.ts key; missing on runs from before issue #28 (= planted) */
+  scenario?: string;
   seed: number;
   startedAt: string;
   workers: Record<string, { exitCode: number | null; timedOut: boolean }>;
@@ -100,7 +107,7 @@ async function runOnce() {
 
   // 2. Seed.
   const admin = await adminConnect(['SELECT * FROM run', 'SELECT * FROM task', 'SELECT * FROM agent']);
-  const s = await seed(admin, mode, Number(values.seed));
+  const s = await seed(admin, mode, Number(values.seed), scenarioName);
   log('demo', `run ${s.runId}: tasks ${AGENTS.map((a) => `${a.id}=${s.tasks[a.id]}`).join(', ')}`);
   if (mode === 'with_contract') warnIfNoCoordinator(admin);
 
@@ -119,7 +126,8 @@ async function runOnce() {
       const r = await run(
         a.id,
         TSX,
-        [join(REPO, 'agents/worker/src/index.ts'), '--id', a.id, '--task', a.task, '--task-id', String(s.tasks[a.id]), '--mode', mode],
+        [join(REPO, 'agents/worker/src/index.ts'), '--id', a.id, '--task', a.task, '--task-id', String(s.tasks[a.id]), '--mode', mode,
+          '--task-text', a.id === 'agent-a' ? scenario.a.task : scenario.b.task],
         REPO,
         timeoutMs,
         { CONTRACT_TOKEN: savedToken(a.id) ?? '' },
@@ -139,7 +147,7 @@ async function runOnce() {
   const demoDir = join(mergeDir, 'demo-repo');
 
   // 5. Checks.
-  const atMerge = await checkAll(demoDir);
+  const atMerge = await checkAll(demoDir, scenario.checks);
   let final = atMerge;
   let mergeFixPasses = 0;
 
@@ -153,7 +161,7 @@ async function runOnce() {
       mergeFixPasses++;
       await mergeFix(a.id, s.tasks[a.id]!, demoDir, final.checks, mergeConflictFiles);
       mergeConflictFiles.splice(0, mergeConflictFiles.length, ...conflictMarkers(mergeDir));
-      final = await checkAll(demoDir);
+      final = await checkAll(demoDir, scenario.checks);
     }
   }
   git(['add', '-A'], mergeDir);
@@ -167,6 +175,7 @@ async function runOnce() {
   const result: RunResult = {
     runId: String(s.runId),
     mode,
+    scenario: scenarioName,
     seed: Number(values.seed),
     startedAt,
     workers,

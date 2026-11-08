@@ -24,7 +24,8 @@
     "mcp": "npm run start -w @contract/mcp --",
     "session": "tsx scripts/session.ts",
     "join": "tsx scripts/join.ts",
-    "judge": "tsx scripts/judge.ts"
+    "judge": "tsx scripts/judge.ts",
+    "bench": "tsx scripts/bench.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
