@@ -168,16 +168,18 @@ function rawConnect(token: string, queries: string[], timeoutMs = 10_000): Promi
   });
 }
 
-export async function runLive(llm: LLM): Promise<void> {
+/** `model` is stored in the coordinator's agent row (e.g. `nemotron:nvidia/...`). */
+export async function runLive(llm: LLM, opts: { model?: string } = {}): Promise<void> {
   const host = process.env.SPACETIME_HOST;
   const dbName = process.env.SPACETIME_DB_NAME;
   if (!host || !dbName) throw new Error('SPACETIME_HOST and SPACETIME_DB_NAME must be set (see .env.example)');
 
-  const agent = { id: 'coordinator', name: 'coordinator', ownerDev: '', machine: hostname(), model: 'claude-code', tokenBudget: 0 };
+  const agent = { id: 'coordinator', name: 'coordinator', ownerDev: '', machine: hostname(), model: opts.model ?? 'claude-code', tokenBudget: 0 };
   // Reuse the saved identity so a restart isn't rejected as "linked to another identity"
   // for the 60 s heartbeat timeout. Keyed by host + db: a token from one server is a 401 on another.
   const key = `${host}|${dbName}`;
-  const saved = readTokens()[key];
+  // COORDINATOR_TOKEN: for hosts that wipe the disk on redeploy (docs/nemotron-coordinator-plan.md).
+  const saved = process.env.COORDINATOR_TOKEN || readTokens()[key];
   let client;
   try {
     client = await connect({ host, dbName, agent, ...(saved ? { token: saved } : {}) });

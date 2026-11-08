@@ -4,7 +4,13 @@
   "private": true,
   "type": "module",
   "exports": "./src/index.ts",
-  "scripts": { "start": "tsx src/index.ts", "typecheck": "tsc --noEmit", "test": "vitest run" },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:nemotron": "vitest run --config vitest.nemotron.config.ts",
+    "test:live": "vitest run --config vitest.live.config.ts"
+  },
   "dependencies": { "@contract/client": "*", "@contract/llm": "*", "dotenv": "^18.0.9" },
   "devDependencies": { "vitest": "^3.2.7" }
 }
