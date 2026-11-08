@@ -1,0 +1,26 @@
+# Runs the scripts tests on Windows, macOS and Linux. spawn.test.ts starts and stops real
+# processes through the control daemon's Registry, which behaves differently on Windows
+# (tsx.cmd can't be spawned without a shell; there are no process groups).
+name: scripts (cross-platform)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scripts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run --project scripts

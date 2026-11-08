@@ -2,9 +2,9 @@
 title: Server (SpacetimeDB module)
 area: server
 sources: [server/]
-verified: af2707c+standby
+verified: issue-62-operators+standby
 ---
-Summary: The whole backend is one SpacetimeDB TypeScript module (`server/src/index.ts`, 1140 lines) with pure rule helpers in `server/src/rules.ts`. All state changes go through reducers; Rule 1-3 conflict checks run inline inside `report_change`, `publish_plan` and `claim_symbol`. Reducers that act for an agent check the caller's identity; the run bookkeeping ones (`start_run`, `end_run`, `create_task`, `mark_attempt_wasted`) stay open for the anonymous admin scripts (see Gotchas).
+Summary: The whole backend is one SpacetimeDB TypeScript module (`server/src/index.ts`, 1140 lines) with pure rule helpers in `server/src/rules.ts`. All state changes go through reducers; Rule 1-3 conflict checks run inline inside `report_change`, `publish_plan` and `claim_symbol`. Reducers that act for an agent check the caller's identity; run bookkeeping and the reset take operators only (`requireOperator`: an agent, machine or machine_access identity), and the code map takes the mapper lock holder only (`requireMapper`); see Identity and auth.
 
 ## Purpose and owner
 - Owner: backend (CLAUDE.md ownership table; spec sections 6, 7, 8).
@@ -37,10 +37,10 @@ Arguments are abbreviated; see the code for exact types.
 - `init()` (lifecycle): inserts the 30 s schedule row for `expire_claims`. index.ts:544
 - `register_agent(id, name, owner_dev, machine, model, token_budget)`: insert, or relink identity. A different identity can take over only after 60 s without heartbeat (message names the machine and the wait). Exception: the `coordinator` id follows the `coordinator` service lock: refused ("coordinator is already running on <machine>") while another identity holds a live lock, otherwise taken over at once. index.ts:697
 - `heartbeat(agent_id)`: updates last_heartbeat. Caller must own the agent. index.ts:601
-- `start_run(mode, seed)` / `end_run(run_id)`: refuses to open a second run while one is open. index.ts:606, 614
-- `reset_demo_state()`: deletes symbol_edge, symbol, plan, plan_item and claim rows; acks undelivered instructions; dismisses open conflicts; sets agents idle. Refused while a run is open, and while any agent is working or paused with a heartbeat under 60 s (`isLiveWorker`): stop the workers first. Keeps change, conflict, decision and token history. No identity check (the reset script connects anonymously), so the live-worker guard is its only protection.
-- `upsert_symbols(file, symbols[], edges[])`: replaces one file's symbols and outgoing edges. Keeps agent-owned behavior_note, and keeps signature and version while the hash is unchanged. index.ts:657
-- `create_task(title, description, agent_id, run_id)`: status starts at `todo`. index.ts:704 (no identity check)
+- `start_run(mode, seed)` / `end_run(run_id)`: operators only. Refuses to open a second run while one is open.
+- `reset_demo_state()`: deletes symbol_edge, symbol, plan, plan_item and claim rows; acks undelivered instructions; dismisses open conflicts; sets agents idle. Operators only. Refused while a run is open, and while any agent is working or paused with a heartbeat under 60 s (`isLiveWorker`): stop the workers first. Keeps change, conflict, decision and token history.
+- `upsert_symbols(file, symbols[], edges[])`: caller must hold the `mapper` service lock (`requireMapper`; the mapper CLI holds it in both one-shot and `--watch` mode). Replaces one file's symbols and outgoing edges. Keeps agent-owned behavior_note, and keeps signature and version while the hash is unchanged.
+- `create_task(title, description, agent_id, run_id)`: operators only (a paired dashboard, the scripts, or any agent). Status starts at `todo`.
 - `set_task_status(task_id, status)`: only the task's agent identity or the coordinator. Enforces TASK_TRANSITIONS (index.ts:45). Syncs the agent row.
 - `publish_plan(agent_id, task_id, summary, items[])`: deactivates the agent's old plan. Rejects unknown symbols except for `create`. Then runs Rule 3 (modify) and Rule 2 (create). index.ts:739
 - `claim_symbol(agent_id, symbol_id, ttl_secs)`: Rule 3. On contention it returns without throwing (see Gotchas). index.ts:783
@@ -54,7 +54,7 @@ Arguments are abbreviated; see the code for exact types.
 - `report_edit(agent_id, file, diff, symbol_ids[])`: diff truncated at 20,000 chars. Keeps newest 50 rows per agent. index.ts:1020
 - `send_instruction(agent_id, text)`: operator push. `'*'` targets working or paused workers. Prefixes text with `Operator: `. Open to any caller by design. index.ts:1039
 - `log_tokens(...)`: checks that cache_read_tokens <= prompt_tokens and cost >= 0, and validates purpose. index.ts:1064
-- `mark_attempt_wasted(task_id, attempt)`: flags that attempt's token rows and bumps task.attempt. index.ts:1085 (no identity check)
+- `mark_attempt_wasted(task_id, attempt)`: operators only. Flags that attempt's token rows and bumps task.attempt.
 - `log_saving(...)`: `requireAgent(agent_id)`; validates kind.
 - `cache_summary(key, summary, summary_tokens)` / `record_cache_hit(key)`: caller must be some registered agent's identity (`requireRegistered`).
 - `expire_claims` (scheduled, 30 s): deletes expired claims. Sets working or paused agents with heartbeat older than 60 s to idle. index.ts:1124
@@ -68,6 +68,8 @@ Arguments are abbreviated; see the code for exact types.
 ## Identity and auth
 - `requireAgent` (index.ts:365): the agent row must exist and its identity must equal `ctx.sender`.
 - `requireCoordinator`: the agent row with id `coordinator` must match the sender.
+- `requireOperator` (#62): the sender is the identity of any `agent` row, any `machine` row (a laptop's `npm run control` daemon) or any `machine_access` row (a dashboard paired with one). Gates `start_run`, `end_run`, `create_task`, `mark_attempt_wasted`, `reset_demo_state`. The admin scripts (`scripts/lib.ts` `adminConnect`) connect as this laptop's machine with the daemon's saved token (`machine:<hostname>` in `.contract/identities.json`) and register the machine row themselves when no daemon has; an unpaired dashboard is told to pair before it can create a task.
+- `requireMapper`: the sender holds the `service` row named `mapper` (`claim_service`). Gates `upsert_symbols`. Registration (`register_agent`, `register_machine`, `claim_service`) stays open, so this stops anonymous and accidental calls on the public database name, not a determined attacker.
 - The mapper and coordinator are identified by convention (`service` lock plus the fixed agent ids), not by a separate role.
 
 ## Build, publish, test
@@ -80,7 +82,7 @@ Arguments are abbreviated; see the code for exact types.
 - postinstall symlinks `node_modules/.bin/tsc` (hack, see Gotchas).
 
 ## Gotchas
-- No identity check on: create_task, upsert_symbols, start_run, end_run, reset_demo_state, mark_attempt_wasted. They are called by the anonymous admin connection in `scripts/lib.ts` and by the dashboard (create_task), so gating them needs an operator token plumbed through scripts first (#62). reset_demo_state refuses while a worker is live, which covers the realistic mistake (a teammate resetting mid-run) but not a stranger on the public database name.
+- Operator gating (#62) means a plain `DbConnection` with a fresh identity can no longer reset, open or close runs, or create tasks: tests use `asOperator(t, ...)` (registers machine `laptop` as the `daemon` identity) and `asMapper(t, ...)` (takes the `mapper` lock) from `test/helpers.ts`; a new script must go through `adminConnect`. `upsert_symbols` from a connection without the `mapper` lock fails with `only the mapper can write the code map`, so a one-shot `npm run mapper` fails while a `--watch` mapper runs elsewhere (`mapper is already running on <machine>`). reset_demo_state also refuses while a worker is live (`isLiveWorker`). Still open to any identity: send_instruction (by design) and the registration reducers.
 - No client-disconnect lifecycle reducer, on purpose: every hook process (`hook.ts`, `claim-guard.ts`, `summary-hook.ts`) opens a short connection with the agent's identity, and a wifi blip drops the worker's socket while it keeps running. Presence is heartbeat (15 s) plus the 30 s sweep (`expire_claims`, 60 s timeout). Expect 60 to 90 s before a dead worker shows idle.
 - claim_symbol does not reject on contention. It returns without throwing, so the conflict row survives. Callers must read the claim row to learn the outcome. Spec section 7 says "Reject". This is deliberate per index.ts:1-14 header comment.
 - register_agent allows identity takeover after 60 s of silence. Spec says "already linked to another identity" rejects. Also deliberate per header comment. For `coordinator` the lock decides instead, so a standby coordinator on the other laptop takes over without the 60 s wait.

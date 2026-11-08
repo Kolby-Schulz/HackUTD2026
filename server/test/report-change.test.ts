@@ -14,6 +14,7 @@ import {
   CHECKOUT,
   sym,
   type Harness,
+  asMapper,
 } from './helpers';
 
 const conflicts = (t: Harness) => all(t.db.conflict.iter());
@@ -366,13 +367,13 @@ describe('report_change: Rule 1 through several callers (up to 3 hops)', () => {
   beforeEach(() => {
     t = makeHarness();
     seedCodeMap(t);
-    t.as('mapper', (ctx) =>
+    asMapper(t, (ctx) =>
       mod.upsert_symbols(ctx, { file: 'src/api/cart.ts', symbols: [sym(ROUTE)], edges: [{ caller_id: ROUTE, callee_id: TOTAL }] }),
     );
-    t.as('mapper', (ctx) =>
+    asMapper(t, (ctx) =>
       mod.upsert_symbols(ctx, { file: 'src/ui/cart.ts', symbols: [sym(PAGE)], edges: [{ caller_id: PAGE, callee_id: ROUTE }] }),
     );
-    t.as('mapper', (ctx) =>
+    asMapper(t, (ctx) =>
       mod.upsert_symbols(ctx, { file: 'src/ui/app.ts', symbols: [sym(APP)], edges: [{ caller_id: APP, callee_id: PAGE }] }),
     );
     register(t, 'agent-a');
@@ -436,7 +437,7 @@ describe('report_change: Rule 1 through several callers (up to 3 hops)', () => {
 
   it('survives a call cycle (recursion between callers)', () => {
     // Arrange: postCart and renderCart call each other
-    t.as('mapper', (ctx) =>
+    asMapper(t, (ctx) =>
       mod.upsert_symbols(ctx, {
         file: 'src/api/cart.ts',
         symbols: [sym(ROUTE)],
