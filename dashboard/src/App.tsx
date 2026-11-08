@@ -75,12 +75,12 @@ export function App() {
         <CommandCenter repoLabel={repoLabel} runs={runs} run={run} runPick={runPick} openRun={openRun} modeName={modeName}
           onPickRun={(v) => { setRunPick(v); setPicked(undefined); }} />
         <div className="tb-right">
-          <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" title="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
-          <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" title="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('map')} aria-label="Toggle code map" title="Code map" onClick={() => flip('map')}>{ICON.map}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('changes')} aria-label="Toggle changes" title="Changes" onClick={() => flip('changes')}>{ICON.changes}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('control')} aria-label="Toggle control" title="Control" onClick={() => flip('control')}>{ICON.control}</button>
-          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('chat')} aria-label="Toggle chat" title="Chat" onClick={() => flip('chat')}>{ICON.chat}</button>
+          <button type="button" className="iconbtn" aria-pressed={open.side} aria-label="Toggle agents" data-tip="Agents" onClick={() => toggle('side')}>{ICON.agents}</button>
+          <button type="button" className="iconbtn" aria-pressed={open.panel} aria-label="Toggle panel" data-tip="Panel" onClick={() => toggle('panel')}>{ICON.panel}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('map')} aria-label="Toggle code map" data-tip="Code map" onClick={() => flip('map')}>{ICON.map}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('changes')} aria-label="Toggle changes" data-tip="Changes" onClick={() => flip('changes')}>{ICON.changes}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('control')} aria-label="Toggle control" data-tip="Control" onClick={() => flip('control')}>{ICON.control}</button>
+          <button type="button" className="iconbtn" aria-pressed={dock.isOpen('chat')} aria-label="Toggle chat" data-tip="Chat" onClick={() => flip('chat')}>{ICON.chat}</button>
         </div>
       </header>
 
