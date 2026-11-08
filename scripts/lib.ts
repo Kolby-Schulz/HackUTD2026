@@ -33,6 +33,30 @@ export function git(args: string[], cwd = REPO): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
+/**
+ * Brings this laptop's checkout of a target up to `base` ("origin/main"), already fetched, so
+ * session start maps what was merged instead of a stale checkout. Only a fast-forward, and only
+ * when HEAD is on the base branch: a checkout on another branch, with commits of its own, or with
+ * edits the update would overwrite is left alone (`skipped`, with the reason).
+ */
+export function fastForwardToBase(gitRoot: string, base: string): { status: 'updated' | 'current' | 'skipped'; reason?: string } {
+  const branch = base.replace(/^origin\//, '');
+  const head = git(['rev-parse', '--abbrev-ref', 'HEAD'], gitRoot);
+  if (head !== branch) return { status: 'skipped', reason: `on branch ${head}, not ${branch}` };
+  if (git(['rev-parse', 'HEAD'], gitRoot) === git(['rev-parse', base], gitRoot)) return { status: 'current' };
+  try {
+    git(['merge-base', '--is-ancestor', 'HEAD', base], gitRoot);
+  } catch {
+    return { status: 'skipped', reason: `local ${branch} has commits that are not on ${base}` };
+  }
+  try {
+    git(['merge', '--ff-only', '--quiet', base], gitRoot);
+  } catch {
+    return { status: 'skipped', reason: 'local changes would be overwritten' };
+  }
+  return { status: 'updated' };
+}
+
 export function log(scope: string, msg: string) {
   console.log(`[${scope}] ${msg}`);
 }
