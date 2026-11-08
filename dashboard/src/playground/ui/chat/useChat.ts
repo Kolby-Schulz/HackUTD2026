@@ -1,6 +1,6 @@
 // Chat and comment state for the page: messages, the open thread, comment pins, and `send`, which
 // routes a note to an agent. The page owns it so it survives panel switches and collapses.
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { MutableRefObject } from 'react';
 import type { AgentRuntime } from '../../agents/runtime';
 import type { BoardKit } from '../../core/commands';
@@ -13,7 +13,9 @@ import { statusOf } from '../meta';
 import type { Meta } from '../meta';
 import { ctxLabel, routeFor } from '../comments/route';
 import type { Pin } from '../comments/route';
-import type { Msg, Thread } from './ChatPanel';
+import { createChatStore, YOU } from '../../chat/store';
+import type { ChatMsg, NewMsg } from '../../chat/store';
+import type { Thread } from './ChatPanel';
 
 /** Actor that reassigns an unowned layer to the agent a note was routed to (kept off the human's undo stack). */
 const ROUTER: ActorId = 'system-router';
@@ -22,7 +24,10 @@ export type SendOpts = { thread?: string; shapeId?: string; at?: { x: number; y:
 
 export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject<AgentRuntime | null>, cursors: Meta[], onOpenChat: () => void) {
   const me = board.me;
-  const [messages, setMessages] = useState<Msg[]>([]);
+  /** The framework-free store; `store.toJSON()` / `store.load()` let persistence save and restore it. */
+  const [store] = useState(createChatStore);
+  const messages = useSyncExternalStore(store.subscribe, store.messages);
+  const unread = useSyncExternalStore(store.subscribe, store.unread);
   const [thread, setThread] = useState('general');
   const [pins, setPins] = useState<Pin[]>([]);
   const [showPins, setShowPins] = useState(true);
@@ -32,18 +37,21 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
   /** Notes waiting on each agent, oldest first: its replies are tagged with the head note's layer. */
   const pending = useRef(new Map<ActorId, Array<{ ctx?: string; shapeId?: string }>>());
 
-  const post = useCallback((m: Omit<Msg, 'id' | 't'>) => setMessages((ms) => [...ms, { ...m, id: newId('m'), t: Date.now() }]), []);
+  const post = useCallback((m: NewMsg) => store.post(m), [store]);
+  const postText = useCallback((m: Omit<NewMsg, 'body'> & { text: string }) => { const { text, ...rest } = m; return store.post({ ...rest, body: { kind: 'text', text } }); }, [store]);
   const resolvePin = useCallback((id: string) => setPins((ps) => ps.map((p) => (p.id === id ? { ...p, done: true } : p))), []);
   const clearResolved = useCallback(() => setPins((ps) => ps.filter((p) => !p.done)), []);
   /** Page teardown: forget every message, pin and queued note. */
-  const reset = useCallback(() => { pending.current.clear(); setMessages([]); setPins([]); pinCount.current = 0; }, []);
+  const reset = useCallback(() => { pending.current.clear(); store.reset(); setPins([]); pinCount.current = 0; }, [store]);
 
   // agent chat lines land in the agent's own thread
   sink.say = (actor, text) => {
     const a = board.actors.get(actor);
     const head = pending.current.get(actor)?.[0];
     const tag = head && !/^(Starting a |Finished the )/.test(text) ? head : undefined;
-    post({ thread: actor, from: actor, name: a?.name ?? actor, color: a?.color ?? '#999', text, ctx: tag?.ctx, shapeId: tag?.shapeId });
+    const who = { thread: actor, from: actor, name: a?.name ?? actor, color: a?.color ?? '#999' };
+    if (/^(Starting a |Finished the )/.test(text)) post({ ...who, body: { kind: 'status', text } });
+    else postText({ ...who, text, ...(tag?.ctx ? { ctx: tag.ctx } : {}), ...(tag?.shapeId ? { shapeId: tag.shapeId } : {}) });
   };
 
   const openThread = useCallback((t: string, msgId?: string) => {
@@ -69,8 +77,8 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       const live = r?.agentIds() ?? [];
       if (live.length) {
         const pick = live[Math.floor(Math.random() * live.length)];
-        post({ thread: 'general', from: 'you', name: 'You', color: YOU_COLOR, text });
-        post({ thread: 'general', from: 'claude', ...CLAUDE, text: `Routing that to ${board.actors.get(pick)?.name ?? pick} →` });
+        postText({ thread: 'general', from: YOU, name: 'You', color: YOU_COLOR, text });
+        post({ thread: 'general', from: 'claude', ...CLAUDE, body: { kind: 'routing', to: pick, why: 'manual' } });
         target = pick;
       }
     }
@@ -83,9 +91,9 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       const pin: Pin = { id: pinId, n: ++pinCount.current, shapeId: shape.id, dx: at.x - box.x, dy: at.y - box.y, thread: target, done: false };
       setPins((ps) => [...ps, pin]);
     }
-    post({ thread: target, from: 'you', name: 'You', color: YOU_COLOR, text, ctx, pin: pinId, shapeId: shape?.id });
+    postText({ thread: target, from: YOU, name: 'You', color: YOU_COLOR, text, ...(ctx ? { ctx } : {}), ...(pinId ? { pin: pinId } : {}), ...(shape ? { shapeId: shape.id } : {}) });
     if (target === 'general' || !r) {
-      post({ thread: 'general', from: 'claude', ...CLAUDE, text: 'No agents on the board yet. Add one with + Agent and I will route notes to it.' });
+      postText({ thread: 'general', from: 'claude', ...CLAUDE, text: 'No agents on the board yet. Add one with + Agent and I will route notes to it.' });
       if (pinId) resolvePin(pinId);
     } else {
       const q = pending.current.get(target) ?? [];
@@ -98,7 +106,7 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
       });
     }
     openThread(target);
-  }, [board, me, rtRef, post, resolvePin, openThread]);
+  }, [board, me, rtRef, post, postText, resolvePin, openThread]);
 
   const threads: Thread[] = useMemo(() => {
     const list: Thread[] = [{ id: 'general', name: 'General', color: CLAUDE.color, status: 'everyone', live: true }];
@@ -106,7 +114,7 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const known = new Set(list.map((t) => t.id));
     for (const m of messages) {
       if (known.has(m.thread)) continue;
-      const a = messages.find((x) => x.thread === m.thread && x.from === m.thread);
+      const a = messages.find((x: ChatMsg) => x.thread === m.thread && x.from === m.thread);
       list.push({ id: m.thread, name: a?.name ?? m.thread, color: a?.color ?? '#999', status: 'left the board', live: false });
       known.add(m.thread);
     }
@@ -119,7 +127,7 @@ export function useChat(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
   };
 
   return {
-    messages, thread, setThread, pins, showPins, setShowPins, flash, focusMsg, clearFocus: () => setFocusMsg(null),
+    store, messages, unread, thread, setThread, pins, showPins, setShowPins, flash, focusMsg, clearFocus: () => setFocusMsg(null),
     threads, threadOf, describeTarget, send, openThread, clearResolved, reset,
   };
 }
