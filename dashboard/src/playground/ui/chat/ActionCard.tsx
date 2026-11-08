@@ -13,10 +13,10 @@ const SHOWN = 6;
 function Swatch({ diff }: { diff: TxDiff }) {
   if (diff.kind === 'size') {
     const f = (n: number) => (n > 0 ? `+${n}` : `${n}`);
-    return <div className="diff" data-kind="size">w {f(diff.dw)} · h {f(diff.dh)}</div>;
+    return <div className="pg-card-diff" data-kind="size">w {f(diff.dw)} · h {f(diff.dh)}</div>;
   }
   const dot = (c: string) => <i className="sw" style={{ background: c, display: 'inline-block', width: 14, height: 14, borderRadius: 4, border: '1px solid var(--pg-line)', verticalAlign: 'middle' }} title={c} />;
-  return <div className="diff" data-kind="color">{diff.from && <>{dot(diff.from)} → </>}{dot(diff.to)}</div>;
+  return <div className="pg-card-diff" data-kind="color">{diff.from && <>{dot(diff.from)} → </>}{dot(diff.to)}</div>;
 }
 
 export function ActionCard({ m, env }: { m: ChatMsg; env: MessageEnv }) {
@@ -43,7 +43,7 @@ export function ActionCard({ m, env }: { m: ChatMsg; env: MessageEnv }) {
   return (
     <div className={'pg-msg action' + (b.undone ? ' undone' : '')}>
       <span className="av" style={{ background: m.color }}>{m.name[0]}</span>
-      <div className="card" style={{ ['--c' as string]: m.color }}>
+      <div className="pg-act-card" style={{ ['--c' as string]: m.color }}>
         <div className="sum"><span className="ic">✦</span>{b.summary}{b.undone && <em>Undone</em>}</div>
         {info?.diff && !b.undone && <Swatch diff={info.diff} />}
         {b.layers.length > 0 && (

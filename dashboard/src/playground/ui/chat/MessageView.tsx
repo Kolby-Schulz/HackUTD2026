@@ -58,7 +58,7 @@ export function MessageView({ m, env }: { m: ChatMsg; env: MessageEnv }) {
     case 'system':
       return <div id={id} className="pg-msg system">{b.text}</div>;
     case 'routing':
-      return <div id={id} className="pg-msg routing"><span className="chip">{m.text && !m.text.startsWith('routed to ') ? m.text : `routed to ${env.nameOf(b.to)} · ${WHY[b.why] ?? b.why}`}</span></div>;
+      return <div id={id} className="pg-msg routing"><span className="pg-msg-chip">{m.text && !m.text.startsWith('routed to ') ? m.text : `routed to ${env.nameOf(b.to)} · ${WHY[b.why] ?? b.why}`}</span></div>;
     case 'error':
       return <div id={id} className="pg-msg error" role="alert"><b>{m.name}</b><p>{b.text}</p></div>;
     case 'conflict':
@@ -80,7 +80,7 @@ export function MessageView({ m, env }: { m: ChatMsg; env: MessageEnv }) {
       return (
         <div id={id} className="pg-msg agent">
           <Avatar m={m} />
-          <div className="body">
+          <div className="pg-msg-body">
             <b style={{ color: m.color }}>{m.name}{unknown && <small> · {(b as { kind: string }).kind}</small>}</b>
             {m.ctx && <Ctx m={m} env={env} />}
             <p>{text}</p>
