@@ -1,6 +1,6 @@
 # Contract — rules for coding agents
 
-Shared context for agents (status, decisions, pitfalls, per-part notes) lives in `vault/`; start at `vault/Home.md`.
+Shared context for agents (status, decisions, pitfalls, per-part notes) lives in `vault/`. See "Shared vault" below.
 
 The full build spec is in `docs/SPEC.md` (text of Tyler's PDF; the PDF wins for tables
 and diagrams). The task list is `docs/TASKS.md`. Read your part's sections before coding.
@@ -32,6 +32,19 @@ and diagrams). The task list is `docs/TASKS.md`. Read your part's sections befor
 - Prefer simple, readable code over abstractions. This is a 24-hour hackathon.
 - Keep secrets in .env; never commit API keys. The repo will be public.
 - After each change, run the part's tests and the end-to-end script if it exists.
+
+## Shared vault (light touch: context, not a gate)
+
+- **Start of a task:** read `vault/Status.md` and the `Summary:` line of your part's note in `vault/Areas/`
+  (map in `vault/Home.md`). Read further only if the task needs it. Skip the vault for small, local fixes.
+- **Code and spec win.** If a note disagrees with the code, trust the code and fix the note.
+- **End of a task, same PR:** if you changed how your part works (a table, reducer, env var, script, or a new trap),
+  update your part's Area note in a line or two and bump its `verified:` to the commit. Add a line to
+  `vault/Pitfalls.md` or `vault/Decisions.md` only for something the next agent would trip on.
+- **Never block on it.** Don't wait for, or ask someone to update, a note before coding. Don't write diaries or
+  run logs into the vault. Keep notes short, and only edit your own part's Area note.
+- **Bulk reading:** if your tool supports subagents, send wide repo or doc searches to a cheaper subagent and keep
+  only its conclusion.
 
 ## packages/llm in practice
 
