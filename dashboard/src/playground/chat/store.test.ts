@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createBoard } from '../core/commands';
 import type { BoardEvent } from '../core/types';
-import { chatSayHandler, createChatStore, YOU } from './store';
+import { chatSayHandler, createChatStore, trimMessages, YOU } from './store';
 
 const agent = { name: 'Iris', color: '#7c3aed' };
 const text = (t: string) => ({ kind: 'text' as const, text: t });
@@ -84,5 +84,31 @@ describe('chat.say through the board', () => {
     expect(store.messages()[0].name).toBe('Iris');
     expect(seen).toHaveLength(2);
     expect(seen[1]).toMatchObject({ t: 'message.created', thread: 'general', to: [board.me], messageId: store.messages()[1].id });
+  });
+});
+
+describe('chat store persistence and routing cards (WP-63)', () => {
+  it('keeps routedBy and a text override through toJSON/load', () => {
+    const s = createChatStore();
+    s.post({ thread: 'general', from: 'claude', ...agent, body: { kind: 'routing', to: 'agent-i', why: 'author' }, text: 'Routed to Iris (made this)', routedBy: { to: 'agent-i', why: 'author' } });
+    const t = createChatStore();
+    t.load(JSON.parse(JSON.stringify(s.toJSON())));
+    expect(t.messages()[0].text).toBe('Routed to Iris (made this)');
+    expect(t.messages()[0].routedBy).toEqual({ to: 'agent-i', why: 'author' });
+  });
+  it('caps messages, dropping status and routing lines first', () => {
+    const s = createChatStore();
+    const mk = (i: number, kind: 'text' | 'status') => ({ thread: 'a', from: 'a', ...agent, id: `m${i}`, body: kind === 'text' ? text('x') : { kind: 'status' as const, text: 's' } });
+    s.post(mk(0, 'text'));
+    for (let i = 1; i <= 5; i++) s.post(mk(i, 'status'));
+    s.load({ v: 1, messages: s.messages(), seen: {} });
+    expect(trimMessages(s.messages(), 3).map((m) => m.id)).toEqual(['m0', 'm4', 'm5']);
+  });
+  it('ignores a corrupt payload and bad seen counters', () => {
+    const s = createChatStore();
+    s.load('garbage'); s.load({ v: 1, messages: 'no' });
+    expect(s.messages()).toEqual([]);
+    s.load({ v: 1, messages: [], seen: { a: 'x', b: 2 } });
+    expect(s.toJSON().seen).toEqual({ b: 2 });
   });
 });

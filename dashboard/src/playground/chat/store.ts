@@ -18,12 +18,32 @@ export type ChatMsg = Message & {
   ctx?: string;
   /** Comment pin this message created. */
   pin?: string;
+  /** Who the router picked for this message and why (COMMENT-9), so the pin popover can show it. */
+  routedBy?: { to: ActorId; why: string };
+  /** Thread this message was mentioned from ("from #general" chip, COMMENT-8). */
+  from_thread?: string;
 };
 
 export type NewMsg = {
   thread: string; from: ActorId; name: string; color: string; body: MsgBody;
   shapeId?: ShapeId; ctx?: string; pin?: string; id?: string; at?: number;
+  /** Overrides the derived plain text (a routing card reads "Routed to Iris (made this)"). */
+  text?: string;
+  routedBy?: { to: ActorId; why: string };
+  from_thread?: string;
 };
+
+/** Retention cap per board (COMMENT-20). Past it, the oldest status/routing lines go first, then the oldest of all. */
+export const MAX_MESSAGES = 5000;
+const CHATTER = new Set<string>(['status', 'routing']);
+export function trimMessages(list: ChatMsg[], max = MAX_MESSAGES): ChatMsg[] {
+  let over = list.length - max;
+  if (over <= 0) return list;
+  const drop = new Set<string>();
+  for (const m of list) { if (over > 0 && CHATTER.has(m.body.kind)) { drop.add(m.id); over--; } }
+  for (const m of list) { if (over > 0 && !drop.has(m.id)) { drop.add(m.id); over--; } }
+  return list.filter((m) => !drop.has(m.id));
+}
 
 export function bodyText(b: MsgBody): string {
   switch (b.kind) {
@@ -79,10 +99,11 @@ export function createChatStore(): ChatStore {
     post(m) {
       const msg: ChatMsg = {
         id: m.id ?? newId('m'), thread: m.thread, from: m.from, at: m.at ?? Date.now(), body: m.body,
-        name: m.name, color: m.color, text: bodyText(m.body),
+        name: m.name, color: m.color, text: m.text ?? bodyText(m.body),
+        ...(m.routedBy ? { routedBy: m.routedBy } : {}), ...(m.from_thread ? { from_thread: m.from_thread } : {}),
         ...(m.shapeId ? { shapeId: m.shapeId } : {}), ...(m.ctx ? { ctx: m.ctx } : {}), ...(m.pin ? { pin: m.pin } : {}),
       };
-      msgs = [...msgs, msg];
+      msgs = trimMessages([...msgs, msg]);
       readActive();
       notify();
       return msg;
@@ -121,8 +142,9 @@ export function createChatStore(): ChatStore {
     load(json) {
       const j = json as Partial<ChatStoreJSON> | null | undefined;
       if (!j || j.v !== 1 || !Array.isArray(j.messages)) return;
-      msgs = j.messages.filter((m) => m && typeof m.id === 'string' && typeof m.thread === 'string' && m.body && typeof m.body.kind === 'string');
-      seen = j.seen && typeof j.seen === 'object' ? { ...j.seen } : {};
+      msgs = trimMessages(j.messages.filter((m) => m && typeof m.id === 'string' && typeof m.thread === 'string' && m.body && typeof m.body.kind === 'string'));
+      seen = {};
+      if (j.seen && typeof j.seen === 'object') for (const [k, v] of Object.entries(j.seen)) if (typeof v === 'number' && v >= 0) seen[k] = v;
       readActive();
       notify();
     },

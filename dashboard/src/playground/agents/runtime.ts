@@ -2,7 +2,7 @@
 // board plus a driver; the runtime builds its AgentContext (choreographer, say, setState) and
 // never touches the store directly. No React, no DOM.
 import { opId } from '../core/ids';
-import type { Actor, ActorId, AgentContext, AgentDriver, AgentState, Board, Pt, Task } from '../core/types';
+import type { Actor, ActorId, AgentContext, AgentDriver, AgentState, Board, Command, ExecResult, Pt, Result, Task } from '../core/types';
 import { createChoreographer, realClock, seededRng } from './choreographer';
 import type { Choreographer, Clock } from './choreographer';
 import { createTaskQueue } from './queue';
@@ -25,7 +25,13 @@ export interface RuntimeOpts {
   onSay?: (agent: Actor, text: string) => void;
   /** false = this browser does not host agents: spawn/request do nothing (see startAgents). */
   host?: boolean;
+  /** An agent committed a batch or build: post an action card (COMMENT-12). `tx` is what `board.revert` takes. */
+  onAction?: (agent: Actor, card: ActionInfo) => void;
+  /** A note started (`on: true`) or the agent has now replied / finished it (`on: false`): the thinking placeholder (COMMENT-16). */
+  onThinking?: (agent: Actor, on: boolean, task?: Task) => void;
 }
+/** What an action card shows: one line, the layers touched, and the tx id of the committed batch. */
+export interface ActionInfo { summary: string; tx: string; layers: string[]; taskId?: string }
 export interface SpawnOpts { name?: string; color?: string; at?: Pt; role?: string; driver?: 'scripted' | 'llm' }
 export interface NoteReq { text: string; shapeId?: string; threadId?: string; from?: ActorId; priority?: 0 | 1 | 2 | 3 }
 export interface StatusEvent { t: 'status.changed'; who: ActorId; state: AgentState; seq: number; at: number; actor: ActorId }
@@ -37,6 +43,38 @@ export interface StatusEvent { t: 'status.changed'; who: ActorId; state: AgentSt
  */
 export function canTransition(from: AgentState | undefined, to: AgentState): boolean {
   return from !== 'stopped' || to === 'stopped' || to === 'idle';
+}
+
+const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
+const upper = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** One edit phrase ("fill is now purple", "removed Button") as an action line ("Changed fill to purple"). */
+function phrase(p: string): string {
+  const m = p.match(/^(.+?) is now (.+)$/);
+  return m ? `Changed ${m[1]} to ${m[2]}` : upper(p);
+}
+
+/**
+ * The card for a committed batch: summary from the batch label ("Iris: fill is now purple", "Iris: build Profile card")
+ * and the layers it touched (updated, deleted, created). Pure.
+ */
+export function actionInfo(label: string | undefined, commands: readonly Command[], results: readonly Result[]): { summary: string; layers: string[] } {
+  const layers: string[] = [];
+  const add = (id: string | undefined) => { if (id && !id.startsWith('$') && !layers.includes(id)) layers.push(id); };
+  commands.forEach((c, i) => {
+    if (c.t === 'shape.create') { const r = results[i]; add(c.id ?? (r && r.ok ? r.id : undefined)); }
+    else if ('ids' in c) c.ids.forEach(add);
+    else if (c.t === 'shape.resize') add(c.id);
+  });
+  const text = (label ?? '').replace(/^[^:]*:\s*/, '').trim();
+  const build = text.match(/^build (.+)$/i);
+  if (build) {
+    const n = commands.filter((c) => c.t === 'shape.create').length;
+    return { summary: `Built ${build[1]} (${n} ${n === 1 ? 'layer' : 'layers'})`, layers };
+  }
+  const parts = text.split(', ').filter(Boolean).map(phrase);
+  const summary = parts.length ? [parts[0], ...parts.slice(1).map(lower)].join(', ') : 'Updated the board';
+  return { summary, layers };
 }
 
 const TAKEOVER_LINE = "You took that over, I'll work elsewhere.";
@@ -53,6 +91,7 @@ type Agent = {
   mult: number;              // per-agent speed multiplier
   credit: number;            // step mode: commands this agent may still run
   claims: Set<string>;       // claim ids this agent holds, released when it is aborted
+  current?: { task: Task; thinking: boolean; acted: boolean };   // the note being worked on (placeholder + card state)
 };
 
 export function createRuntime(opts: RuntimeOpts) {
@@ -96,7 +135,42 @@ export function createRuntime(opts: RuntimeOpts) {
   }
 
   const hosting = opts.host !== false;
-  const say = (a: Agent, text: string) => { opts.onSay?.(a.actor, text); };
+  /** The thinking placeholder ends at the agent's first reply, its action card, or the end of the note. */
+  function endThinking(a: Agent) {
+    const c = a.current;
+    if (c?.thinking) { c.thinking = false; opts.onThinking?.(a.actor, false, c.task); }
+  }
+  function finishCurrent(a: Agent) { endThinking(a); a.current = undefined; }
+  const say = (a: Agent, text: string) => {
+    // the card replaces the scripted "Done: ..." line
+    if (a.current?.acted && /^Done: /.test(text)) return;
+    endThinking(a);
+    opts.onSay?.(a.actor, text);
+  };
+
+  /** A committed batch becomes an action card; no card for a batch that changed nothing. */
+  function committed(a: Agent, label: string | undefined, commands: readonly Command[], r: ExecResult) {
+    if (!r.tx || !opts.onAction) return;
+    const info = actionInfo(label, commands, r.results);
+    if (a.current) { endThinking(a); a.current.acted = true; }
+    opts.onAction(a.actor, { ...info, tx: r.tx, ...(a.current ? { taskId: a.current.task.id } : {}) });
+  }
+  /** The board an agent's driver sees: same board, but its commits are reported so the chat can offer Undo. */
+  function watched(a: Agent): Board {
+    return {
+      ...board,
+      exec(b) { const r = board.exec(b); committed(a, b.label, b.commands, r); return r; },
+      gesture(actor, label, o) {
+        const g = board.gesture(actor, label, o);
+        let cmds: Command[] = [];
+        return {
+          update(c) { cmds = c; g.update(c); },
+          commit() { const r = g.commit(); committed(a, label, cmds, r); return r; },
+          abort() { g.abort(); },
+        };
+      },
+    };
+  }
 
   // ---- claims: remember what each agent holds so an abort can release it ----
   function releaseClaims(a: Agent) {
@@ -117,9 +191,12 @@ export function createRuntime(opts: RuntimeOpts) {
     const t = a.queue.next();
     if (!t) return;
     const gen = a.gen;
+    a.current = { task: t, thinking: false, acted: false };
+    if (t.kind === 'note') { a.current.thinking = true; opts.onThinking?.(a.actor, true, t); }
     const done = (state: 'done' | 'failed') => {
       if (a.queue.running() !== t) return;      // cancelled or the run was replaced meanwhile
       a.queue.finish(state);
+      finishCurrent(a);
       settle(a, t);
       if (gen === a.gen) pump(a);
     };
@@ -127,7 +204,7 @@ export function createRuntime(opts: RuntimeOpts) {
   }
   function cancelAllTasks(a: Agent) {
     const running = a.queue.running();
-    if (running) { a.queue.finish('cancelled'); settle(a, running); }
+    if (running) { a.queue.finish('cancelled'); finishCurrent(a); settle(a, running); }
     for (const t of a.queue.clear()) settle(a, t);
   }
 
@@ -144,7 +221,7 @@ export function createRuntime(opts: RuntimeOpts) {
     a.driver = makeDriver(a.kind, slots);
     const live = () => gen === a.gen;
     const ctx: AgentContext & { choreo: Choreographer } = {
-      me: a.actor, board, choreo: a.choreo, signal: a.ctrl.signal, rng: a.rng,
+      me: a.actor, board: watched(a), choreo: a.choreo, signal: a.ctrl.signal, rng: a.rng,
       intent: (i) => a.choreo.intent(i),
       setState: (s, d) => { if (live()) driverState(a, s, d); },
       say: (text) => { if (live()) say(a, text); },
@@ -245,7 +322,7 @@ export function createRuntime(opts: RuntimeOpts) {
     if (a.stopped) return;
     abortRun(a);
     const running = a.queue.running();
-    if (running) { a.queue.finish('cancelled'); settle(a, running); }
+    if (running) { a.queue.finish('cancelled'); finishCurrent(a); settle(a, running); }
     say(a, line);
     if (!a.paused) transition(a, 'thinking', 'finding another spot');
     else a.held = { s: 'thinking', d: 'finding another spot' };
