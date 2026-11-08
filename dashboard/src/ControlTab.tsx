@@ -49,6 +49,7 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
   const [workerId, setWorkerId] = useState('agent-a');
   const [prompt, setPrompt] = useState('');
   const [integration, setIntegration] = useState(false);
+  const [land, setLand] = useState(false);
 
   const procs = status?.processes ?? [];
   const running = (key: string) => procs.some((p) => p.key === key && p.status === 'running');
@@ -156,8 +157,13 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
               <input type="checkbox" checked={integration} onChange={(e) => setIntegration(e.target.checked)} /> Integration test (canned demo tasks only)
             </label>
           )}
+          <label className="muted" style={{ fontSize: 12, display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input type="checkbox" checked={land} onChange={(e) => setLand(e.target.checked)} /> Push to the default branch (e.g. main) when every check passes
+          </label>
           <div className="row">
-            <button type="button" className="btn" disabled={!!busy || running('session-merge') || !openRun} onClick={() => act('Merge', '/run', { action: 'session-merge', integration: isDemo && integration })}>
+            <button type="button" className="btn" disabled={!!busy || running('session-merge') || !openRun}
+              onClick={() => act('Merge', '/run', { action: 'session-merge', integration: isDemo && integration, land },
+                land ? `Merge and push to ${status?.repoLabel ?? 'the repo'}'s default branch on GitHub if the checks pass?` : undefined)}>
               {running('session-merge') ? 'Merging…' : 'Merge and check'}
             </button>
             <ProcState p={procs.find((p) => p.key === 'session-merge')} />

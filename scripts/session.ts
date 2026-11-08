@@ -7,12 +7,14 @@
 //   Each worker pushes agent/<id> to origin when it finishes.
 //
 // npm run session -- merge [--agents agent-a,agent-b] [--integration] [--no-fix]
-//                          [--fixer <id>] [--fix-passes 2] [--push]
+//                          [--fixer <id>] [--fix-passes 2] [--push] [--land]
 //   On either laptop, once every agent is done: fetches origin/agent/<id> for each agent
 //   with a task in the open run, merges them onto origin/main in .worktrees/merge-<run>,
 //   runs the checks, lets one local agent fix the merged code if they fail, then ends the run.
 //   --integration adds demo-repo's integration test, which only passes for the two canned
 //   tasks (agents/worker/src/tasks.ts); free-form prompts get unit tests, typecheck, check-dupes.
+//   --land pushes the merge commit to the base branch on origin (e.g. main) when every check
+//   passes; otherwise the merged code only stays on demo/merge-<run>.
 //
 // Any repo (issue #18): add --repo <path|git URL> (or set CONTRACT_TARGET) to start, merge,
 // the workers and reset. start maps that repo; merge runs its contract.json checks (or
@@ -37,6 +39,7 @@ const { values, positionals } = parseArgs({
     fixer: { type: 'string' },
     'fix-passes': { type: 'string', default: '2' },
     push: { type: 'boolean', default: false },
+    land: { type: 'boolean', default: false },
     repo: { type: 'string' },
     tasks: { type: 'string' },
   },
@@ -164,14 +167,36 @@ async function mergeSession() {
   stageAll(mergeDir); // never installed dependencies
   git(['commit', '-m', `merge run ${runRow.id} (session: ${agents.join(', ')})`, '--allow-empty', '--no-verify'], mergeDir);
   if (values.push) git(['push', '--force', '-u', 'origin', mergeBranch], mergeDir);
+  const landed = values.land && land(mergeDir, base, mergeBranch, green());
 
   // 5. Close the run.
   await conn.reducers.endRun({ runId: runRow.id });
   conn.disconnect();
   log('session', `run ${runRow.id} ended: ${green() ? 'ALL CHECKS PASS' : 'checks still failing'}` +
     ` (${final.tests.passed} tests passed, ${final.tests.failed} failed, ${final.dateFormatters} date formatter(s),` +
-    ` ${passes} fix pass(es)); merged code on branch ${mergeBranch}${values.push ? ' (pushed)' : ''}`);
+    ` ${passes} fix pass(es)); merged code on branch ${mergeBranch}${values.push ? ' (pushed)' : ''}${landed ? `, landed on ${base}` : ''}`);
   if (!green()) process.exit(1);
+}
+
+/** --land: fast-forward the base branch on origin to the merge commit, only when the checks pass. */
+function land(mergeDir: string, base: string, mergeBranch: string, green: boolean): boolean {
+  if (!green) {
+    log('session', `not landing: checks fail; the merged code stays on ${mergeBranch}`);
+    return false;
+  }
+  if (!base.startsWith('origin/')) {
+    log('session', `not landing: ${target.label} has no origin branch to push to; the merged code stays on ${mergeBranch}`);
+    return false;
+  }
+  try {
+    // No --force: if someone pushed to the base since the fetch, this fails instead of dropping their commits.
+    git(['push', 'origin', `HEAD:refs/heads/${base.slice('origin/'.length)}`], mergeDir);
+    log('session', `landed on ${base}`);
+    return true;
+  } catch (e) {
+    log('session', `could not push to ${base} (did it move since the merge started?): ${e instanceof Error ? e.message : String(e)}; the merged code stays on ${mergeBranch}`);
+    return false;
+  }
 }
 
 function openRun(conn: DbConnection) {
