@@ -24,7 +24,7 @@ import { createLLM } from '@contract/llm';
 import { cloneDirFor, DbConnection, missingTools, resolveTarget, type MissingTool } from '@contract/client';
 import { Identity } from 'spacetimedb';
 import { Assistant, type Plan, type Snapshot } from './assistant.ts';
-import { browserCommand, Daemon, Pairer, type MachinePort } from './daemon.ts';
+import { browserCommand, Daemon, Pairer, TakeoverGuard, takeOverPidFile, type MachinePort } from './daemon.ts';
 import { machineId, machineTokenKey, REPO, savedToken, saveToken, TSX } from './lib.ts';
 
 const LOG_LINES = 300;
@@ -410,6 +410,17 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   const { repo, clone } = reg.setRepo(values.repo ?? process.env.CONTRACT_TARGET ?? saved ?? '');
   console.log(`[control] repository: ${repo || 'demo-repo (built-in)'}${clone ? ' (cloning…)' : ''}`);
 
+  // One daemon per machine, locally: stop the daemon the last `npm run control` in this checkout
+  // left running (its pid is in .contract/control-<id>.pid), before it and this one both run
+  // every command. The database guard at the end of main handles daemons from other checkouts.
+  const pidFile = join(REPO, '.contract', `control-${id}.pid`);
+  mkdirSync(dirname(pidFile), { recursive: true });
+  const stoppedPid = takeOverPidFile(pidFile, process.pid, isControlDaemon, (pid) => process.kill(pid, 'SIGTERM'), { readFileSync, writeFileSync, existsSync });
+  if (stoppedPid !== undefined) {
+    console.log(`[control] stopped the earlier npm run control (pid ${stoppedPid}) so only this one answers the dashboard.`);
+    await new Promise((r) => setTimeout(r, 500)); // let it stop its children and exit before we register
+  }
+
   const conn = await connectDaemon(id).catch((e: unknown) => {
     console.error(`[control] ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
@@ -496,25 +507,35 @@ if (process.argv[1] && resolve(process.argv[1]) === join(REPO, 'scripts', 'contr
   process.on('SIGINT', quit);
   process.on('SIGTERM', quit);
 
-  // One daemon per machine. A second `npm run control` on this laptop registers as the same
+  // One daemon per machine, across checkouts. A second `npm run control` registers as the same
   // machine with the same saved identity, and the server accepts it: both would then answer every
   // pairing (the wrong one rejects the code) and run every command twice. register_machine
   // stamps started_at, so when the row's started_at moves past ours, a newer daemon took over
-  // and this one stops.
-  let registeredAt = conn.db.machine.id.find(id)?.startedAt.microsSinceUnixEpoch;
-  let takenOver = false;
-  conn.db.machine.onUpdate((_ctx, _old, row) => {
-    if (row.id !== id || takenOver) return;
-    const at = row.startedAt.microsSinceUnixEpoch;
-    if (registeredAt === undefined || at <= registeredAt) {
-      registeredAt ??= at;
-      return;
-    }
-    takenOver = true;
+  // and this one stops. Checked on every row update and once a second (in case an update is missed).
+  const guard = new TakeoverGuard(conn.db.machine.id.find(id)?.startedAt.microsSinceUnixEpoch);
+  const checkTakeover = (startedAt: bigint | undefined) => {
+    if (!guard.check(startedAt)) return;
     console.error(`[control] another npm run control just registered as machine "${id}"; stopping this one so only one answers the dashboard. If you meant this one, stop the other and start this again.`);
     setTimeout(() => process.exit(1), 2000).unref();
     daemon.shutdown().catch(() => undefined).finally(() => process.exit(1));
-  });
+  };
+  conn.db.machine.onUpdate((_ctx, _old, row) => { if (row.id === id) checkTakeover(row.startedAt.microsSinceUnixEpoch); });
+  setInterval(() => checkTakeover(conn.db.machine.id.find(id)?.startedAt.microsSinceUnixEpoch), 1000);
+}
+
+/** True when `pid` is a live process running scripts/control.ts (checked with ps where there is one). */
+function isControlDaemon(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  if (process.platform === 'win32') return true; // no ps; trust the pid file
+  try {
+    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).includes('control.ts');
+  } catch {
+    return false;
+  }
 }
 
 /** The chat's real dependencies: one SpacetimeDB connection (opened on first use) and the model. */
