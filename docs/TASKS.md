@@ -68,7 +68,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 
 - [ ] Two laptops, fixed seed, three clean rehearsals
 - [ ] Backup demo video (#26)
-- [ ] README with setup + architecture; repo public. **Repo is public** and setup is written; still missing: architecture diagram, screenshots, LICENSE (#26)
+- [ ] README with setup + architecture; repo public. **Repo is public;** setup, quickstart, Mermaid architecture diagram, rules table, screenshot and MIT LICENSE are in. Still missing: backup video, Devpost paste from `docs/devpost.md`, one product name (dashboard says InSync) (#26)
 - [ ] Pitch rehearsal (section 17)
 
 ## After demo-ready (stretch, in this order)
