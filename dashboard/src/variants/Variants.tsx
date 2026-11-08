@@ -371,9 +371,12 @@ function Workspace({ screen, variants, initPanes, onScreen, viewport, onViewport
     <div className="vx">
       <header className="vx-top">
         <div className="vx-brand">
-          <a className="vx-iconbtn" href="#/" title="Back to the dashboard" aria-label="Back to the dashboard"><Icon name="back" /></a>
-          <span className="vx-wordmark">InSync</span>
-          <span className="vx-crumb">/ Variants</span>
+          <a className="vx-wordmark" href="#/" title="Back to the dashboard">InSync</a>
+          <nav className="vx-nav" aria-label="Pages">
+            <a href="#/">Dashboard</a>
+            <a href="#/playground">Design board</a>
+            <span aria-current="page">Variants</span>
+          </nav>
         </div>
         <div className="vx-cmd">
           <label>
