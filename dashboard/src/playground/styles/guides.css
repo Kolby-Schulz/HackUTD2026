@@ -1,0 +1,10 @@
+/* Smart guides and the align bar. The guide red (#F24822, same in both themes) is set as `color` by SmartGuides.tsx until tokens.css gains --pg-guide. */
+.pg-guides { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.pg-guides line, .pg-guides path { fill: none; stroke: currentColor; stroke-width: 1; shape-rendering: crispEdges; vector-effect: non-scaling-stroke; }
+.pg-guides .pg-gl-label { fill: currentColor; }
+.pg-guides text { fill: var(--pg-white); font: 600 10px/1 system-ui, sans-serif; font-variant-numeric: tabular-nums; text-anchor: middle; dominant-baseline: central; }
+.pg-align { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--pg-line); }
+.pg-align button { flex: 1; height: 28px; display: grid; place-items: center; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.pg-align button:hover:not(:disabled) { background: var(--pg-hover); }
+.pg-align button:disabled { opacity: 0.35; cursor: default; }
+.pg-align svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.4; }
