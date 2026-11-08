@@ -71,3 +71,46 @@ describe('distributeCommands', () => {
     expect(distributeCommands(three, ['a', 'b'], 'h')).toEqual([]);
   });
 });
+
+describe('WP-72 target, distribute, match', () => {
+  const frame = view([
+    mk('f', null, { kind: 'frame', x: 0, y: 0, w: 200, h: 100 }),
+    mk('a', 'f', { x: 0, y: 0, w: 20, h: 10 }),
+    mk('b', 'f', { x: 50, y: 20, w: 40, h: 30 }),
+    mk('c', 'f', { x: 100, y: 40, w: 10, h: 60 }),
+    mk('d', 'f', { x: 160, y: 5, w: 30, h: 10 }),
+  ]);
+  it('parent mode aligns every shape flush right to its frame', async () => {
+    const { alignCommands: ac } = await import('./align');
+    const r = apply(frame, ac(frame, ['a', 'b', 'c'], 'right', 'parent'));
+    expect(['a', 'b', 'c'].map((i) => r.get(i)!.x + frame.shapes.get(i)!.w)).toEqual([200, 200, 200]);
+  });
+  it('key mode aligns to the first selected and leaves it put', async () => {
+    const { alignCommands: ac } = await import('./align');
+    const cmds = ac(frame, ['b', 'a', 'c'], 'left', 'key', 'b');
+    const r = apply(frame, cmds);
+    expect(['a', 'b', 'c'].map((i) => r.get(i)!.x)).toEqual([50, 50, 50]);
+    expect(cmds.length).toBe(2);
+  });
+  it('distributes 4 shapes with equal gaps in one batch', () => {
+    const r = apply(frame, distributeCommands(frame, ['a', 'b', 'c', 'd'], 'h'));
+    const o = ['a', 'b', 'c', 'd'].map((i) => ({ x: r.get(i)!.x, w: frame.shapes.get(i)!.w }));
+    const gaps = o.slice(1).map((s, i) => s.x - (o[i]!.x + o[i]!.w));
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThanOrEqual(1);
+    expect(o[0]!.x).toBe(0); expect(o[3]!.x).toBe(160);
+  });
+  it('blocks distribute for 2 shapes or mixed parents', async () => {
+    const m = await import('./align');
+    expect(m.distributeBlocked(frame, ['a', 'b'])).toMatch(/3\+/);
+    expect(m.distributeBlocked(frame, ['a', 'b', 'f'])).toBeTruthy();
+  });
+  it('matches width/height to the key, keeping top-left', async () => {
+    const m = await import('./align');
+    const cmds = m.matchSizeCommands(frame, ['b', 'a', 'c'], 'w');
+    expect(cmds).toEqual([
+      { t: 'shape.resize', id: 'a', box: { x: 0, y: 0, w: 40, h: 10 } },
+      { t: 'shape.resize', id: 'c', box: { x: 100, y: 40, w: 40, h: 60 } },
+    ]);
+    expect(m.matchSizeCommands(frame, ['b'], 'h')).toEqual([]);
+  });
+});
