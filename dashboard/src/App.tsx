@@ -1,7 +1,7 @@
 // Dashboard (spec section 13). Owner: dashboard + demo.
 // One screen, laid out like an editor workbench (storyboard "Frame 1 as an editor workbench"):
 // Agents side bar, editor groups holding the Code map, Control and Chat tabs (drag to reorder,
-// move or split; Dock.tsx), Savings / Problems panel, status bar. Tables come from live subscriptions; Control and the chat's
+// move or split; Dock.tsx), Savings panel, status bar. Tables come from live subscriptions; Control and the chat's
 // assistant talk to the local control server (npm run control). ReplayTab.tsx stays, unmounted.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
@@ -31,7 +31,6 @@ export function App() {
   const w = runWindow(run, now);
   const { layout, resize, toggle } = useLayout();
   const [picked, setPicked] = useState<string>();
-  const [panelTab, setPanelTab] = useState<'savings' | 'problems'>('savings');
   const dock = useDock();
   const { repoLabel, machine } = useControlInfo();
   // A pairing link (#/pair?…) opens the Control tab, where its progress shows.
@@ -119,7 +118,7 @@ export function App() {
                     {repoLabel && <span>{repoLabel}</span>}
                     {STAGES.map((s, i) => <span key={s}>{(i > 0 || repoLabel) && <>›&nbsp; </>}<span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
                     <span className="grow" />
-                    <span className="ellipsis">dashed = planned · outline = claimed · click a symbol for details</span>
+                    <span className="ellipsis">focused on what agents touch · ⋯ expands · dashed = planned · outline = claimed</span>
                   </nav>
                   <div className="editor">
                     <Boundary name="Code map">
@@ -155,9 +154,9 @@ export function App() {
           {open.panel && (
             <>
               <Sash dir="h" label="Resize panel" size={size.panel} sign={-1} onSize={(px) => resize('panel', px)} onToggle={() => toggle('panel', false)} />
-              <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings and problems">
+              <section className="pane" style={{ height: size.panel, flex: 'none' }} aria-label="Savings">
                 <Boundary name="Panel">
-                  <BottomPanel savings={view.savings} cases={view.cases} tab={panelTab} setTab={setPanelTab} onClose={() => toggle('panel', false)} />
+                  <BottomPanel savings={view.savings} cases={view.cases} onClose={() => toggle('panel', false)} />
                 </Boundary>
               </section>
             </>
@@ -170,10 +169,10 @@ export function App() {
         {run ? <><span>Run #{String(run.id)}</span><span>{modeName(run.mode)}</span><span>seed {run.seed}</span></> : <span>Start a run: npm run demo -- --mode with_contract</span>}
         <span>{view.called.size} agent{view.called.size === 1 ? '' : 's'} in this run</span>
         <span className="grow" />
-        <button type="button" onClick={() => { toggle('panel', true); setPanelTab('problems'); }} aria-label="Show problems">
+        <span title="Open conflicts, marked in red on the code map" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
           <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2L14.5 13.5h-13z M8 6.5v3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
           {openCount} open
-        </button>
+        </span>
         <span>Stage: {view.stage}</span>
       </footer>
     </div>

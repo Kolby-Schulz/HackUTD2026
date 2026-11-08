@@ -416,13 +416,47 @@ export interface MapNode {
   owners: Person[];
   state: NodeState;
   ghost: boolean;
+  /** An agent is working on it: claimed, in conflict, or touched within the idle limit. */
+  active: boolean;
+  /** Not active itself, but directly calls an active function (shown faded for context). */
+  context: boolean;
+  /** Active, but close to timing out: no agent has touched it for most of the idle limit. */
+  fading: boolean;
   col: number;
   row: number;
 }
 export interface MapEdge { id: string; source: string; target: string; hot: boolean }
 
-/** Symbols as nodes (callers left of their callees), planned creates as dashed ghosts. */
-export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; edges: MapEdge[] } {
+/** How long a function counts as worked on after the last agent activity on it. */
+export const MAP_IDLE_MS = 3 * 60_000;
+const FADE_MS = 30_000;
+
+/** Last time an agent touched each symbol (planned, claimed, changed, edited, conflicted on),
+ *  ignoring rows newer than `now` so a replay shows the map as it was. */
+export function symbolActivity(t: Tables, now: number): Map<string, number> {
+  const last = new Map<string, number>();
+  const touch = (id: string, at: number) => { if (at <= now && at > (last.get(id) ?? -Infinity)) last.set(id, at); };
+  const planAt = new Map(t.plans.map((p) => [p.id, ms(p.createdAt)]));
+  for (const i of t.planItems) { const at = planAt.get(i.planId); if (at !== undefined) touch(i.symbolId, at); }
+  for (const c of t.claims) touch(c.symbolId, ms(c.claimedAt));
+  for (const c of t.changes) touch(c.symbolId, ms(c.createdAt));
+  for (const e of t.fileEdits ?? []) for (const id of e.symbolIds) touch(id, ms(e.createdAt));
+  for (const c of t.conflicts) {
+    touch(c.symbolId, ms(c.createdAt));
+    if (c.resolvedAt) touch(c.symbolId, ms(c.resolvedAt));
+  }
+  return last;
+}
+
+/** Most callers of one active function shown as context, so a widely used helper does not
+ *  pull half the repo into the focused view. */
+const CONTEXT_CALLERS = 3;
+
+/** Every symbol as a node (callers left of their callees), planned creates as dashed ghosts.
+ *  A function is `active` while it is claimed or has an open conflict, and for `idleMs` after the
+ *  last agent activity on it; its direct callers are `context`. The code map focuses on those
+ *  and collapses the rest. */
+export function codeMap(t: Tables, w: Window, now: number, idleMs = MAP_IDLE_MS): { nodes: MapNode[]; edges: MapEdge[]; total: number; activeCount: number } {
   const ppl = people(t.agents);
   const ids = new Set(t.symbols.map((s) => s.id));
   const active = new Set(t.plans.filter((p) => p.active).map((p) => p.id));
@@ -440,9 +474,20 @@ export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; 
   for (const c of t.claims) if (ms(c.expiresAt) > now) claimBy.set(c.symbolId, c.agentId);
 
   const all = [...ids, ...ghosts.keys()];
-  const edges = t.edges.filter((e) => (ids.has(e.callerId) || ghosts.has(e.callerId)) && (ids.has(e.calleeId) || ghosts.has(e.calleeId)));
+  const shown = new Set(all);
+  const edges = t.edges.filter((e) => shown.has(e.callerId) && shown.has(e.calleeId));
   const callers = new Map<string, string[]>();
   for (const e of edges) callers.set(e.calleeId, [...(callers.get(e.calleeId) ?? []), e.callerId]);
+
+  // worked on: anything held or contested right now, or touched within idleMs
+  const lastAt = symbolActivity(t, now);
+  const idleOf = (id: string) => (claimBy.has(id) || hotSyms.has(id) ? 0 : now - (lastAt.get(id) ?? -Infinity));
+  const activeIds = new Set(all.filter((id) => idleOf(id) <= idleMs));
+  const contextIds = new Set<string>();
+  for (const id of activeIds) {
+    const cs = (callers.get(id) ?? []).filter((c) => !activeIds.has(c)).sort();
+    for (const c of cs.slice(0, CONTEXT_CALLERS)) contextIds.add(c);
+  }
 
   // column = longest chain of callers above a symbol
   const col = new Map<string, number>();
@@ -458,13 +503,27 @@ export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; 
   };
   all.forEach(depth);
 
-  const rows = new Map<number, number>();
+  // A call-depth level with many functions would make one very tall column, so each level wraps
+  // into extra columns after `maxRows`, keeping the whole map roughly screen-shaped.
+  const maxRows = Math.max(6, Math.ceil(1.4 * Math.sqrt(all.length)));
+  const perDepth = new Map<number, number>();
+  for (const id of all) perDepth.set(col.get(id)!, (perDepth.get(col.get(id)!) ?? 0) + 1);
+  const firstCol = new Map<number, number>();
+  let next = 0;
+  for (const d of [...perDepth.keys()].sort((a, b) => a - b)) {
+    firstCol.set(d, next);
+    next += Math.ceil(perDepth.get(d)! / maxRows);
+  }
+  const placed = new Map<number, number>(); // depth -> functions placed so far
+  const symById = new Map(t.symbols.map((x) => [x.id, x]));
   const sorted = all.slice().sort((a, b) => (col.get(a)! - col.get(b)!) || symbolFile(a).localeCompare(symbolFile(b)) || a.localeCompare(b));
   const nodes: MapNode[] = sorted.map((id) => {
-    const s = t.symbols.find((x) => x.id === id);
-    const c = col.get(id)!;
-    const r = rows.get(c) ?? 0;
-    rows.set(c, r + 1);
+    const s = symById.get(id);
+    const d = col.get(id)!;
+    const i = placed.get(d) ?? 0;
+    placed.set(d, i + 1);
+    const c = firstCol.get(d)! + Math.floor(i / maxRows);
+    const r = i % maxRows;
     const ghost = !s;
     const ownerIds = claimBy.has(id) ? [claimBy.get(id)!] : ghost ? ghosts.get(id) ?? [] : [];
     const ownerId = ownerIds[0];
@@ -472,10 +531,14 @@ export function codeMap(t: Tables, w: Window, now: number): { nodes: MapNode[]; 
     return {
       id, name: s?.name ?? symbolName(id), file: s?.file ?? symbolFile(id), kind: s?.kind ?? 'function', version: s?.version ?? 0,
       owner: ownerId ? person(ppl, ownerId) : undefined, owners: ownerIds.map((x) => person(ppl, x)), state, ghost, col: c, row: r,
+      active: activeIds.has(id), context: contextIds.has(id),
+      fading: activeIds.has(id) && idleOf(id) > idleMs - FADE_MS,
     };
   });
   return {
     nodes,
+    total: t.symbols.length,
+    activeCount: activeIds.size,
     edges: edges.map((e) => ({ id: String(e.id), source: e.callerId, target: e.calleeId, hot: hotSyms.has(e.calleeId) || hotSyms.has(e.callerId) })),
   };
 }

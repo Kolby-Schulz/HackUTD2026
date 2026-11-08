@@ -2,13 +2,13 @@
 title: Dashboard and scripts
 area: dashboard
 sources: [dashboard/, scripts/]
-verified: claude/vercel-prod-multi-user-d13a5f
+verified: fix/code-map-features
 ---
 Summary: The dashboard is a React 19 + Vite single page that reads 15 SpacetimeDB tables through live `useTable` subscriptions and only writes via reducers (create task, send instruction). `scripts/` holds the demo, reset, session, join, judge and bench entry points, all run with `tsx` from the root `package.json`. Unit tests exist for both but were not run here (no `node_modules` at the root).
 
 ## Dashboard
 
-- **Framework**: React 19, Vite 8 (`dashboard/package.json`), `@xyflow/react` (React Flow) for the code map (`dashboard/src/CodeMap.tsx`), `spacetimedb/react` hooks. Entry: `dashboard/src/main.tsx:8-12` wraps `<App/>` in `SpacetimeDBProvider`.
+- **Framework**: React 19, Vite 8 (`dashboard/package.json`), `@xyflow/react` (React Flow) for the code map (`dashboard/src/CodeMap.tsx`), `spacetimedb/react` hooks. The map draws every function, but while agents work (claim, conflict, or touched in the last `MAP_IDLE_MS`, 3 min) it focuses on those plus up to 3 faded direct callers each and packs them into a small graph of their own; the rest is not drawn, and links that pass through collapsed functions are dashed with a "⋯" (`dashboard/src/mapLayout.ts`). "Expand all" / "Collapse to agent work" animate between layouts (`CodeMap.tsx`, JS tween so edges follow), hold the function nearest screen centre still, pulse the agents' functions, and dim untouched ones in the full view. Camera never frames below zoom 0.8, and stops following once the user pans. Depth levels wrap after ~1.4*sqrt(N) rows. Nodes carry a language badge from the file extension (`langOf`). Entry: `dashboard/src/main.tsx:8-12` wraps `<App/>` in `SpacetimeDBProvider`.
 - **Connection**: `dashboard/src/data.ts:22-31` builds `DbConnection` with `withUri(SPACETIME_HOST)`, `withDatabaseName`, and a token saved in localStorage per server (`data.ts:18-19`, `onConnect` at `:26`). Host comes from `vite.config.ts:14-19` (root `.env`, `VITE_SPACETIME_HOST` or `SPACETIME_HOST`). A localhost host falls back to `ws://<page hostname>:3000` (`data.ts:12`), so a second laptop can open `http://<demo-laptop>:5173`.
 - **Bindings**: imported only from `@bindings/*`, aliased to `packages/client/src/bindings` (`vite.config.ts:9,18`). Spec section 18 rule respected.
 - **Subscriptions** (`data.ts:35-49`): agent, task, symbol, symbolEdge, plan, planItem, claim, change, conflict, decision, instruction, run, tokenUsage, tokenSaving (as `savings`), fileEdit. `fileEdit` and `task` are not in the spec 13 table list (see gotchas).

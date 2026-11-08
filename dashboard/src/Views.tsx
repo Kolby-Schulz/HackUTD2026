@@ -1,6 +1,6 @@
 // The workbench's views: the Agents side bar, the symbol details widget on the code map, and
-// the bottom panel (Savings and Problems). Each fact has one home: what an agent is doing lives
-// in the side bar, where it happens lives on the map, conflicts live under Problems.
+// the bottom Savings panel. Each fact has one home: what an agent is doing lives in the side
+// bar, where it happens (including conflicts) lives on the map.
 import { useEffect, useRef, useState } from 'react';
 import type * as R from '@bindings/types.ts';
 import type { AgentCard, CaseView, CoordView, FeedEvent, HistoryItem, MapNode, Savings } from './model.ts';
@@ -135,7 +135,7 @@ export function SymbolWidget({ node, symbols, edges, history, openCase, onClose 
             <span className="muted">Calls</span><span className="mono" style={{ fontSize: 11.5 }}>{callees.join(', ') || 'none'}</span>
             <span className="muted">File</span><span className="mono ellipsis" style={{ fontSize: 11.5 }}>{node.file}</span>
           </div>
-          {openCase && <div className="alert"><span>Conflict #{openCase.key} open</span><span style={{ color: 'var(--text2)', fontWeight: 500 }}>see Problems</span></div>}
+          {openCase && <div className="alert"><span>Conflict #{openCase.key} open</span><span style={{ color: 'var(--text2)', fontWeight: 500 }}>{openCase.kind}</span></div>}
         </div>
       ) : (
         <div className="wbody" role="tabpanel">
@@ -155,82 +155,50 @@ export function SymbolWidget({ node, symbols, edges, history, openCase, onClose 
   );
 }
 
-/* ---------------- bottom panel: Savings and Problems ---------------- */
+/* ---------------- bottom panel: Savings ---------------- */
 
-export function BottomPanel({ savings, cases, tab, setTab, onClose }: {
-  savings: Savings; cases: CaseView[]; tab: 'savings' | 'problems'; setTab: (t: 'savings' | 'problems') => void; onClose: () => void;
-}) {
+export function BottomPanel({ savings, cases, onClose }: { savings: Savings; cases: CaseView[]; onClose: () => void }) {
   const open = cases.filter((c) => c.open);
   const resolved = cases.filter((c) => c.status === 'Resolved').length;
   const maxBar = Math.max(1, savings.base ?? 0, savings.current);
   return (
     <>
-      <div className="ptabs" role="tablist" aria-label="Panel">
-        <button type="button" role="tab" aria-selected={tab === 'savings'} onClick={() => setTab('savings')}>SAVINGS</button>
-        <button type="button" role="tab" aria-selected={tab === 'problems'} onClick={() => setTab('problems')}>PROBLEMS {cases.length > 0 && <span className="count" style={{ background: open.length ? 'var(--danger)' : 'var(--ok)' }}>{open.length || cases.length}</span>}</button>
+      <div className="ptabs">
+        <h2 className="ptitle">SAVINGS</h2>
         <span className="grow" />
         <button type="button" className="iconbtn" aria-label="Hide panel" title="Hide" onClick={onClose} style={{ alignSelf: 'center', height: 24 }}>{ICON.close}</button>
       </div>
       <div className="pane-body">
-        {tab === 'savings' ? (
-          <div className="savings" role="tabpanel">
-            <div>
-              <div className="hd">Tokens saved</div>
-              <div className="saved-row">
-                <span className={'num' + (savings.saved ? '' : ' zero')} style={savings.saved ? { color: 'var(--accent)' } : undefined}>{savings.saved === undefined ? '—' : fmtK(savings.saved)}</span>
-                {savings.base !== undefined && (
-                  <div>
-                    <div className="vs"><span className="muted">without</span><span className="track"><span style={{ width: `${(savings.base / maxBar) * 100}%`, background: '#afb8c1' }} /></span><span className="mono" style={{ textAlign: 'right' }}>{fmtK(savings.base)}</span></div>
-                    <div className="vs"><span style={{ color: 'var(--accent)', fontWeight: 600 }}>with</span><span className="track"><span style={{ width: `${(savings.current / maxBar) * 100}%`, background: 'var(--accent)' }} /></span><span className="mono" style={{ textAlign: 'right' }}>{fmtK(savings.current)}</span></div>
-                  </div>
-                )}
-              </div>
-              <div className="muted" style={{ fontSize: 12 }}>{savings.base !== undefined ? 'Against the last run without InSync, at the same point in the run.' : savings.current === 0 ? 'Counts from this run’s first tokens.' : 'Run once without InSync (npm run demo -- --mode without_contract) to measure against.'}</div>
-            </div>
-            <div>
-              <div className="hd">Conflicts caught</div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span className={'num' + (cases.length ? '' : ' zero')}>{cases.length}</span>
-                {open.length > 0 && <span className="badge" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{open.length} open</span>}
-              </div>
-              {cases[0] && <button type="button" onClick={() => setTab('problems')} style={{ border: 'none', background: 'none', padding: 0, textAlign: 'left', fontSize: 12 }} className="ellipsis">
-                <span className="mono" style={{ fontWeight: 700 }}>#{cases[0].key} {cases[0].symbol}</span> <span style={{ color: cases[0].open ? 'var(--warn)' : 'var(--ok)', fontWeight: 600 }}>{cases[0].open ? 'deciding' : cases[0].status.toLowerCase()}</span>
-              </button>}
-            </div>
-            <div>
-              <div className="hd">Merge failures avoided</div>
-              <span className={'num' + (resolved ? '' : ' zero')}>{resolved}</span>
-              <div className="muted" style={{ fontSize: 12, lineHeight: 1.45 }}>Conflicts resolved while coding instead of at merge.</div>
-            </div>
-          </div>
-        ) : (
-          <div role="tabpanel">
-            {!cases.length && <div className="empty">No problems. A conflict appears here the moment a plan or a change breaks one of the rules.</div>}
-            {cases.map((c) => (
-              <div key={c.key} className={'problem' + (c.open ? ' open' : '')}>
-                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">{c.open
-                  ? <path d="M8 2L14.5 13.5h-13z M8 6.5v3 M8 11.5h.01" fill="none" stroke="var(--danger)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  : <path d="M14.25 8a6.25 6.25 0 1 1-12.5 0a6.25 6.25 0 1 1 12.5 0z M5.5 8.2l1.7 1.7 3.3-3.6" fill="none" stroke="var(--ok)" strokeWidth="1.8" strokeLinecap="round" />}</svg>
-                <div style={{ minWidth: 0 }}>
-                  <div className="ellipsis"><span className="muted">#{c.key}</span> <span className="mono" style={{ fontWeight: 700 }}>{c.symbol}</span></div>
-                  <div className="muted ellipsis" style={{ fontSize: 12 }}>{c.kind}{c.rule && ` · ${c.rule}`} · {c.agentA.name} ↔ {c.agentB.name}</div>
+        <div className="savings">
+          <div>
+            <div className="hd">Tokens saved</div>
+            <div className="saved-row">
+              <span className={'num' + (savings.saved ? '' : ' zero')} style={savings.saved ? { color: 'var(--accent)' } : undefined}>{savings.saved === undefined ? '—' : fmtK(savings.saved)}</span>
+              {savings.base !== undefined && (
+                <div>
+                  <div className="vs"><span className="muted">without</span><span className="track"><span style={{ width: `${(savings.base / maxBar) * 100}%`, background: '#afb8c1' }} /></span><span className="mono" style={{ textAlign: 'right' }}>{fmtK(savings.base)}</span></div>
+                  <div className="vs"><span style={{ color: 'var(--accent)', fontWeight: 600 }}>with</span><span className="track"><span style={{ width: `${(savings.current / maxBar) * 100}%`, background: 'var(--accent)' }} /></span><span className="mono" style={{ textAlign: 'right' }}>{fmtK(savings.current)}</span></div>
                 </div>
-                <div className="steps">
-                  {c.steps.map((p, i) => {
-                    const dot = p.state === 'done' ? { background: c.open ? 'var(--accent)' : 'var(--ok)' } : p.state === 'running' ? { border: '2px solid var(--warn)', background: 'var(--warn-soft)' } : { border: '2px solid var(--border)' };
-                    return (
-                      <div key={i} className="step">
-                        <div className="line"><span className="sd" style={dot} />{i < c.steps.length - 1 && <span className="sl" />}</div>
-                        <b style={{ color: p.state === 'running' ? 'var(--warn)' : p.state === 'waiting' ? 'var(--text2)' : undefined }}>{p.label}</b>
-                        <span className="mono muted" style={{ fontSize: 11 }}>{p.time}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
+              )}
+            </div>
+            <div className="muted" style={{ fontSize: 12 }}>{savings.base !== undefined ? 'Against the last run without InSync, at the same point in the run.' : savings.current === 0 ? 'Counts from this run’s first tokens.' : 'Run once without InSync (npm run demo -- --mode without_contract) to measure against.'}</div>
           </div>
-        )}
+          <div>
+            <div className="hd">Conflicts caught</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span className={'num' + (cases.length ? '' : ' zero')}>{cases.length}</span>
+              {open.length > 0 && <span className="badge" style={{ background: 'var(--danger-soft)', color: 'var(--danger)' }}>{open.length} open</span>}
+            </div>
+            {cases[0] && <div style={{ fontSize: 12 }} className="ellipsis">
+              <span className="mono" style={{ fontWeight: 700 }}>#{cases[0].key} {cases[0].symbol}</span> <span style={{ color: cases[0].open ? 'var(--warn)' : 'var(--ok)', fontWeight: 600 }}>{cases[0].open ? 'deciding' : cases[0].status.toLowerCase()}</span>
+            </div>}
+          </div>
+          <div>
+            <div className="hd">Merge failures avoided</div>
+            <span className={'num' + (resolved ? '' : ' zero')}>{resolved}</span>
+            <div className="muted" style={{ fontSize: 12, lineHeight: 1.45 }}>Conflicts resolved while coding instead of at merge.</div>
+          </div>
+        </div>
       </div>
     </>
   );
