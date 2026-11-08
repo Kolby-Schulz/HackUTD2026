@@ -28,7 +28,7 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - note: `MsgBody` routing `why` lacks `role|split|general` (types frozen); `routingCard` maps them to `manual`.
 
 ## B. Action cards (WP-61)
-- todo: `ui/useBoot.ts` `startAgents(..., { host, onSay, ...agentChatHooks(sink.chat) })` + import from
+- done (wire/core): `ui/useBoot.ts` `startAgents(..., { host, onSay, ...agentChatHooks(sink.chat) })` + import from
   `./chat/agentChat`.
 - todo: `ui/chat/ChatView.tsx` replace `onUndo` with the `doc` + `undo(m)` handler that calls
   `board.revert(board.me, m.body.tx)`, marks the card undone and posts "You undid: ...".
@@ -55,21 +55,21 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - todo: `ui/comments/CommentList.tsx` lists orphan pins.
 
 ## G. Agents and presence
-- todo: `core/commands.ts` emits `status.changed` on `status.set` (WP-41; today only `rt.onStatus`).
-- todo: `core/actors.ts` and `agents/runtime.ts` assign colours with `pickColor` from `presence/colors.ts` (WP-37).
-- todo: after a restored board, tell the runtime which slots are occupied so resumed agents do not build over saved
+- done (wire/core): `core/commands.ts` emits `status.changed` on `status.set` (WP-41; today only `rt.onStatus`).
+- done (wire/core): `core/actors.ts` and `agents/runtime.ts` assign colours with `pickColor` from `presence/colors.ts` (WP-37).
+- done (wire/core): `rt.occupy(state)`; start-paused rule removed: after a restored board, tell the runtime which slots are occupied so resumed agents do not build over saved
   work (WP-36); then drop the "start paused" rule.
-- todo: agents snap their placements through `agentSnapMove` (WP-24).
+- todo (wire/core could not: placement is in `agents/scripted.ts`, W-chat file; see report): agents snap their placements through `agentSnapMove` (WP-24).
 
 ## H. Selection, undo, inspector, layers, export
 - todo: Shift-click deselect and narrowing a multi-selection happen on pointer-up without movement (`pipeline.onClick`,
   WP-13/14).
-- todo: set `Tx.sel` when transactions are created so undo restores selection exactly (WP-34; core).
-- todo: `actions/align.ts` Alt+A/D/W/S/H/V align shortcuts (WP-24).
-- todo: opacity keys 1-9 and 0 in an actions file (WP-56).
-- todo: Share menu and inspector export entries call `exportSelection(board, 1|2|3)` (WP-64).
+- done (wire/core): exec/gesture set it, undo/redo reselect: set `Tx.sel` when transactions are created so undo restores selection exactly (WP-34; core).
+- done (wire/core): `actions/align.ts` Alt+A/D/W/S/H/V align shortcuts (WP-24).
+- done (wire/core): in `actions/layers.ts`: opacity keys 1-9 and 0 in an actions file (WP-56).
+- done (wire/core): Share menu and inspector export entries call `exportSelection(board, 1|2|3)` (WP-64).
 - todo: layers panel feeds LayerRow the data for ancestor owner rings and "+n" dots (WP-55).
-- todo: toasts pause/resume and sticky (WP-45; `core/toast.ts`).
+- done (wire/core): store API; `ui/shell/Toasts.tsx` hover must call `toasts.pause/resume`: toasts pause/resume and sticky (WP-45; `core/toast.ts`).
 
 ## I. Remaining Wave 1 seams
 - todo (WP-28): `ui/layers/LayersPanel.tsx` renders rows through `VirtualList` (import `VirtualList`, `ROW_HEIGHT` from
@@ -79,7 +79,7 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - WP-16, WP-50: no seam (WP-50 write-back of measured text sizes is WP-60's job, Wave 2).
 - todo (WP-46): `ui/gestures/pipeline.ts` `down()` ignores `button === 2` so a right-click opens the context menu without
   starting a select/move gesture.
-- todo (WP-33): `actions/view.ts` adds `{ id: 'view.toggleDebug', title: 'Toggle debug HUD', group: 'View', contexts: ctx,
+- done (wire/core) (WP-33): `actions/view.ts` adds `{ id: 'view.toggleDebug', title: 'Toggle debug HUD', group: 'View', contexts: ctx,
   run: () => toggleDebug() }` (import `toggleDebug` from `../core/perf`); `core/devtools.ts` adds
   `debug: (on = true) => setDebug(on)`.
 

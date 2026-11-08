@@ -7,7 +7,10 @@ import { createChoreographer, realClock, seededRng } from './choreographer';
 import type { Choreographer, Clock } from './choreographer';
 import { createTaskQueue } from './queue';
 import type { TaskQueue } from './queue';
-import { createScriptedDriver, createSlots } from './scripted';
+import { pickColor } from '../presence/colors';
+import { absRect } from '../core/tree';
+import type { TreeView } from '../core/tree';
+import { CELL_H, CELL_W, COLS, createScriptedDriver, createSlots } from './scripted';
 import type { Slots } from './scripted';
 
 export const NAMES = ['Iris', 'Juno', 'Milo', 'Nova', 'Otto', 'Pia', 'Rex', 'Sol', 'Tess', 'Vik', 'Wren', 'Zed'];
@@ -97,7 +100,15 @@ type Agent = {
 export function createRuntime(opts: RuntimeOpts) {
   const { board } = opts;
   const clock = opts.clock ?? realClock;
-  const slots = createSlots();
+  const baseSlots = createSlots();
+  // cells that already hold saved work (a restored board): never handed out
+  const occupied = new Set<number>();
+  const slots: Slots = {
+    claim() {
+      for (;;) { const k = baseSlots.claim(); if (k < 0 || !occupied.has(k)) return k; }
+    },
+    clear() { baseSlots.clear(); occupied.clear(); },
+  };
   const agents = new Map<ActorId, Agent>();
   const makeDriver = opts.makeDriver ?? ((kind, s) => {
     if (kind !== 'scripted') throw new Error('only the scripted driver exists yet');
@@ -248,7 +259,7 @@ export function createRuntime(opts: RuntimeOpts) {
     const actor: Actor = {
       id, kind: 'agent', driver: kind, role: o.role,
       name: o.name ?? NAMES[n % NAMES.length] + (lap ? ` ${lap + 1}` : ''),
-      color: o.color ?? COLORS[n % COLORS.length],
+      color: o.color ?? pickColor(board.actors.list().map((x) => x.color)),
       caps: ['read', 'write', 'comment', 'claim'],
     };
     const rng = seededRng((opts.seed ?? 1) + n);
@@ -399,6 +410,18 @@ export function createRuntime(opts: RuntimeOpts) {
   /** The human cleared the board: forget the slot grid so agents start laying out from cell 0 again. */
   function resetSlots() { slots.clear(); }
 
+  /** A restored board: cells overlapped by a saved top-level layer are taken, so resumed agents build beside it. */
+  function occupy(view: TreeView) {
+    for (const id of view.children.get(null) ?? []) {
+      const s = view.shapes.get(id);
+      const r = s && !s.deleted ? absRect(view, id) : null;
+      if (!r) continue;
+      const c0 = Math.max(0, Math.floor(r.x / CELL_W)), c1 = Math.min(COLS - 1, Math.floor((r.x + r.w - 1e-6) / CELL_W));
+      const r0 = Math.max(0, Math.floor(r.y / CELL_H)), r1 = Math.floor((r.y + r.h - 1e-6) / CELL_H);
+      for (let row = r0; row <= r1; row++) for (let col = c0; col <= c1; col++) occupied.add(row * COLS + col);
+    }
+  }
+
   function reset() {
     for (const id of [...agents.keys()]) remove(id);
     slots.clear();
@@ -406,7 +429,7 @@ export function createRuntime(opts: RuntimeOpts) {
   }
 
   return {
-    hosting, spawn, stop, stopAll, restart, remove, setPaused, setAllPaused, request, resetSlots, reset,
+    hosting, spawn, stop, stopAll, restart, remove, setPaused, setAllPaused, request, resetSlots, occupy, reset,
     cancelTask, promoteTask, tasks, step, setSpeed, setAgentSpeed,
     getSpeed: () => (stepMode ? 0 : speed),
     getAgentSpeed: (id: ActorId) => agents.get(id)?.mult ?? 1,

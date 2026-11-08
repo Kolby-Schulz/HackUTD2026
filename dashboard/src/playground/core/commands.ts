@@ -95,7 +95,7 @@ interface Ctx {
   mkId(i: number, k: number): ShapeId;  // new shape id number k of command i (stable across gesture frames)
   deps: Deps;
 }
-interface Deps { claims: Claims; presence: MemoryPresenceBus; selection: SelectionStore; extra?: ExtraHandler }
+interface Deps { claims: Claims; presence: MemoryPresenceBus; selection: SelectionStore; extra?: ExtraHandler; emit?: (e: EventDraft) => unknown }
 /** Seam for commands this module does not own yet (comments, chat). Return undefined to decline. */
 export type ExtraHandler = (actor: ActorId, cmd: Command) => Result | undefined;
 
@@ -428,7 +428,10 @@ function compile(cmd: Command, c: Ctx, clock: { n: number }): Compiled {
       return done([], undefined, () => { c.deps.claims.release(claim.id); });
     }
     case 'status.set':
-      return done([], undefined, () => c.deps.presence.publish({ actor, state: cmd.state, ...(cmd.detail !== undefined ? { detail: cmd.detail } : {}) }));
+      return done([], undefined, () => {
+        c.deps.presence.publish({ actor, state: cmd.state, ...(cmd.detail !== undefined ? { detail: cmd.detail } : {}) });
+        c.deps.emit?.({ t: 'status.changed', actor, who: actor, state: cmd.state });
+      });
 
     case 'comment.create': case 'comment.reply': case 'comment.resolve': case 'chat.say': {
       const r = c.deps.extra?.(actor, cmd);
@@ -572,7 +575,7 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
   });
   const prune = () => selection.prune((id) => !!live(doc.getState(), id));
 
-  const deps: Deps = { claims, presence, selection, ...(opts.extra ? { extra: opts.extra } : {}) };
+  const deps: Deps = { claims, presence, selection, emit: (e) => events.emit(e), ...(opts.extra ? { extra: opts.extra } : {}) };
   let seq = 0;
   const cache = new Map<string, ExecResult>();
 
@@ -610,6 +613,7 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
       return { ok: false, seq, results: [fail('invalid', `a batch holds at most ${MAX_COMMANDS} commands`)] };
     }
 
+    const selBefore = [...selection.get(b.actor).ids];
     const p = plan(b, doc.getState(), gate, deps, () => newId());
     const causedBy = b.causedBy ?? b.opId;
     let tx: Tx | null = null;
@@ -623,7 +627,7 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
         return { ok: false, seq, results: b.commands.map(() => fail('invalid', msg)) };
       }
       p.afters.forEach((f) => f());
-      if (tx) { undoManager.record(tx); emitTx(tx, b.actor, causedBy); }
+      if (tx) { tx.sel = { before: selBefore, after: [...selection.get(b.actor).ids] }; undoManager.record(tx); emitTx(tx, b.actor, causedBy); }
     }
     const ok = !p.failed && !aborted;
     const applied = !aborted && (tx !== null || p.afters.length > 0);
@@ -636,6 +640,7 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
 
   function gesture(actor: ActorId, label: string, o: { coalesceKey?: string } = {}): Gesture {
     open.get(actor)?.abort(); // one open gesture per actor: a new one supersedes a stale one
+    const selBefore = [...selection.get(actor).ids];
     const ids = new Map<string, ShapeId>();
     const mkId = (i: number, k: number) => {
       const key = `${i}:${k}`;
@@ -664,7 +669,7 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
         finished = true; open.delete(actor);
         const tx = handle.commit();
         last.afters.forEach((f) => f());
-        if (tx) { undoManager.record(tx); emitTx(tx, actor); seq++; }
+        if (tx) { tx.sel = { before: selBefore, after: [...selection.get(actor).ids] }; undoManager.record(tx); emitTx(tx, actor); seq++; }
         return { ok: !last.failed, seq, results: last.results, ...(tx ? { tx: tx.id } : {}) };
       },
       abort() {
@@ -678,20 +683,25 @@ export function createBoard(opts: BoardOptions = {}): BoardKit {
   }
   const open = new Map<ActorId, Gesture>();
 
-  function afterUndo(actor: ActorId, tx: Tx | null) { if (tx) { emitTx(tx, actor); seq++; } }
+  /** `reselect`: undo / redo restore the selection the original edit started from (revert by a card leaves it alone). */
+  function afterUndo(actor: ActorId, tx: Tx | null, reselect = false) {
+    if (!tx) return;
+    emitTx(tx, actor); seq++;
+    if (reselect && tx.sel) selection.set(actor, tx.sel.after);
+  }
 
   const board: BoardKit = {
     exec, gesture, doc, presence, actors, locks, claims, selection, index, undoManager, events, gate, me,
     undo(actor) {
       if (!gate.can(actor, 'write')) return false;
       const r = undoManager.undo(actor);
-      afterUndo(actor, r.tx);
+      afterUndo(actor, r.tx, true);
       return r.ok;
     },
     redo(actor) {
       if (!gate.can(actor, 'write')) return false;
       const r = undoManager.redo(actor);
-      afterUndo(actor, r.tx);
+      afterUndo(actor, r.tx, true);
       return r.ok;
     },
     revert(by, txId) {

@@ -7,6 +7,7 @@ import { fitRect, zoomAt } from '../core/camera';
 import { union } from '../core/geom';
 import { isTweening, tweenCam } from '../core/tween';
 import { worldBounds } from '../core/tree';
+import { toggleDebug } from '../core/perf';
 import { toast } from '../core/toast';
 import { activeBoard, selectedIds } from '../ui/board/state';
 import type { BoardEnv } from '../ui/board/state';
@@ -79,5 +80,6 @@ export const actions: Action[] = [
   { id: 'view.zoomSelection', title: 'Zoom to selection', group: 'View', keys: { all: ['Shift+Digit2'] }, contexts: ctx, run: run(zoomSelection) },
   { id: 'view.zoom100', title: 'Zoom to 100%', group: 'View', keys: { all: ['Mod+Digit0', 'Shift+Digit0'] }, contexts: ctx, run: run((e) => zoomToward(e, 1, false)) },
   { id: 'view.zoom50', title: 'Zoom to 50%', group: 'View', contexts: ctx, run: run((e) => zoomToward(e, 0.5, false)) },
+  { id: 'view.toggleDebug', title: 'Toggle debug HUD', group: 'View', contexts: ctx, run: () => toggleDebug() },
   { id: 'view.zoom200', title: 'Zoom to 200%', group: 'View', contexts: ctx, run: run((e) => zoomToward(e, 2, false)) },
 ];

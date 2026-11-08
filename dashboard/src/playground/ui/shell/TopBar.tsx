@@ -5,7 +5,7 @@ import { RENAME_EVENT, cleanFileName, FILE_NAME_MAX } from '../../actions/panels
 import { prefs } from '../../core/prefs';
 import { useStoreValue } from '../../core/react';
 import { toast } from '../../core/toast';
-import { copyLink } from '../../actions/share';
+import { copyLink, exportSelection } from '../../actions/share';
 import { activeBoard } from '../board/state';
 import type { Persistence } from '../../core/persist';
 import { BUBBLE } from '../constants';
@@ -61,7 +61,8 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
 }) {
   const tool = useUi(ui, 'tool');
   const [menu, setMenu] = useState(false);
-  useEffect(() => ui.onEscape(() => setMenu(false)), [ui]);
+  const [shareMenu, setShareMenu] = useState(false);
+  useEffect(() => ui.onEscape(() => { setMenu(false); setShareMenu(false); }), [ui]);
 
   const share = () => {
     const env = activeBoard();
@@ -91,10 +92,21 @@ export function TopBar({ board, ui, cursors, showPins, onShowPins, onClearResolv
           </div>
         )}
       </div>
-      <button className="pg-share" onClick={share} title="Copy link">
-        <svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 11V8a5 5 0 0 1 10 0v3M5.5 11h13v9.5h-13z" /></svg>
-        <span>Share</span>
-      </button>
+      <div className="pg-cbtn">
+        <button className="pg-share" onClick={share} title="Copy link">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 11V8a5 5 0 0 1 10 0v3M5.5 11h13v9.5h-13z" /></svg>
+          <span>Share</span>
+        </button>
+        <button className="pg-chev" title="Share options" aria-haspopup="menu" aria-expanded={shareMenu} onClick={() => setShareMenu((m) => !m)}>▾</button>
+        {shareMenu && (
+          <div className="pg-menu" role="menu" onMouseLeave={() => setShareMenu(false)}>
+            <button role="menuitem" onClick={() => { share(); setShareMenu(false); }}>Copy link to this view</button>
+            {([1, 2, 3] as const).map((s) => (
+              <button key={s} role="menuitem" onClick={() => { void exportSelection(board, s); setShareMenu(false); }}>Export selection as PNG ({s}x)</button>
+            ))}
+          </div>
+        )}
+      </div>
       <ZoomMenu />
     </header>
   );

@@ -5,6 +5,7 @@ import { useChildren, useDoc } from '../../core/react';
 import type { SlotProps } from '../slotProps';
 import { AlignSection } from './sections/Align';
 import { EffectsSection } from './sections/Effects';
+import { ExportSection } from './sections/Export';
 import { FillSection } from './sections/Fill';
 import { LayerSection } from './sections/Layer';
 import { LayoutSection } from './sections/Layout';
@@ -67,6 +68,7 @@ export function Inspector(props: SlotProps) {
       {show.paint && <FillSection {...props} />}
       {show.paint && <StrokeSection {...props} />}
       {show.paint && <EffectsSection {...props} />}
+      <ExportSection {...props} />
     </div>
   );
 }

@@ -55,9 +55,24 @@ export function soloVisible(b: BoardKit, id: ShapeId): boolean {
   return b.exec({ actor: b.me, opId: opId(b.me), commands }).ok;
 }
 
+/** Figma opacity keys: 1..9 = 10%..90%, 0 = 100%. One shape.update, one undo entry. */
+export function setOpacity(b: BoardKit, ids: readonly ShapeId[], value: number): boolean {
+  const shapes = b.doc.getState().shapes;
+  const live = ids.filter((id) => { const s = shapes.get(id); return s && !s.deleted; });
+  if (!live.length) return false;
+  return b.exec({ actor: b.me, opId: opId(b.me), commands: [{ t: 'shape.update', ids: [...live], patch: { opacity: value } }], label: `Opacity ${Math.round(value * 100)}%` }).ok;
+}
+
 const withBoard = (fn: (b: BoardKit) => void) => () => { const env = activeBoard(); if (env && !env.ui.get().editing) fn(env.board); };
 
+const opacityActions: Action[] = Array.from({ length: 10 }, (_, d) => ({
+  id: `layers.opacity${d}`, title: `Set opacity to ${d === 0 ? 100 : d * 10}%`, group: 'Edit' as const, keys: { all: [`Digit${d}`] }, contexts: ['canvas', 'panel'] as Action['contexts'],
+  // contexts exclude text fields; the editing check also covers the on-canvas text editor
+  run: withBoard((b) => setOpacity(b, selectedIds(b), d === 0 ? 1 : d / 10)),
+}));
+
 export const actions: Action[] = [
+  ...opacityActions,
   { id: 'layers.lock', title: 'Lock / unlock selection', group: 'Edit', keys: { all: ['Mod+Shift+l'] }, contexts: ['canvas', 'panel'], run: withBoard((b) => toggleFlag(b, selectedIds(b), 'locked')) },
   { id: 'layers.hide', title: 'Show / hide selection', group: 'Edit', keys: { all: ['Mod+Shift+h'] }, contexts: ['canvas', 'panel'], run: withBoard((b) => toggleFlag(b, selectedIds(b), 'hidden')) },
   {
