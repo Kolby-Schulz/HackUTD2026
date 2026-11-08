@@ -27,7 +27,7 @@ import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { checkTools, connect, DEP_DIRS, DEP_PATHSPEC, isOperatorInstruction, noopClient, resolveTarget, runInstall, toolPath, worktreeDir, type ContractClient, type Instruction } from '@contract/client';
+import { checkTools, connect, DEP_DIRS, isOperatorInstruction, noopClient, resolveTarget, runInstall, stageAll, toolPath, worktreeDir, type ContractClient, type Instruction } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
@@ -308,7 +308,7 @@ if (stopReason) {
   process.exit(3);
 }
 // Never commit installed dependencies (node_modules, .venv, ...) even if the repo doesn't ignore them.
-execFileSync('git', ['add', '-A', ...DEP_PATHSPEC], { cwd: worktree });
+stageAll(worktree);
 execFileSync('git', ['commit', '-m', `${agentId}: ${task.slice(0, 60)}`, '--allow-empty'], { cwd: worktree, stdio: 'inherit' });
 for (const symbolId of contract.myClaims()) {
   await contract.release(symbolId).catch((e: unknown) => console.warn(`[${agentId}] release ${symbolId}: ${String(e)}`));

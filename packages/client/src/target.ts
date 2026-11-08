@@ -11,7 +11,8 @@
 //   this monorepo). Workers get a git worktree of that repo and work in the same folder.
 // - A git URL is cloned once into .contract/repos/<name> and fetched on later runs.
 // - Optional <target>/contract.json: { "checks": { "unit tests": "npm test", ... },
-//   "base": "origin/main", "install": "make deps" | false }. Checks are the commands the
+//   "base": "origin/main", "install": "make deps" | false,
+//   "map": { "include": ["scripts"], "exclude": ["demo-repo"] } }. Checks are the commands the
 //   merge runs and the commands workers may run without asking. CONTRACT_TEST_CMD overrides
 //   a single test command. Without contract.json, checks and the dependency install are
 //   detected from the repo's files (package.json, pyproject.toml, go.mod, Cargo.toml, ...).
@@ -118,6 +119,8 @@ interface TargetConfig {
   base?: string;
   /** Shell command that installs dependencies, or false for none (default: detected). */
   install?: string | false;
+  /** Code-map folders: read by the mapper (mapper/src/map.ts MapPolicy), not here. */
+  map?: { include?: string[]; exclude?: string[] };
 }
 
 function readConfig(dir: string): TargetConfig {
@@ -279,7 +282,19 @@ export function toolPath(dir: string, path = process.env.PATH ?? ''): string {
 
 /** Folders installs create; never committed (git pathspec excludes, no repo config changes). */
 export const DEP_DIRS = ['node_modules', '.venv', 'vendor/bundle', 'target', '__pycache__'];
-export const DEP_PATHSPEC = ['--', '.', ...DEP_DIRS.flatMap((d) => [`:(exclude,glob)${d}/**`, `:(exclude,glob)**/${d}/**`])];
+const DEP_GLOBS = DEP_DIRS.flatMap((d) => [`:(glob)${d}/**`, `:(glob)**/${d}/**`]);
+
+/**
+ * Stages everything in `dir` except installed dependencies, whether or not the repo ignores
+ * them. Not one `git add` with `:(exclude)` pathspecs: when a dep folder is gitignored, git
+ * treats that exclude as "a pathspec that only matched ignored files" and exits 1 ("The
+ * following paths are ignored by one of your .gitignore files"), which killed every worker on
+ * a repo with node_modules in .gitignore. So: add all, then unstage the dep folders.
+ */
+export function stageAll(dir: string): void {
+  execFileSync('git', ['add', '-A', '--', '.'], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync('git', ['reset', '-q', '--', ...DEP_GLOBS], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+}
 
 /**
  * Installs the target's dependencies in a checkout of it (`dir` = the target folder in a

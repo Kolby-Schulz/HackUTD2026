@@ -2,14 +2,14 @@
 title: Coordinator, mapper, triage, demo-repo
 area: coordinator
 sources: [mapper/, agents/coordinator/, agents/triage/, demo-repo/]
-verified: 87debe9
+verified: self-run-checkpoint
 ---
 Summary: The mapper parses demo-repo into symbol and edge rows and pushes them through upsert_symbols. The coordinator asks a model (Nemotron or Claude Code) to resolve each open conflict, validates the answer, and falls back to a first-claimant rule. Triage (Jev) is a stub that exits unless TRIAGE=on. Demo-repo is the billing app with two planted conflicts; its integration test is red by design.
 
 ## Mapper (spec 9)
 
 - Parser: `mapper/src/map.ts`. Maps exported functions, arrow/function consts, other exported consts, classes and their methods (header rules at `map.ts:1-31`). Edges are value references that resolve to mapped symbols, not only calls (`map.ts:1-31`). Type-only references are not edges.
-- TS/JS: `RepoMapper` (`map.ts`) builds a ts-morph project over the repo. Python, Go, Java, Rust, Ruby, PHP, C#, C/C++: `mapper/src/polyglot.ts` + `lang.ts` via tree-sitter (`@vscode/tree-sitter-wasm` pinned 0.3.1); signatures are canonical `name(p: T): R` so Rule 2 parses them unchanged; call edges are matched by name (same file first, else a unique repo-wide name). `createRepoMapper(dir)` (async) combines both; hooks use `mapFileAsync` / `symbolRangesAsync`. `SKIP_DIRS` at `map.ts:376`; `test/tests/__tests__/scripts` are non-source (`map.ts:383`).
+- TS/JS: `RepoMapper` (`map.ts`) builds a ts-morph project over the repo. Python, Go, Java, Rust, Ruby, PHP, C#, C/C++: `mapper/src/polyglot.ts` + `lang.ts` via tree-sitter (`@vscode/tree-sitter-wasm` pinned 0.3.1); signatures are canonical `name(p: T): R` so Rule 2 parses them unchanged; call edges are matched by name (same file first, else a unique repo-wide name). `createRepoMapper(dir)` (async) combines both; hooks use `mapFileAsync` / `symbolRangesAsync`. `SKIP_DIRS` at `map.ts:377`; `test/tests/__tests__/scripts` are non-source (`NON_SOURCE_DIRS`), unless the target's `contract.json` has `"map": { "include": [...], "exclude": [...] }` (`MapPolicy` in `map.ts`; module state set by `useMapPolicy(repoDir)`, which `listMappableFiles`/`mapFile` and the worker hooks call). The monorepo's own `contract.json` includes `scripts/` and excludes `demo-repo/` so Contract can run on itself (`--repo .`).
 - Output: `FileMap` per file, pushed by `MapSync.push` (`mapper/src/sync.ts:127`). `planUpsert` (`sync.ts:41`) sends only when symbols, hashes or edges differ, so restarts and no-op saves bump nothing.
 - Sync never sends `behavior_note`; it always sends `''` (`sync.ts:6-8`). Agents set it through `report_change`.
 - CLI (`mapper/src/cli.ts`): `--repo` (default `CONTRACT_TARGET`, else demo-repo, `cli.ts:106`); refuses `.worktrees/` paths (`cli.ts:107`). `--watch` takes the `mapper` service lock (`cli.ts:137`), debounces 150 ms or 1 s in bursts (`cli.ts:33-35`), and re-maps the whole repo above 50 changed files (`cli.ts:37`).

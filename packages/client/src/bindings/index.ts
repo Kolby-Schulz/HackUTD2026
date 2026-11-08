@@ -39,25 +39,36 @@ import CacheSummaryReducer from "./cache_summary_reducer";
 import ClaimServiceReducer from "./claim_service_reducer";
 import ClaimSymbolReducer from "./claim_symbol_reducer";
 import CreateTaskReducer from "./create_task_reducer";
+import DeleteMachineProcessReducer from "./delete_machine_process_reducer";
 import DismissConflictReducer from "./dismiss_conflict_reducer";
 import EndRunReducer from "./end_run_reducer";
+import FinishMachineCommandReducer from "./finish_machine_command_reducer";
+import GrantMachineAccessReducer from "./grant_machine_access_reducer";
 import HeartbeatReducer from "./heartbeat_reducer";
 import LogSavingReducer from "./log_saving_reducer";
 import LogTokensReducer from "./log_tokens_reducer";
 import MarkAttemptWastedReducer from "./mark_attempt_wasted_reducer";
 import MarkConflictResolvingReducer from "./mark_conflict_resolving_reducer";
+import PostMachineChatReducer from "./post_machine_chat_reducer";
 import PublishPlanReducer from "./publish_plan_reducer";
+import PutMachineProcessReducer from "./put_machine_process_reducer";
 import RecordCacheHitReducer from "./record_cache_hit_reducer";
 import RegisterAgentReducer from "./register_agent_reducer";
+import RegisterMachineReducer from "./register_machine_reducer";
 import ReleaseClaimReducer from "./release_claim_reducer";
 import ReleaseServiceReducer from "./release_service_reducer";
 import ReportChangeReducer from "./report_change_reducer";
 import ReportEditReducer from "./report_edit_reducer";
+import RequestMachinePairingReducer from "./request_machine_pairing_reducer";
 import ResetDemoStateReducer from "./reset_demo_state_reducer";
 import ResolveConflictReducer from "./resolve_conflict_reducer";
+import ResolveMachinePairingReducer from "./resolve_machine_pairing_reducer";
+import RevokeMachineAccessReducer from "./revoke_machine_access_reducer";
 import SendInstructionReducer from "./send_instruction_reducer";
+import SendMachineCommandReducer from "./send_machine_command_reducer";
 import SetTaskStatusReducer from "./set_task_status_reducer";
 import StartRunReducer from "./start_run_reducer";
+import UpdateMachineReducer from "./update_machine_reducer";
 import UpsertSymbolsReducer from "./upsert_symbols_reducer";
 
 // Import all procedure arg schemas
@@ -70,6 +81,12 @@ import ConflictRow from "./conflict_table";
 import DecisionRow from "./decision_table";
 import FileEditRow from "./file_edit_table";
 import InstructionRow from "./instruction_table";
+import MachineRow from "./machine_table";
+import MachineAccessRow from "./machine_access_table";
+import MachineChatRow from "./machine_chat_table";
+import MachineCommandRow from "./machine_command_table";
+import MachinePairRequestRow from "./machine_pair_request_table";
+import MachineProcessRow from "./machine_process_table";
 import PlanRow from "./plan_table";
 import PlanItemRow from "./plan_item_table";
 import RunRow from "./run_table";
@@ -174,6 +191,87 @@ const tablesSchema = __schema({
       { name: 'instruction_id_key', constraint: 'unique', columns: ['id'] },
     ],
   }, InstructionRow),
+  machine: __table({
+    name: 'machine',
+    indexes: [
+      { accessor: 'id', name: 'machine_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+    ],
+    constraints: [
+      { name: 'machine_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MachineRow),
+  machineAccess: __table({
+    name: 'machine_access',
+    indexes: [
+      { accessor: 'id', name: 'machine_access_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'machine_id', name: 'machine_access_machine_id_idx_btree', algorithm: 'btree', columns: [
+        'machineId',
+      ] },
+    ],
+    constraints: [
+      { name: 'machine_access_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MachineAccessRow),
+  machineChat: __table({
+    name: 'machine_chat',
+    indexes: [
+      { accessor: 'id', name: 'machine_chat_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'machine_id', name: 'machine_chat_machine_id_idx_btree', algorithm: 'btree', columns: [
+        'machineId',
+      ] },
+    ],
+    constraints: [
+      { name: 'machine_chat_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MachineChatRow),
+  machineCommand: __table({
+    name: 'machine_command',
+    indexes: [
+      { accessor: 'id', name: 'machine_command_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'machine_id', name: 'machine_command_machine_id_idx_btree', algorithm: 'btree', columns: [
+        'machineId',
+      ] },
+    ],
+    constraints: [
+      { name: 'machine_command_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MachineCommandRow),
+  machinePairRequest: __table({
+    name: 'machine_pair_request',
+    indexes: [
+      { accessor: 'id', name: 'machine_pair_request_id_idx_btree', algorithm: 'btree', columns: [
+        'id',
+      ] },
+      { accessor: 'machine_id', name: 'machine_pair_request_machine_id_idx_btree', algorithm: 'btree', columns: [
+        'machineId',
+      ] },
+    ],
+    constraints: [
+      { name: 'machine_pair_request_id_key', constraint: 'unique', columns: ['id'] },
+    ],
+  }, MachinePairRequestRow),
+  machineProcess: __table({
+    name: 'machine_process',
+    indexes: [
+      { accessor: 'key', name: 'machine_process_key_idx_btree', algorithm: 'btree', columns: [
+        'key',
+      ] },
+      { accessor: 'machine_id', name: 'machine_process_machine_id_idx_btree', algorithm: 'btree', columns: [
+        'machineId',
+      ] },
+    ],
+    constraints: [
+      { name: 'machine_process_key_key', constraint: 'unique', columns: ['key'] },
+    ],
+  }, MachineProcessRow),
   plan: __table({
     name: 'plan',
     indexes: [
@@ -314,25 +412,36 @@ const reducersSchema = __reducers(
   __reducerSchema("claim_service", ClaimServiceReducer),
   __reducerSchema("claim_symbol", ClaimSymbolReducer),
   __reducerSchema("create_task", CreateTaskReducer),
+  __reducerSchema("delete_machine_process", DeleteMachineProcessReducer),
   __reducerSchema("dismiss_conflict", DismissConflictReducer),
   __reducerSchema("end_run", EndRunReducer),
+  __reducerSchema("finish_machine_command", FinishMachineCommandReducer),
+  __reducerSchema("grant_machine_access", GrantMachineAccessReducer),
   __reducerSchema("heartbeat", HeartbeatReducer),
   __reducerSchema("log_saving", LogSavingReducer),
   __reducerSchema("log_tokens", LogTokensReducer),
   __reducerSchema("mark_attempt_wasted", MarkAttemptWastedReducer),
   __reducerSchema("mark_conflict_resolving", MarkConflictResolvingReducer),
+  __reducerSchema("post_machine_chat", PostMachineChatReducer),
   __reducerSchema("publish_plan", PublishPlanReducer),
+  __reducerSchema("put_machine_process", PutMachineProcessReducer),
   __reducerSchema("record_cache_hit", RecordCacheHitReducer),
   __reducerSchema("register_agent", RegisterAgentReducer),
+  __reducerSchema("register_machine", RegisterMachineReducer),
   __reducerSchema("release_claim", ReleaseClaimReducer),
   __reducerSchema("release_service", ReleaseServiceReducer),
   __reducerSchema("report_change", ReportChangeReducer),
   __reducerSchema("report_edit", ReportEditReducer),
+  __reducerSchema("request_machine_pairing", RequestMachinePairingReducer),
   __reducerSchema("reset_demo_state", ResetDemoStateReducer),
   __reducerSchema("resolve_conflict", ResolveConflictReducer),
+  __reducerSchema("resolve_machine_pairing", ResolveMachinePairingReducer),
+  __reducerSchema("revoke_machine_access", RevokeMachineAccessReducer),
   __reducerSchema("send_instruction", SendInstructionReducer),
+  __reducerSchema("send_machine_command", SendMachineCommandReducer),
   __reducerSchema("set_task_status", SetTaskStatusReducer),
   __reducerSchema("start_run", StartRunReducer),
+  __reducerSchema("update_machine", UpdateMachineReducer),
   __reducerSchema("upsert_symbols", UpsertSymbolsReducer),
 );
 

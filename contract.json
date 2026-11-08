@@ -1,0 +1,10 @@
+{
+  "checks": {
+    "unit tests": "npm test",
+    "typecheck": "npm run typecheck"
+  },
+  "map": {
+    "include": ["scripts"],
+    "exclude": ["demo-repo"]
+  }
+}

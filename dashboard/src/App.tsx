@@ -3,7 +3,7 @@
 // Agents side bar, editor groups holding the Code map, Control and Chat tabs (drag to reorder,
 // move or split; Dock.tsx), Savings / Problems panel, status bar. Tables come from live subscriptions; Control and the chat's
 // assistant talk to the local control server (npm run control). ReplayTab.tsx stays, unmounted.
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
 import { agentCards, calledAgents, cases, codeMap, coordFocus, coordinator, edits, feed, latestRun, runStage, runWindow, savingsNow, symbolHistory } from './model.ts';
@@ -17,6 +17,7 @@ import { ChangesView } from './Changes.tsx';
 import { CommandCenter } from './CommandCenter.tsx';
 import { Boundary } from './ui.tsx';
 import { ControlTab, useControlInfo } from './ControlTab.tsx';
+import { useMachine } from './machine.tsx';
 
 const modeName = (m: string) => (m === 'with_contract' ? `with ${APP_NAME}` : m === 'without_contract' ? `without ${APP_NAME}` : m);
 
@@ -33,6 +34,10 @@ export function App() {
   const [panelTab, setPanelTab] = useState<'savings' | 'problems'>('savings');
   const dock = useDock();
   const { repoLabel, machine } = useControlInfo();
+  // A pairing link (#/pair?…) opens the Control tab, where its progress shows.
+  const pairingWith = useMachine().pairing?.machine;
+  const openView = dock.open;
+  useEffect(() => { if (pairingWith) openView('control'); }, [pairingWith, openView]);
 
   const view = useMemo(() => ({
     agents: agentCards(live, run, now),

@@ -1,10 +1,10 @@
-import { cpSync, mkdtempSync, rmSync, unlinkSync, writeFileSync, readFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { duplicateReason, parseSignature } from '@contract/server/rules';
-import { checkFileCount, isMappable, mapFile, maxFiles, RepoMapper, signatureHash, type FileMap } from '../src/index.ts';
+import { checkFileCount, isMappable, mapFile, maxFiles, readMapPolicy, RepoMapper, setMapPolicy, signatureHash, useMapPolicy, type FileMap } from '../src/index.ts';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/repo', import.meta.url));
 
@@ -263,6 +263,44 @@ describe('isMappable', () => {
     ['tests/setup.js', false],
     ['README.md', false],
   ])('%s -> %s', (path, want) => expect(isMappable(path)).toBe(want));
+});
+
+describe('map policy (contract.json "map")', () => {
+  afterEach(() => setMapPolicy());
+
+  it('include maps a tooling folder, minus its tests and configs; exclude hides a folder', () => {
+    setMapPolicy({ include: ['scripts'], exclude: ['demo-repo'] });
+    expect(isMappable('scripts/lib.ts')).toBe(true);
+    expect(isMappable('scripts/nested/daemon.ts')).toBe(true);
+    expect(isMappable('scripts/test/daemon.test.ts')).toBe(false);
+    expect(isMappable('scripts/vitest.config.ts')).toBe(false);
+    expect(isMappable('other/scripts/x.ts')).toBe(false); // include is a repo-relative prefix
+    expect(isMappable('demo-repo/src/fees.ts')).toBe(false);
+    expect(isMappable('demo-repo-two/src/fees.ts')).toBe(true);
+    expect(isMappable('node_modules/scripts/x.ts')).toBe(false);
+  });
+
+  it('is read from the repo\'s contract.json and applied by RepoMapper', () => {
+    const work = mkdtempSync(join(tmpdir(), 'mapper-policy-'));
+    try {
+      cpSync(FIXTURE, work, { recursive: true });
+      mkdirSync(join(work, 'scripts'));
+      writeFileSync(join(work, 'scripts', 'tool.ts'), 'export function toolMain(argv: string[]): number { return argv.length; }\n');
+      expect(new RepoMapper(work).files()).not.toContain('scripts/tool.ts');
+      writeFileSync(join(work, 'contract.json'), JSON.stringify({ map: { include: ['scripts'], exclude: ['src/billing'] } }));
+      // a fresh dir has a fresh policy (the cache is per directory)
+      const dir2 = mkdtempSync(join(tmpdir(), 'mapper-policy-'));
+      cpSync(work, dir2, { recursive: true });
+      const files = new RepoMapper(dir2).files();
+      expect(files).toContain('scripts/tool.ts');
+      expect(files.some((f) => f.startsWith('src/billing/'))).toBe(false);
+      expect(readMapPolicy(dir2)).toEqual({ include: ['scripts'], exclude: ['src/billing'] });
+      expect(useMapPolicy(FIXTURE)).toEqual({ include: [], exclude: [] });
+      rmSync(dir2, { recursive: true, force: true });
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('watch primitives: refresh + dependents', () => {

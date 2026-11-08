@@ -40,10 +40,10 @@ export function resetFiles(force = false, target: Target = resolveTarget(REPO, u
 
   // 2. The target folder back to the committed starting point.
   const dirty = targetChanges(target);
-  if (dirty) {
+  if (dirty.length > 0) {
     const where = target.subdir ? `${target.subdir}/` : `${target.label} (whole repo)`;
     if (!force) {
-      throw new Error(`${where} has uncommitted changes; commit them or rerun with --force to discard:\n${dirty}`);
+      throw new Error(`${where} has uncommitted changes; commit them or rerun with --force to discard:\n${dirty.join('\n')}`);
     }
     const path = target.subdir || '.';
     git(['restore', '--source=HEAD', '--staged', '--worktree', '--', path], target.gitRoot);
@@ -54,9 +54,16 @@ export function resetFiles(force = false, target: Target = resolveTarget(REPO, u
 }
 
 /** Uncommitted changes in the target folder, ignoring a local `npm install` lockfile. */
-export function targetChanges(target: Target = resolveTarget(REPO, undefined, { clone: false })): string {
+export function targetChanges(target: Target = resolveTarget(REPO, undefined, { clone: false })): string[] {
   const path = target.subdir || '.';
-  return git(['status', '--porcelain', '--', path, `:!${target.subdir ? `${target.subdir}/` : ''}package-lock.json`], target.gitRoot);
+  const out = git(['status', '--porcelain', '--', path, `:!${target.subdir ? `${target.subdir}/` : ''}package-lock.json`], target.gitRoot);
+  // git() trims the output, which can eat the first line's leading space, so strip the
+  // status token loosely. For renames ("R  old -> new") keep the new path.
+  return out
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => line.replace(/^\s*\S+\s+/, '').replace(/^.* -> /, ''))
+    .filter((p) => p !== 'package-lock.json' && !p.endsWith('/package-lock.json'));
 }
 
 /** The demo's name for targetChanges() (run-demo checks demo-repo before a run). */

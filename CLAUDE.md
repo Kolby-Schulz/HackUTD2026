@@ -31,6 +31,8 @@ and diagrams). The task list is `docs/TASKS.md`. Read your part's sections befor
 - Build the MVP first (section 16). No stretch features until the MVP checklist passes.
 - Prefer simple, readable code over abstractions. This is a 24-hour hackathon.
 - Keep secrets in .env; never commit API keys. The repo will be public.
+- Commits are authored by the human only. Do not add `Co-Authored-By`, "Generated with", or any
+  other agent attribution line to commit messages or PR descriptions.
 - After each change, run the part's tests and the end-to-end script if it exists.
 
 ## Shared vault (light touch: context, not a gate)

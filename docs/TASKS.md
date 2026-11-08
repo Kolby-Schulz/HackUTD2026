@@ -39,7 +39,7 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 - [x] **CM:** mapper: ts-morph parse → symbols (id `file#name`, `file#Class.method`), signature + `signature_hash`, call edges; `upsert_symbols` per file; `--watch` with chokidar. **Done** (`mapper/src`; 42 unit + 9 live tests). Signatures are the declaration as written (no inference; un-annotated returns left out, so give demo-repo functions return types for Rule 2). Edges = every value reference to a mapped symbol (calls, `new`, methods, callbacks, const reads) through imports/barrels/namespaces; type-only refs aren't edges. Only files whose interface or edges changed are sent (restart = no writes); `behavior_note`, and the signature text while the hash is unchanged, are kept from the server. Watch re-maps importers too. Run one mapper, on main `demo-repo/` only (it refuses `.worktrees/`).
 - [x] **CM:** mapper exports `mapFile(path)` for `contract-hook` to reuse. **Done:** `import { mapFile } from '@contract/mapper'`; `mapFile(absPath, { repoDir: <worktree>/demo-repo, edges: false })` parses one file in ~5 ms and gives the same ids/hashes as the main checkout. **Hook note (AG):** `report_change('signature')` updates the row's `signature` but not `signature_hash`, so comparing hashes alone re-reports on every later edit; also compare `signatureHash(row.signature)` (exported) or remember what was already reported.
 - [x] **DD:** dashboard connects with `spacetimedb/react`; Agents panel + Activity feed on real tables (Live, Activity, Tokens, Scoreboard tabs; storyboard rows G/F; `npm test -w @contract/dashboard`)
-- [ ] **DD:** `scripts/seed.ts`: create the two tasks and a run
+- [x] **DD:** `scripts/seed.ts`: create the two tasks and a run (`seed()` is also called by run-demo; tasks come from `scripts/scenarios.ts`)
 
 ## Milestone 3: Rule 1 end to end
 
@@ -59,21 +59,24 @@ Built from the updated spec (`docs/SPEC.md`, Nov 7). Grouped by milestone (secti
 ## Milestone 5: Without/with runs
 
 - [x] **BE:** `mark_attempt_wasted`, `log_saving`, `cache_summary`/`record_cache_hit`
-- [ ] **DD:** `scripts/run-demo.ts --mode … --seed 7`: run both workers, merge branches, run tests + check-dupes, `merge_fix` pass
-- [ ] **DD:** `scripts/reset.ts`: restore demo-repo, remove `.worktrees/`, clear run data
+- [x] **DD:** `scripts/run-demo.ts --mode … --seed 7`: run both workers, merge branches, run tests + check-dupes, `merge_fix` pass (`--scenario`, `--runs N`; `npm run bench` runs every scenario, #28)
+- [x] **DD:** `scripts/reset.ts`: restore demo-repo, remove `.worktrees/`, clear run data (also `--repo` for any target, #18)
 - [x] **DD:** Token meter, Savings ticker, Scoreboard panels (duplicate helpers + tests passing show "not recorded" until run-demo stores them)
-- [ ] **Everyone:** 3 runs per mode, average, sanity-check numbers
+- [ ] **Everyone:** 3 runs per mode, average, sanity-check numbers. **Not yet:** the README table is 1 run x 2 scenarios and the control shows -15%; run `npm run bench -- --runs 3`.
 
 ## Milestone 6: Demo-ready
 
 - [ ] Two laptops, fixed seed, three clean rehearsals
-- [ ] Backup demo video
-- [ ] README with setup + architecture; repo public
+- [ ] Backup demo video (#26)
+- [ ] README with setup + architecture; repo public. **Repo is public** and setup is written; still missing: architecture diagram, screenshots, LICENSE (#26)
 - [ ] Pitch rehearsal (section 17)
 
 ## After demo-ready (stretch, in this order)
 
-- [ ] **AG:** Nemotron provider in `packages/llm` + `--engine nemotron` worker (Node tool loop over the same MCP tools); re-run with/without. Needed for the NVIDIA track.
-- [ ] **CM:** Jev triage (`agents/triage`, section 12b): questions 1–2 first, then 3–4; schema additions from sections 6–7; fallback to a fast model through `decide()`
-- [ ] Live diffs + claim guard (`docs/spec-additions-live-code.md`, parts A and C)
-- [ ] Context slices + summary cache shown live; judge-typed third task; 8090 decision-log view
+- [ ] (#21) **AG:** Nemotron provider in `packages/llm` + `--engine nemotron` worker (Node tool loop over the same MCP tools); re-run with/without. Needed for the NVIDIA track.
+- [ ] (#23) **CM:** Jev triage (`agents/triage`, section 12b): questions 1–2 first, then 3–4; schema additions from sections 6–7; fallback to a fast model through `decide()`
+- [x] Live diffs + claim guard (`docs/spec-additions-live-code.md`, parts A and C) (#24)
+- [ ] Context slices + summary cache shown live; 8090 decision-log view. (Judge-typed third task done, #29; run replay done, #27.)
+- [ ] (#20) Hosted dashboard + always-on coordinator/mapper (`vercel.json` drafted)
+- [ ] (#17) Dashboard polish pass for judges
+- [ ] (#35) Per-role model mix, shown live (needs #21)

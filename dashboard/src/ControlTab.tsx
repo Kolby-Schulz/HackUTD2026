@@ -5,84 +5,44 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as R from '@bindings/types.ts';
 import { StatusLabel } from './ui.tsx';
+import { MachinePicker, useMachine, type ChatMessage, type Proc, type Status } from './machine.tsx';
 
-export const CONTROL_URL = 'http://127.0.0.1:5199';
+export type { ChatMessage } from './machine.tsx';
 
-interface Proc {
-  key: string;
-  label: string;
-  long: boolean;
-  status: 'running' | 'exited' | 'stopped';
-  code: number | null;
-  startedAt: number;
-  endedAt?: number;
-  log: string[];
-}
-interface Status {
-  machine: string;
-  repo?: string;
-  repoLabel?: string;
-  repoInfo?: { checks: string[]; install: string[]; languages: string[]; missing: { tool: string; neededBy: string[]; hint?: string }[]; dir: string };
-  needsSession?: boolean;
-  processes: Proc[];
+/** The old HTTP paths, now commands for the paired laptop's daemon. */
+function useSend() {
+  const { send } = useMachine();
+  return (path: string, body: Record<string, unknown> = {}) => {
+    if (path === '/run') {
+      const { action, ...args } = body;
+      return send(String(action), args);
+    }
+    return send(path.slice(1), body); // /repo, /stop, /forget, /chat
+  };
 }
 
-export async function post(path: string, body: unknown) {
-  const res = await fetch(`${CONTROL_URL}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-contract-control': '1' },
-    body: JSON.stringify(body),
-  });
-  const json = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`);
-}
-
-/** This laptop's control server facts: its target repo label and its machine name. Both are
- *  undefined while the server isn't running (most viewers never run one). */
+/** The paired laptop's facts: its target repo label (once one is chosen) and its machine name.
+ *  Both are undefined while no paired laptop is online (most viewers never pair one). */
 export function useControlInfo(): { repoLabel?: string; machine?: string } {
-  const [info, setInfo] = useState<{ repoLabel?: string; machine?: string }>({});
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    // 10 s while it answers; 30 s while it's down
-    const load = () =>
-      fetch(`${CONTROL_URL}/status?tail=0`)
-        .then((r) => r.json() as Promise<Status>)
-        .then((s) => { if (alive) { setInfo((p) => { const repoLabel = s.repo ? s.repoLabel : undefined; return p.repoLabel === repoLabel && p.machine === s.machine ? p : { repoLabel, machine: s.machine }; }); timer = setTimeout(load, 10_000); } })
-        .catch(() => { if (alive) { setInfo((p) => (p.repoLabel || p.machine ? {} : p)); timer = setTimeout(load, 30_000); } });
-    load();
-    return () => { alive = false; clearTimeout(timer); };
-  }, []);
-  return info;
+  const { status } = useMachine();
+  return { repoLabel: status?.repo ? status.repoLabel : undefined, machine: status?.machine };
 }
 
-/** This laptop's target repo label from the control server, or undefined if it isn't running. */
+/** The paired laptop's target repo label, or undefined when none is chosen or no laptop is online. */
 export function useControlRepo(): string | undefined {
   return useControlInfo().repoLabel;
 }
 
 export function useControl() {
-  const [status, setStatus] = useState<Status>();
-  const [down, setDown] = useState(false);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    // 1.5 s while it answers; 5 s while it's down, so a closed server doesn't flood the console
-    const load = () =>
-      fetch(`${CONTROL_URL}/status?tail=60`)
-        .then((r) => r.json() as Promise<Status>)
-        .then((s) => { if (alive) { setStatus(s); setDown(false); timer = setTimeout(load, 1500); } })
-        .catch(() => { if (alive) { setDown(true); timer = setTimeout(load, 5000); } });
-    load();
-    return () => { alive = false; clearTimeout(timer); };
-  }, [tick]);
-  return { status, down, refresh: () => setTick((n) => n + 1) };
+  const { status } = useMachine();
+  return { status, down: !status, refresh: () => undefined };
 }
 
 /** `chat` false: the workbench shows the assistant in its own Chat pane, so this tab only has the controls. */
 export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: boolean }) {
   const { status, down, refresh } = useControl();
+  const { pairing } = useMachine();
+  const post = useSend();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState<string>();
   const [workerId, setWorkerId] = useState('agent-a');
@@ -92,7 +52,7 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
   const procs = status?.processes ?? [];
   const running = (key: string) => procs.some((p) => p.key === key && p.status === 'running');
 
-  async function act(label: string, path: string, body: unknown, confirmText?: string): Promise<boolean> {
+  async function act(label: string, path: string, body: Record<string, unknown>, confirmText?: string): Promise<boolean> {
     if (confirmText && !window.confirm(confirmText)) return false;
     setBusy(label);
     setError(undefined);
@@ -108,28 +68,21 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
     }
   }
 
-  if (down && !status) {
-    return (
-      <section className="card pad control-off">
-        <h2 style={{ fontSize: 16 }}>Start Contract's chat on this laptop</h2>
-        <p className="muted">Run this once in a terminal in the repo. Then you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and Contract starts the coordinator, a session and the agents for you:</p>
-        <pre className="mono">npm run control</pre>
-        <p className="muted" style={{ fontSize: 12 }}>It only listens on 127.0.0.1 and only runs commands on this machine. Each laptop runs its own.</p>
-      </section>
-    );
-  }
+  if (down && !status) return <NotPaired chat={chat} />;
 
-  const longToggle = (key: string, label: string, action: object) =>
+  const longToggle = (key: string, label: string, action: Record<string, unknown>) =>
     running(key)
       ? <button type="button" className="btn danger" disabled={!!busy} onClick={() => act(`Stop ${label}`, '/stop', { key })}>Stop</button>
       : <button type="button" className="btn" disabled={!!busy} onClick={() => act(`Start ${label}`, '/run', action)}>Start</button>;
 
   const isDemo = !status?.repo;
+  const justPaired = pairing?.state === 'done' && pairing.machine === status?.machine;
 
   return (
     <div className="control">
       <RepoPicker status={status} openRun={openRun} locked={procs.some((p) => p.status === 'running' && p.key !== 'clone')} busy={!!busy}
         onSet={(repo) => act('Set repository', '/repo', { repo })} />
+      {justPaired && <div className="repo-ok" role="status">✓ Paired this browser with {pairing.machine}.</div>}
       {error && <div className="banner" role="alert">{error}</div>}
       {chat && <ChatPanel openRun={openRun} onChange={refresh} demo={isDemo} repoLabel={status?.repoLabel} />}
       <details className="card pad manual">
@@ -137,7 +90,8 @@ export function ControlTab({ openRun, chat = true }: { openRun?: R.Run; chat?: b
       <div className="control" style={{ marginTop: 14 }}>
       <div className="control-head">
         <span className="dot" style={{ width: 8, height: 8, background: down ? 'var(--danger)' : 'var(--ok)' }} />
-        <span>{down ? 'Lost the control server' : <>Controlling <span className="mono">{status?.machine}</span></>}</span>
+        <span>{down ? 'Lost the laptop' : <>Controlling <span className="mono">{status?.machine}</span></>}</span>
+        <MachinePicker />
         <span className="grow" />
         <span className="muted">{openRun ? <>Open run <span className="mono">#{String(openRun.id)}</span> · {openRun.mode}</> : 'No open run'}</span>
       </div>
@@ -327,7 +281,6 @@ export function RepoPicker({ status, openRun, locked, busy, onSet }: {
   );
 }
 
-export interface ChatMessage { id: number; role: 'user' | 'assistant' | 'event'; text: string; at: number }
 
 export const EXAMPLES = [
   'Add a late fee to overdue invoices',
@@ -336,36 +289,25 @@ export const EXAMPLES = [
 ];
 
 /** The chat: type what you want built; the assistant (scripts/assistant.ts) runs everything. */
-/** The assistant's conversation (scripts/assistant.ts via the control server), polled once a
- *  second while the server answers. `up` is false when this laptop isn't running `npm run control`. */
+/** The paired laptop's assistant (scripts/assistant.ts, mirrored through machine_chat).
+ *  `up` is false when no paired laptop is running `npm run control`. */
 export function useAssistant(onChange?: () => void) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [up, setUp] = useState(false);
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    const load = () =>
-      fetch(`${CONTROL_URL}/chat`)
-        .then((r) => r.json() as Promise<{ busy: boolean; messages: ChatMessage[] }>)
-        .then((c) => {
-          if (!alive) return;
-          setUp(true);
-          setMessages((prev) => (prev.length === c.messages.length && prev.at(-1)?.id === c.messages.at(-1)?.id ? prev : c.messages));
-          setBusy(c.busy);
-          timer = setTimeout(load, 1000);
-        })
-        .catch(() => { if (alive) { setUp(false); timer = setTimeout(load, 4000); } });
-    load();
-    return () => { alive = false; clearTimeout(timer); };
-  }, []);
+  const { status, chat, send: sendCommand } = useMachine();
+  const [sent, setSent] = useState<ChatMessage[]>([]);
+  // Show what you typed until the daemon's copy of it arrives.
+  const echoed = !sent.length || chat.messages.some((m) => m.role === 'user' && m.text === sent[0].text && m.at >= sent[0].at - 5000);
+  const messages = echoed ? chat.messages : [...chat.messages, ...sent];
   async function send(text: string) {
-    await post('/chat', { text });
-    setBusy(true);
-    setMessages((m) => [...m, { id: -Date.now(), role: 'user', text, at: Date.now() }]);
+    setSent([{ id: -Date.now(), role: 'user', text, at: Date.now() }]);
+    try {
+      await sendCommand('chat', { text });
+    } catch (e) {
+      setSent([]);
+      throw e;
+    }
     onChange?.();
   }
-  return { messages, busy, up, send };
+  return { messages, busy: chat.busy || !echoed, up: !!status, send };
 }
 
 function ChatPanel({ openRun, onChange, demo, repoLabel }: { openRun?: R.Run; onChange: () => void; demo: boolean; repoLabel?: string }) {
@@ -452,5 +394,33 @@ function ProcRow({ p, busy, onStop, onClear }: { p: Proc; busy: boolean; onStop:
       </div>
       {open && <pre className="proc-log mono">{p.log.length ? p.log.join('\n') : 'No output yet.'}</pre>}
     </div>
+  );
+}
+
+/** No paired laptop online: how to start the daemon and pair this browser. */
+function NotPaired({ chat }: { chat: boolean }) {
+  const { mine, unpaired, pair, pairing } = useMachine();
+  const [machine, setMachine] = useState('');
+  const [code, setCode] = useState('');
+  const target = machine || unpaired[0] || '';
+  const working = pairing?.state === 'working';
+  return (
+    <section className="card pad control-off">
+      <h2 style={{ fontSize: 16 }}>{working ? `Pairing with ${pairing.machine}…` : 'Connect a laptop'}</h2>
+      <p className="muted">Agents run on your own laptop. Start the daemon in a terminal in the repo, then click the pairing link it prints (or type its code below). After that you can type what you want built {chat ? 'here' : 'in the Chat pane'}, and InSync starts the coordinator, a session and the agents for you.</p>
+      <pre className="mono">npm run control</pre>
+      {pairing?.state === 'failed' && <div className="banner" role="alert">Couldn't pair with {pairing.machine}: {pairing.error}</div>}
+      {unpaired.length > 0 && (
+        <form className="row repo-form" onSubmit={(e) => { e.preventDefault(); if (target && code.trim()) void pair(target, code).then(() => setCode('')).catch(() => undefined); }}>
+          {unpaired.length > 1
+            ? <select value={target} onChange={(e) => setMachine(e.target.value)} aria-label="Laptop">{unpaired.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+            : <span className="mono">{target}</span>}
+          <input className="mono" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code, e.g. K7Q-4XM" aria-label="Pairing code" spellCheck={false} autoComplete="off" maxLength={12} />
+          <button type="submit" className="btn small" disabled={working || !code.trim()}>Pair</button>
+        </form>
+      )}
+      {mine.length > 0 && <p className="muted">Paired, but offline: <span className="mono">{mine.map((m) => m.id).join(', ')}</span>. Start <span className="mono">npm run control</span> there again.</p>}
+      <p className="muted" style={{ fontSize: 12 }}>The daemon connects out to SpacetimeDB; nothing listens on a port. It only runs commands from browsers you paired, and only on that laptop. Codes work once and expire after 10 minutes.</p>
+    </section>
   );
 }

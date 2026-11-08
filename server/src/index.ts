@@ -288,6 +288,94 @@ const tokenSaving = table(
   },
 );
 
+// Laptop daemons (scripts/control.ts): each laptop's control daemon registers a machine row,
+// paired dashboards queue commands for it, and it reports its processes, logs and chat back.
+// Nothing listens on a port, so the hosted dashboard can drive any paired laptop.
+const machine = table(
+  { name: 'machine', public: true },
+  {
+    id: t.string().primaryKey(), // the laptop's name, e.g. "ethan-mbp"
+    identity: t.identity(), // the daemon; only it may write this machine's state
+    repo: t.string(), // CONTRACT_TARGET ('' = built-in demo-repo)
+    repo_label: t.string(),
+    info_json: t.string(), // RepoInfo as JSON ('' = unknown)
+    needs_session: t.bool(),
+    chat_busy: t.bool(),
+    started_at: t.timestamp(),
+    heartbeat_at: t.timestamp(),
+  },
+);
+
+// Who may send commands to a machine. Only the machine's daemon adds rows (after pairing).
+const machineAccess = table(
+  { name: 'machine_access', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    identity: t.identity(),
+    label: t.string(),
+    added_at: t.timestamp(),
+  },
+);
+
+// Commands for a daemon. Dashboards insert them; the daemon runs them and marks them done.
+const machineCommand = table(
+  { name: 'machine_command', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    sender: t.identity(),
+    action: t.string(), // MachineAction
+    args_json: t.string(),
+    status: t.string(), // 'pending' | 'done' | 'failed'
+    error: t.string(),
+    created_at: t.timestamp(),
+  },
+);
+
+// One row per process a daemon started (key = "<machine_id>/<proc key>"), log = last lines.
+const machineProcess = table(
+  { name: 'machine_process', public: true },
+  {
+    key: t.string().primaryKey(),
+    machine_id: t.string().index('btree'),
+    proc_key: t.string(),
+    label: t.string(),
+    long: t.bool(),
+    status: t.string(), // 'running' | 'exited' | 'stopped'
+    code: t.option(t.i32()),
+    started_at_ms: t.f64(),
+    ended_at_ms: t.option(t.f64()),
+    log: t.string(), // newline-joined tail
+  },
+);
+
+// The daemon's chat assistant transcript, mirrored for every viewer.
+const machineChat = table(
+  { name: 'machine_chat', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    role: t.string(), // 'user' | 'assistant' | 'event'
+    text: t.string(),
+    at_ms: t.f64(),
+  },
+);
+
+// A dashboard asking to pair with a machine: proof = sha256("<code>:<its identity hex>"), where
+// the code is the one the daemon printed. The daemon checks it, grants access, and deletes the row.
+// The code itself never reaches the database, so watching this table doesn't help anyone pair.
+const machinePairRequest = table(
+  { name: 'machine_pair_request', public: true },
+  {
+    id: t.u64().primaryKey().autoInc(),
+    machine_id: t.string().index('btree'),
+    identity: t.identity(),
+    proof: t.string(),
+    created_at: t.timestamp(),
+  },
+);
+
 // Drives the scheduled expire_claims reducer (every 30 s). Private: nobody subscribes.
 const expireClaimsSchedule = table(
   { name: 'expire_claims_schedule' },
@@ -316,6 +404,12 @@ const spacetimedb = schema({
   expireClaimsSchedule,
   fileEdit,
   service,
+  machine,
+  machineAccess,
+  machineCommand,
+  machineProcess,
+  machineChat,
+  machinePairRequest,
 });
 export default spacetimedb;
 
@@ -1163,5 +1257,183 @@ export const expire_claims = spacetimedb.reducer(
         ctx.db.agent.id.update({ ...a, status: 'idle' });
       }
     }
+  },
+);
+
+// ---------------------------------------------------------------------------------
+// Laptop daemons (scripts/control.ts)
+// ---------------------------------------------------------------------------------
+
+const MACHINE_ACTIONS = ['coordinator', 'session-start', 'session-merge', 'worker', 'judge', 'reset', 'repo', 'stop', 'forget', 'chat'] as const;
+const MACHINE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+const MAX_COMMAND_ARGS = 8_000;
+const MAX_PENDING_COMMANDS = 20;
+const COMMANDS_KEPT = 50;
+const CHAT_KEPT = 200;
+const MAX_PROCESS_LOG = 16_000;
+const MAX_CHAT_TEXT = 8_000;
+
+/** The machine row, which must belong to the caller (its daemon). */
+function requireMachine(ctx: Ctx, machineId: string) {
+  const row = ctx.db.machine.id.find(machineId);
+  if (!row) throw new SenderError(`unknown machine '${machineId}'`);
+  if (!row.identity.equals(ctx.sender)) throw new SenderError(`machine '${machineId}' belongs to another daemon`);
+  return row;
+}
+
+function hasMachineAccess(ctx: Ctx, machineId: string): boolean {
+  for (const a of ctx.db.machineAccess.machine_id.filter(machineId)) if (a.identity.equals(ctx.sender)) return true;
+  return false;
+}
+
+/**
+ * A daemon claims its machine id. The same identity re-registers freely (restart); another
+ * identity can take the id only after HEARTBEAT_TIMEOUT_SECS of silence, and the takeover
+ * drops every pairing, queued command and process row, so old dashboards can't drive the
+ * new daemon and the new daemon never sees the old one's commands.
+ */
+export const register_machine = spacetimedb.reducer({ id: t.string() }, (ctx, { id }) => {
+  if (!MACHINE_ID.test(id)) throw new SenderError('machine id: lowercase letters, digits, dots, dashes and underscores');
+  const existing = ctx.db.machine.id.find(id);
+  const fresh = { id, identity: ctx.sender, repo: '', repo_label: 'demo-repo', info_json: '', needs_session: false, chat_busy: false, started_at: ctx.timestamp, heartbeat_at: ctx.timestamp };
+  if (!existing) {
+    ctx.db.machine.insert(fresh);
+    return;
+  }
+  if (existing.identity.equals(ctx.sender)) {
+    ctx.db.machine.id.update({ ...existing, started_at: ctx.timestamp, heartbeat_at: ctx.timestamp, chat_busy: false });
+    return;
+  }
+  if (micros(ctx.timestamp) - micros(existing.heartbeat_at) < BigInt(HEARTBEAT_TIMEOUT_SECS) * 1_000_000n) {
+    throw new SenderError(`machine '${id}' is online with another daemon; stop it first (or wait ${HEARTBEAT_TIMEOUT_SECS} s)`);
+  }
+  for (const a of [...ctx.db.machineAccess.machine_id.filter(id)]) ctx.db.machineAccess.id.delete(a.id);
+  for (const c of [...ctx.db.machineCommand.machine_id.filter(id)]) ctx.db.machineCommand.id.delete(c.id);
+  for (const p of [...ctx.db.machineProcess.machine_id.filter(id)]) ctx.db.machineProcess.key.delete(p.key);
+  for (const m of [...ctx.db.machineChat.machine_id.filter(id)]) ctx.db.machineChat.id.delete(m.id);
+  for (const r of [...ctx.db.machinePairRequest.machine_id.filter(id)]) ctx.db.machinePairRequest.id.delete(r.id);
+  ctx.db.machine.id.update(fresh);
+});
+
+/** The daemon's heartbeat, carrying what the dashboard shows about the laptop. */
+export const update_machine = spacetimedb.reducer(
+  { id: t.string(), repo: t.string(), repo_label: t.string(), info_json: t.string(), needs_session: t.bool(), chat_busy: t.bool() },
+  (ctx, { id, repo, repo_label, info_json, needs_session, chat_busy }) => {
+    const row = requireMachine(ctx, id);
+    if (info_json.length > MAX_COMMAND_ARGS) throw new SenderError('info_json is too long');
+    ctx.db.machine.id.update({ ...row, repo, repo_label, info_json, needs_session, chat_busy, heartbeat_at: ctx.timestamp });
+  },
+);
+
+/** Pairs a dashboard identity with this machine. Only the machine's daemon can do it. */
+export const grant_machine_access = spacetimedb.reducer(
+  { machine_id: t.string(), identity: t.identity(), label: t.string() },
+  (ctx, { machine_id, identity, label }) => {
+    requireMachine(ctx, machine_id);
+    for (const a of ctx.db.machineAccess.machine_id.filter(machine_id)) if (a.identity.equals(identity)) return;
+    ctx.db.machineAccess.insert({ id: 0n, machine_id, identity, label: label.slice(0, 80), added_at: ctx.timestamp });
+  },
+);
+
+/** Unpairs a dashboard: the daemon can remove anyone, a dashboard only itself. */
+export const revoke_machine_access = spacetimedb.reducer(
+  { machine_id: t.string(), identity: t.identity() },
+  (ctx, { machine_id, identity }) => {
+    const m = ctx.db.machine.id.find(machine_id);
+    const daemon = m?.identity.equals(ctx.sender) ?? false;
+    if (!daemon && !identity.equals(ctx.sender)) throw new SenderError('only the daemon can unpair other dashboards');
+    for (const a of [...ctx.db.machineAccess.machine_id.filter(machine_id)]) if (a.identity.equals(identity)) ctx.db.machineAccess.id.delete(a.id);
+  },
+);
+
+/** Queues a command for a machine's daemon. The caller must be paired with that machine. */
+export const send_machine_command = spacetimedb.reducer(
+  { machine_id: t.string(), action: t.string(), args_json: t.string() },
+  (ctx, { machine_id, action, args_json }) => {
+    const m = ctx.db.machine.id.find(machine_id);
+    if (!m) throw new SenderError(`unknown machine '${machine_id}'`);
+    if (!m.identity.equals(ctx.sender) && !hasMachineAccess(ctx, machine_id)) {
+      throw new SenderError(`this dashboard isn't paired with ${machine_id}; pair it from the daemon's terminal first`);
+    }
+    if (!(MACHINE_ACTIONS as readonly string[]).includes(action)) throw new SenderError(`unknown action '${action}'`);
+    if (args_json.length > MAX_COMMAND_ARGS) throw new SenderError('command is too long');
+    const queued = [...ctx.db.machineCommand.machine_id.filter(machine_id)].filter((c) => c.status === 'pending').length;
+    if (queued >= MAX_PENDING_COMMANDS) throw new SenderError(`${machine_id} has ${queued} commands waiting; is its daemon running?`);
+    ctx.db.machineCommand.insert({ id: 0n, machine_id, sender: ctx.sender, action, args_json, status: 'pending', error: '', created_at: ctx.timestamp });
+  },
+);
+
+/** The daemon marks a command done or failed; only the newest COMMANDS_KEPT per machine stay. */
+export const finish_machine_command = spacetimedb.reducer(
+  { command_id: t.u64(), ok: t.bool(), error: t.string() },
+  (ctx, { command_id, ok, error }) => {
+    const c = ctx.db.machineCommand.id.find(command_id);
+    if (!c) throw new SenderError(`unknown command ${command_id}`);
+    requireMachine(ctx, c.machine_id);
+    ctx.db.machineCommand.id.update({ ...c, status: ok ? 'done' : 'failed', error: error.slice(0, 2000) });
+    const done = [...ctx.db.machineCommand.machine_id.filter(c.machine_id)].filter((r) => r.status !== 'pending').sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of done.slice(0, Math.max(0, done.length - COMMANDS_KEPT))) ctx.db.machineCommand.id.delete(old.id);
+  },
+);
+
+/** The daemon reports one process (insert or update). */
+export const put_machine_process = spacetimedb.reducer(
+  {
+    machine_id: t.string(), proc_key: t.string(), label: t.string(), long: t.bool(), status: t.string(),
+    code: t.option(t.i32()), started_at_ms: t.f64(), ended_at_ms: t.option(t.f64()), log: t.string(),
+  },
+  (ctx, a) => {
+    requireMachine(ctx, a.machine_id);
+    if (!a.proc_key) throw new SenderError('proc_key is empty');
+    const log = a.log.length > MAX_PROCESS_LOG ? a.log.slice(-MAX_PROCESS_LOG) : a.log;
+    if (!['running', 'exited', 'stopped'].includes(a.status)) throw new SenderError(`unknown process status '${a.status}'`);
+    const row = { ...a, code: a.code, ended_at_ms: a.ended_at_ms, key: `${a.machine_id}/${a.proc_key}`, log };
+    if (ctx.db.machineProcess.key.find(row.key)) ctx.db.machineProcess.key.update(row);
+    else ctx.db.machineProcess.insert(row);
+  },
+);
+
+export const delete_machine_process = spacetimedb.reducer({ machine_id: t.string(), proc_key: t.string() }, (ctx, { machine_id, proc_key }) => {
+  requireMachine(ctx, machine_id);
+  ctx.db.machineProcess.key.delete(`${machine_id}/${proc_key}`);
+});
+
+/** The daemon appends a chat line; only the newest CHAT_KEPT per machine stay. */
+export const post_machine_chat = spacetimedb.reducer(
+  { machine_id: t.string(), role: t.string(), text: t.string(), at_ms: t.f64() },
+  (ctx, { machine_id, role, text, at_ms }) => {
+    requireMachine(ctx, machine_id);
+    if (!['user', 'assistant', 'event'].includes(role)) throw new SenderError(`unknown chat role '${role}'`);
+    ctx.db.machineChat.insert({ id: 0n, machine_id, role, text: text.slice(0, MAX_CHAT_TEXT), at_ms });
+    const mine = [...ctx.db.machineChat.machine_id.filter(machine_id)].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of mine.slice(0, Math.max(0, mine.length - CHAT_KEPT))) ctx.db.machineChat.id.delete(old.id);
+  },
+);
+
+const MAX_PAIR_REQUESTS = 20;
+
+/** A dashboard asks to pair with a machine (see machine_pair_request). Oldest requests drop past the cap. */
+export const request_machine_pairing = spacetimedb.reducer(
+  { machine_id: t.string(), proof: t.string() },
+  (ctx, { machine_id, proof }) => {
+    if (!ctx.db.machine.id.find(machine_id)) throw new SenderError(`unknown machine '${machine_id}'`);
+    if (!/^[0-9a-f]{64}$/.test(proof)) throw new SenderError('proof must be a sha256 hex digest');
+    const reqs = [...ctx.db.machinePairRequest.machine_id.filter(machine_id)].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const old of reqs.slice(0, Math.max(0, reqs.length - MAX_PAIR_REQUESTS + 1))) ctx.db.machinePairRequest.id.delete(old.id);
+    ctx.db.machinePairRequest.insert({ id: 0n, machine_id, identity: ctx.sender, proof, created_at: ctx.timestamp });
+  },
+);
+
+/** The daemon answers a pairing request: grants access when the proof matched, and always deletes the request. */
+export const resolve_machine_pairing = spacetimedb.reducer(
+  { request_id: t.u64(), accept: t.bool(), label: t.string() },
+  (ctx, { request_id, accept, label }) => {
+    const r = ctx.db.machinePairRequest.id.find(request_id);
+    if (!r) return; // already answered
+    requireMachine(ctx, r.machine_id);
+    ctx.db.machinePairRequest.id.delete(r.id);
+    if (!accept) return;
+    for (const a of ctx.db.machineAccess.machine_id.filter(r.machine_id)) if (a.identity.equals(r.identity)) return;
+    ctx.db.machineAccess.insert({ id: 0n, machine_id: r.machine_id, identity: r.identity, label: label.slice(0, 80), added_at: ctx.timestamp });
   },
 );
