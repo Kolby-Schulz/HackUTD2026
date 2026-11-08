@@ -4,7 +4,8 @@ import { isHuman } from '../core/actors';
 import type { ActorId, Command, Gesture, LockRecord, ShapeId } from '../core/types';
 import type { BoardKit } from '../core/commands';
 
-export const DEFAULT_LOCK_TTL_MS = 4000; // MULTI-7: refreshed while active
+export const DEFAULT_LOCK_TTL_MS = 4000; // MULTI-7 default for direct acquire()
+export const ACTIVITY_LOCK_TTL_MS = 1200; // an agent gesture holds only what it is changing right now
 export const IMPLICIT_HOLD_MS = 500;     // AGENT-12: an exec batch holds its shapes for 500 ms after it lands
 
 export type LockCheck = { ok: true } | { ok: false; error: 'locked'; holder: ActorId; retryAfterMs?: number };
@@ -55,6 +56,19 @@ export function commandIds(cmds: Command[]): ShapeId[] {
   return [...out];
 }
 
+/** Stable per-id serialization of the commands touching each id (new ids differ from "no previous"). */
+function commandSigs(cmds: Command[]): Map<ShapeId, string> {
+  const out = new Map<ShapeId, string>();
+  cmds.forEach((c, i) => {
+    const ids = commandIds([c]);
+    if (!ids.length) return;
+    // placeholders ($n) resolve by position, so include the index only for them
+    const sig = JSON.stringify(c);
+    for (const id of ids) out.set(id, (out.get(id) ?? '') + '|' + sig + (sig.includes('"$') ? '@' + i : ''));
+  });
+  return out;
+}
+
 export interface AttachOpts {
   ttlMs?: number;
   /** Called on a human takeover with the toast text, e.g. "You took over from Iris". */
@@ -77,7 +91,7 @@ export interface LocksHandle {
  */
 export function attachLocks(board: BoardKit, o: AttachOpts = {}): LocksHandle {
   const { locks, events, actors } = board;
-  const ttl = o.ttlMs ?? DEFAULT_LOCK_TTL_MS;
+  const ttl = o.ttlMs ?? ACTIVITY_LOCK_TTL_MS;
   const rawGesture = board.gesture.bind(board);
   const live = new Set<{ actor: ActorId; ids: Set<ShapeId>; kill(): void }>();
 
@@ -89,6 +103,15 @@ export function attachLocks(board: BoardKit, o: AttachOpts = {}): LocksHandle {
       if (isHuman(r.holder) && !isHuman(by)) continue; // agents never win against humans
       locks.release(id, r.holder);
       byHolder.set(r.holder, [...(byHolder.get(r.holder) ?? []), id]);
+    }
+    // Humans win even after an agent's short activity lock lapsed: an open agent gesture that touched these shapes
+    // would otherwise commit over the human's edit later, so it is taken over too.
+    if (isHuman(by)) {
+      for (const g of live) {
+        if (isHuman(g.actor) || g.actor === by) continue;
+        const hit = ids.filter((id) => g.ids.has(id) && !(byHolder.get(g.actor) ?? []).includes(id));
+        if (hit.length) byHolder.set(g.actor, [...(byHolder.get(g.actor) ?? []), ...hit]);
+      }
     }
     for (const [holder, hit] of byHolder) {
       for (const g of [...live]) if (g.actor === holder && hit.some((id) => g.ids.has(id))) g.kill();
@@ -109,6 +132,7 @@ export function attachLocks(board: BoardKit, o: AttachOpts = {}): LocksHandle {
     const inner = rawGesture(actor, label, opts);
     const mine = new Set<ShapeId>();
     let revoked = false, done = false;
+    const prev = new Map<ShapeId, string>(); // per-id command serialization of the previous frame
     // A takeover keeps what the agent drew so far (commit, not abort): shapes it created inside this gesture exist only
     // here, so aborting would make them vanish under the human's cursor. The human's open gesture replays on top.
     const entry = { actor, ids: mine, kill() { revoked = true; finish(); inner.commit(); } };
@@ -120,7 +144,13 @@ export function attachLocks(board: BoardKit, o: AttachOpts = {}): LocksHandle {
         const ids = commandIds(cmds);
         if (isHuman(actor)) takeover(ids, actor);
         else if (!locks.check(ids, actor).ok) { inner.update(cmds); return; } // gate reports `locked` per command
-        for (const id of ids) { mine.add(id); locks.acquire(id, actor, ttl); }
+        // A scripted build re-plans the whole list each frame: only ids whose command changed are "being edited".
+        const cur = commandSigs(cmds);
+        for (const id of ids) {
+          mine.add(id);
+          if (isHuman(actor) || prev.get(id) !== cur.get(id)) locks.acquire(id, actor, ttl);
+        }
+        prev.clear(); cur.forEach((v, k) => prev.set(k, v));
         inner.update(cmds);
       },
       commit() {

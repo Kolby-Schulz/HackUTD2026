@@ -21,6 +21,7 @@ export function AgentsPanel({ board, rt, cursors, children }: SlotProps & { chil
   };
   const me = board.me;
   const agents = cursors.filter((c) => c.kind === 'agent');
+  const allStopped = agents.length > 0 && agents.every((c) => c.state === 'stopped');
   const allPaused = agents.length > 0 && agents.every((c) => c.state === 'paused');
 
   const clearBoard = () => {
@@ -43,7 +44,9 @@ export function AgentsPanel({ board, rt, cursors, children }: SlotProps & { chil
         <button className="primary" onClick={() => rt?.spawn({ at: viewCenter() })}>+ Agent</button>
         <button onClick={() => { for (let i = 0; i < 5; i++) rt?.spawn({ at: viewCenter() }); }}>+5</button>
         <button onClick={() => rt?.setAllPaused(!allPaused)}>{allPaused ? 'Resume' : 'Pause'} all</button>
-        <button onClick={() => rt?.stopAll(board.actors.get(me)?.name ?? 'you')} title="Stop every agent (Ctrl/Cmd+Shift+.)">Stop all</button>
+        {allStopped
+          ? <button onClick={() => agents.forEach((c) => rt?.restart(c.id))} title="Restart every stopped agent">Restart all</button>
+          : <button onClick={() => rt?.stopAll(board.actors.get(me)?.name ?? 'you')} title="Stop every agent (Ctrl/Cmd+Shift+.)">Stop all</button>}
       </div>
       <div className="pg-row">
         <label>Speed</label>

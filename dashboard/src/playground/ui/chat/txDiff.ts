@@ -15,9 +15,10 @@ export interface TxInfo {
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-const swatch = (p: Partial<ShapeProps>): string | undefined => {
-  const f = (p.fills ?? [])[0];
-  return f && f.type === 'solid' ? f.color : p.color;
+/** The colour a patch / prior state shows. `color` is the TEXT colour (default black), so only text layers use it. */
+const swatch = (p: Partial<ShapeProps>, text: boolean): string | undefined => {
+  const f = (p.fills ?? []).find((x) => x.type === 'solid' && !x.hidden);
+  return f ? f.color : text ? p.color : undefined;
 };
 
 /** Read the tx out of the log. Undefined when the log no longer holds it. */
@@ -45,9 +46,10 @@ export function inspectTx(doc: DocStore, txId: string): TxInfo | undefined {
     if (b.t !== 'set') continue;
     for (const [field, value] of Object.entries(b.patch)) info.wrote.push({ id: b.id, field, value });
     if (info.diff) continue;
-    const to = swatch(b.patch);
+    const isText = doc.getState().shapes.get(b.id)?.kind === 'text';
+    const to = swatch(b.patch, isText);
     if (to) {
-      const prior = swatch({ fills: before(b.id, 'fills') as ShapeProps['fills'], color: before(b.id, 'color') as string | undefined });
+      const prior = swatch({ fills: before(b.id, 'fills') as ShapeProps['fills'], color: before(b.id, 'color') as string | undefined }, isText);
       info.diff = { kind: 'color', ...(prior ? { from: prior } : {}), to };
     } else if (typeof b.patch.w === 'number' || typeof b.patch.h === 'number') {
       const w0 = before(b.id, 'w'), h0 = before(b.id, 'h');
