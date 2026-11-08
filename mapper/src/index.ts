@@ -1,9 +1,21 @@
 // Code mapper (spec section 9). Owner: coordinator + mapper.
-// npm run mapper -- --repo ../demo-repo [--watch]
-import { config as loadEnv } from 'dotenv';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-// npm -w runs us inside our own folder, so load the monorepo's .env explicitly.
-loadEnv({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../.env'), quiet: true });
-console.log('mapper: not implemented yet', process.argv.slice(2));
+// Library entry point: importing this never starts the CLI (that's src/cli.ts), so
+// contract-hook and tests can use the parser directly.
+//
+//   import { mapFile } from '@contract/mapper';
+//   const { symbols } = mapFile(absPath, { repoDir: worktreeDemoRepo, edges: false });
+//   // compare symbols[i].signatureHash with the shared `symbol` row's signatureHash
+export {
+  RepoMapper,
+  mapFile,
+  isMappable,
+  signatureHash,
+  normalizeSignature,
+  cleanSignature,
+  SKIP_DIRS,
+  type FileMap,
+  type MappedSymbol,
+  type MappedEdge,
+  type SymbolKind,
+} from './map.ts';
+export { MapSync, planUpsert, type ServerSymbol, type SyncOptions, type Upsert } from './sync.ts';
