@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Command } from '../core/types';
-import { createRuntime } from './runtime';
+import { createBoard } from '../core/commands';
+import { createRuntime, startAgents } from './runtime';
 import { COLS, CELL_H, CELL_W, createSlots, slotOrigin } from './scripted';
 import { TEMPLATES } from './templates';
 import { fakeBoard, fakeClock, mkShape, until } from './fakes.test';
 
 const creates = (cmds: Command[]) => cmds.filter((c): c is Extract<Command, { t: 'shape.create' }> => c.t === 'shape.create');
-const says = (batches: ReturnType<typeof fakeBoard>['batches']) =>
-  batches.flatMap((b) => b.commands).filter((c) => c.t === 'chat.say').map((c) => (c as Extract<Command, { t: 'chat.say' }>).body).map((b) => (b.kind === 'text' ? b.text : ''));
-
 function rig(frameMs = 50) {
   const fb = fakeBoard();
-  const rt = createRuntime({ board: fb.board, clock: fakeClock(), seed: 3, frameMs });
-  return { ...fb, rt };
+  const lines: string[] = [];
+  const rt = createRuntime({ board: fb.board, clock: fakeClock(), seed: 3, frameMs, onSay: (_a, t) => lines.push(t) });
+  return { ...fb, rt, lines };
 }
 
 describe('slot grid', () => {
@@ -31,7 +30,7 @@ describe('slot grid', () => {
 
 describe('runtime with scripted agents (fake board)', () => {
   it('spawns 3 agents; each builds a frame with children parented to it, one gesture per build', async () => {
-    const { rt, gestures, batches, actors } = rig();
+    const { rt, gestures, batches, actors, lines } = rig();
     const ids = [rt.spawn(), rt.spawn(), rt.spawn()];
     expect(ids.every((id) => id.startsWith('agent-'))).toBe(true);
     expect(actors.size).toBe(3);
@@ -55,8 +54,8 @@ describe('runtime with scripted agents (fake board)', () => {
       expect(t.props.text).toBeTruthy();
     }
     expect(batches.every((b) => b.actor.startsWith('agent-'))).toBe(true);
-    expect(says(batches).some((s) => s.startsWith('Starting a '))).toBe(true);
-    expect(says(batches).some((s) => s.startsWith('Finished the '))).toBe(true);
+    expect(lines.some((s) => s.startsWith('Starting a '))).toBe(true);
+    expect(lines.some((s) => s.startsWith('Finished the '))).toBe(true);
   });
 
   it('each agent gets its own slot', async () => {
@@ -80,7 +79,8 @@ describe('runtime with scripted agents (fake board)', () => {
 
   it('answers a layer note: moves, applies one batch as the agent, says On it / Done', async () => {
     const fb = fakeBoard({ shapes: [mkShape('r1', { name: 'Box' })] });
-    const rt = createRuntime({ board: fb.board, clock: fakeClock(), seed: 1, frameMs: 50 });
+    const lines: string[] = [];
+    const rt = createRuntime({ board: fb.board, clock: fakeClock(), seed: 1, frameMs: 50, onSay: (_a, t) => lines.push(t) });
     const id = rt.spawn();
     const done = rt.request(id, { text: 'make it blue', shapeId: 'r1' });
     await done;
@@ -88,13 +88,12 @@ describe('runtime with scripted agents (fake board)', () => {
     const upd = fb.batches.find((b) => b.commands[0].t === 'shape.update')!;
     expect(upd.actor).toBe(id);
     expect(upd.commands).toEqual([{ t: 'shape.update', ids: ['r1'], patch: { fills: [{ type: 'solid', color: '#3b82f6' }] } }]);
-    const lines = says(fb.batches);
     expect(lines).toContain('On it: Box.');
     expect(lines).toContain('Done: fill is now blue.');
   });
 
   it('missing layer, unknown note, and a template request choose the next build', async () => {
-    const { rt, batches, gestures } = rig();
+    const { rt, gestures, lines } = rig();
     const id = rt.spawn();
     await Promise.all([
       rt.request(id, { text: 'make it blue', shapeId: 'gone' }),
@@ -103,7 +102,6 @@ describe('runtime with scripted agents (fake board)', () => {
     ]);
     await until(() => gestures.some((g) => g.committed));
     rt.reset();
-    const lines = says(batches);
     expect(lines).toContain('That layer is gone now, so there is nothing to change.');
     expect(lines.some((l) => l.startsWith("I'm a scripted demo agent"))).toBe(true);
     expect(lines).toContain("Sure, I'll build a Stat widget next.");
@@ -161,8 +159,44 @@ describe('runtime with scripted agents (fake board)', () => {
 });
 
 describe('with the real board', () => {
-  // enable after WP-08 merges
-  it.skip('spawn 3 scripted agents against a fresh board; each frame has children with parent = frameId and every op has actor = agent-*', () => {});
-  // enable after WP-08 merges
-  it.skip("board.undo('agent-x') removes that agent's last template build in one step", () => {});
+  function real() {
+    const board = createBoard();
+    const lines: string[] = [];
+    const rt = startAgents(board, { clock: fakeClock(), seed: 5, frameMs: 50, onSay: (_a, t) => lines.push(t) });
+    const finished = () => lines.filter((l) => l.startsWith('Finished the ')).length;
+    return { board, rt, finished };
+  }
+  const live = (board: ReturnType<typeof createBoard>) => [...board.doc.getState().shapes.values()].filter((s) => !s.deleted);
+
+  it('spawn 3 scripted agents against a fresh board; each frame has children with parent = frameId and every op has actor = agent-*', async () => {
+    const { board, rt, finished } = real();
+    const ids = [rt.spawn(), rt.spawn(), rt.spawn()];
+    await until(() => finished() >= 3);
+    rt.reset();
+    expect(ids).toHaveLength(3);
+    const shapes = live(board);
+    const frames = shapes.filter((s) => s.kind === 'frame');
+    expect(frames.length).toBeGreaterThanOrEqual(3);
+    for (const f of frames) {
+      expect(f.parent).toBeNull();
+      const kids = shapes.filter((s) => s.parent === f.id);
+      expect(kids.length).toBeGreaterThan(0);
+      for (const k of kids) { expect(k.x).toBeLessThan(f.w); expect(k.createdBy).toMatch(/^agent-/); }
+    }
+    expect(shapes.filter((s) => s.parent !== null).every((s) => frames.some((f) => f.id === s.parent))).toBe(true);
+    for (const e of board.doc.log()) expect(e.actor).toMatch(/^agent-/);
+  });
+
+  it("board.undo('agent-x') removes that agent's last template build in one step", async () => {
+    const { board, rt, finished } = real();
+    const id = rt.spawn();
+    await until(() => finished() >= 1);
+    rt.stop(id);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(live(board).length).toBeGreaterThan(1);
+    expect(board.undo(id)).toBe(true);
+    expect(live(board)).toHaveLength(0);
+    expect(board.undo(id)).toBe(false);
+    rt.reset();
+  });
 });
