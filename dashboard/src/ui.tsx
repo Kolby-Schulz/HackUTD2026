@@ -1,5 +1,6 @@
 // Small shared pieces: event icons, avatars, status chips.
-import type { CSSProperties } from 'react';
+import { Component } from 'react';
+import type { CSSProperties, ErrorInfo, ReactNode } from 'react';
 import type { Kind, Person } from './model.ts';
 
 export const KIND_COLOR: Record<Kind, string> = {
@@ -56,4 +57,25 @@ export function StatusLabel({ status, dot = true }: { status: string; dot?: bool
 
 export function Empty({ children }: { children: React.ReactNode }) {
   return <div className="muted" style={{ fontSize: 13, lineHeight: 1.5 }}>{children}</div>;
+}
+
+// Catches a crash in one tab so the header, agents column and other tabs keep working.
+// Pass a `resetKey` (e.g. the tab name) so switching tabs clears the error.
+export class ErrorBoundary extends Component<{ label: string; resetKey?: string; children: ReactNode }, { error?: Error; key?: string }> {
+  state: { error?: Error; key?: string } = {};
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  static getDerivedStateFromProps(props: { resetKey?: string }, state: { error?: Error; key?: string }) {
+    return props.resetKey !== state.key ? { error: undefined, key: props.resetKey } : null;
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) { console.error(`[dashboard] ${this.props.label} crashed`, error, info.componentStack); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="card pad" role="alert">
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>The {this.props.label} panel hit an error.</div>
+        <div className="muted mono" style={{ fontSize: 12, marginBottom: 10, overflowWrap: 'anywhere' }}>{this.state.error.message}</div>
+        <button type="button" className="pill" style={{ cursor: 'pointer', background: 'transparent' }} onClick={() => this.setState({ error: undefined })}>Try again</button>
+      </div>
+    );
+  }
 }

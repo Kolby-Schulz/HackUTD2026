@@ -64,6 +64,18 @@ export function buildReceipt(order: Order): string {
 `,
 };
 
+// Agent B, told to reuse formatDate, keeps its own name as a thin wrapper: still one formatter.
+const B_WRAPPER: Record<string, string> = {
+  'src/checkout/receipt.ts': `import type { Order } from '../models.ts';
+import { computeTotal } from './checkout.ts';
+import { formatDate } from '../format.ts';
+const formatOrderDate = (date: Date): string => formatDate(date);
+export function buildReceipt(order: Order): string {
+  return 'Total: $' + (computeTotal(order) / 100).toFixed(2) + ' on ' + formatOrderDate(order.createdAt);
+}
+`,
+};
+
 function scenario(patches: Record<string, string>[]) {
   rmSync(SCRATCH, { recursive: true, force: true });
   mkdirSync(SCRATCH);
@@ -82,6 +94,7 @@ const cases = [
   { name: 'baseline', patches: [], want: { integration: false, dupes: true } },
   { name: 'A + B without Contract', patches: [A, B_ALONE], want: { integration: false, dupes: false } },
   { name: 'A + B with Contract', patches: [A, B_CONTRACT], want: { integration: true, dupes: true } },
+  { name: 'A + B with a thin wrapper', patches: [A, B_WRAPPER], want: { integration: true, dupes: true } },
 ];
 
 let failed = 0;

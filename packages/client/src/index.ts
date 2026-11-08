@@ -19,6 +19,7 @@ export type SavingKind = 'early_stop' | 'reuse' | 'context_slice' | 'cache_hit' 
 export type * as rows from './bindings/types.ts';
 export { DbConnection } from './bindings/index.ts';
 export { estimateTokens } from './context.ts';
+export { copyNote, copySharedFiles, mentionedFiles, planCopies, refreshCopies, type CopiedFile, type ShareCopy } from './share.ts';
 
 export interface AgentInfo {
   id: string; // 'agent-a', or the fixed ids 'coordinator', 'mapper', 'triage'

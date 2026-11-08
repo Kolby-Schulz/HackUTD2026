@@ -5,7 +5,9 @@
 // (toLocaleDateString, Intl.DateTimeFormat, getMonth, ...) or its name says it formats a
 // date (formatDate, toDisplayDate, dateToString, ...). Only the innermost match counts,
 // so a receipt that calls formatDate is not a second formatter, but a receipt that
-// formats the date inline is.
+// formats the date inline is. A thin wrapper whose body only returns a call to another
+// date formatter (`function formatDueDate(d) { return formatOrderDate(d); }`) is an alias
+// of that helper, not a second formatter.
 //
 // npx tsx scripts/check-dupes.ts [srcDir]   (default: src next to this script)
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -39,6 +41,23 @@ function nameOf(node: ts.Node): string {
 const isFunction = (node: ts.Node) =>
   ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
 
+/** `return otherFormatter(...)` (or an arrow returning that call) with no date API in the arguments. */
+function isThinWrapper(node: ts.Node, name: string, source: ts.SourceFile): boolean {
+  if (!(ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node))) return false;
+  let expr: ts.Expression | undefined;
+  if (node.body && ts.isBlock(node.body)) {
+    const [only, ...rest] = node.body.statements;
+    if (rest.length || !only || !ts.isReturnStatement(only)) return false;
+    expr = only.expression;
+  } else if (node.body) {
+    expr = node.body as ts.Expression;
+  }
+  while (expr && ts.isParenthesizedExpression(expr)) expr = expr.expression;
+  if (!expr || !ts.isCallExpression(expr) || !ts.isIdentifier(expr.expression)) return false;
+  const callee = expr.expression.text;
+  return callee !== name && DATE_NAME(callee) && !expr.arguments.some((a) => DATE_API.test(a.getText(source)));
+}
+
 interface Found { file: string; name: string; line: number }
 const found: Found[] = [];
 
@@ -50,6 +69,7 @@ for (const file of tsFiles(SRC)) {
     node.forEachChild((child) => { inner = visit(child) || inner; });
     if (!isFunction(node) || inner) return inner;
     const name = nameOf(node);
+    if (isThinWrapper(node, name, source)) return false;
     if (DATE_NAME(name) || DATE_API.test(node.getText(source))) {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
       found.push({ file: relative(ROOT, file), name, line });

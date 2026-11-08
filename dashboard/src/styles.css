@@ -141,10 +141,20 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .live-grid, .act-grid, .tok-grid { grid-template-columns: minmax(0, 1fr); }
   .side-cards { padding-top: 0; flex-direction: row; flex-wrap: wrap; }
   .side-cards > * { flex: 1 1 260px; }
+  /* Once the side cards stack under the map, Live no longer fits one screen: scroll like the other tabs.
+     (In fit mode the single-column grid squeezed .map-wrap below the map's min-height, so the map
+     spilled over the symbol card, and the fixed-height shell clipped the KPI row and header.) */
+  .app.fit { height: auto; overflow: visible; }
+  .app.fit .body { grid-template-rows: none; }
+  .app.fit .agents { position: sticky; height: auto; max-height: calc(100vh - 32px); align-self: start; }
+  .app.fit .live-grid { flex: none; }
+  .app.fit .map { flex: none; height: 460px; }
+  .app.fit .side-cards { overflow: visible; }
+  .topnav { height: auto; min-height: 60px; flex-wrap: wrap; padding-top: 10px; padding-bottom: 10px; }
 }
 @media (max-width: 900px) {
   .body { grid-template-columns: minmax(0, 1fr); padding: 12px 16px 16px; }
-  .agents { position: static; max-height: none; }
+  .agents, .app.fit .agents { position: static; max-height: none; }
   .topnav { height: auto; flex-wrap: wrap; padding: 12px 16px; }
   .tabs { order: 5; width: 100%; justify-content: space-between; }
   .tab { padding: 7px 10px; font-size: 13px; }
@@ -152,6 +162,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   .bottom, .stat-row, .notes3 { grid-template-columns: minmax(0, 1fr); }
   .score-grid { grid-template-columns: minmax(0, 1fr) 90px 90px; gap: 12px; }
   .case-row { grid-template-columns: minmax(0, 1fr); }
-  .map { height: 420px; }
+  .map, .app.fit .map { height: 420px; }
   .table-wrap { overflow-x: auto; }
 }

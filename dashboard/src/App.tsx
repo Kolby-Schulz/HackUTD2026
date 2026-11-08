@@ -9,6 +9,7 @@ import { LiveTab } from './LiveTab.tsx';
 import { ActivityTab } from './ActivityTab.tsx';
 import { TokensTab } from './TokensTab.tsx';
 import { ScoreboardTab } from './ScoreboardTab.tsx';
+import { ErrorBoundary } from './ui.tsx';
 
 type Tab = 'live' | 'activity' | 'tokens' | 'scoreboard';
 const TABS: [Tab, string][] = [['live', 'Live'], ['activity', 'Activity'], ['tokens', 'Tokens'], ['scoreboard', 'Scoreboard']];
@@ -94,12 +95,14 @@ export function App() {
       )}
 
       <div className="body">
-        <AgentsPanel agents={view.agents} coord={view.coord} />
+        <ErrorBoundary label="Agents"><AgentsPanel agents={view.agents} coord={view.coord} /></ErrorBoundary>
         <main className="main">
+          <ErrorBoundary label={TABS.find(([k]) => k === tab)?.[1] ?? tab} resetKey={tab}>
           {tab === 'live' && <LiveTab agents={view.agents} cases={view.cases} events={view.events} map={view.map} stats={view.stats} without={view.without} symbols={live.symbols} edges={live.edges} runStart={w.start} />}
           {tab === 'activity' && <ActivityTab events={view.events} cases={view.cases} people={view.people} />}
           {tab === 'tokens' && <TokensTab stats={view.stats} agents={view.agents} coord={view.coord} cases={view.cases} runStart={w.start} />}
           {tab === 'scoreboard' && <ScoreboardTab without={view.without} withC={view.withC} />}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

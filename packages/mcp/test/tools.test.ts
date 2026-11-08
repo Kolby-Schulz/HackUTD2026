@@ -44,9 +44,9 @@ function fakeClient() {
   return { c, calls, pending };
 }
 
-async function setup() {
+async function setup(shareFiles?: (text: string) => string[]) {
   const f = fakeClient();
-  const server = createServer(Promise.resolve(f.c), 7n);
+  const server = createServer(Promise.resolve(f.c), 7n, shareFiles);
   const [a, b] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test', version: '0' });
   await Promise.all([server.connect(a), client.connect(b)]);
@@ -83,6 +83,20 @@ describe('contract mcp tools', () => {
     expect(t.calls[0]).toEqual(['publishPlan', 7n, 'late fees', [{ symbolId: 'src/a.ts#f', intent: 'modify' }]]);
     expect(JSON.parse(r.text).instructions).toEqual([{ id: '1', text: 'Reuse formatDate' }]);
     expect(again.text).toMatch(/No new instructions/);
+  });
+
+  it('copies files the instructions name and adds the notes (issue #15)', async () => {
+    // Arrange
+    const seen: string[] = [];
+    const u = await setup((text) => (seen.push(text), ['Copied src/format.ts from agent-b']));
+    u.pending.push({ id: 2n, agentId: 'agent-a', text: 'Import formatDate from src/format.ts', acknowledged: false });
+
+    // Act
+    const r = await u.call('get_instructions');
+
+    // Assert
+    expect(seen).toEqual(['Import formatDate from src/format.ts']);
+    expect(r.text).toContain('Copied src/format.ts from agent-b');
   });
 
   it('declare_plan forwards the signature of a planned create', async () => {

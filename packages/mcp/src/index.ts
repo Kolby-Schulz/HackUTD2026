@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { ClaimedError, connect, estimateTokens, type ContractClient, type Instruction } from '@contract/client';
+import { ClaimedError, connect, copyNote, copySharedFiles, estimateTokens, type ContractClient, type Instruction } from '@contract/client';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 // Claude Code starts us in the agent's worktree, so load the monorepo's .env explicitly.
@@ -64,7 +64,12 @@ const showInstructions = (list: Instruction[]) =>
  * Builds the MCP server around a client promise. Exported for tests: pass any
  * ContractClient (a fake works) and a task id.
  */
-export function createServer(clientP: Promise<ContractClient>, taskId: bigint): McpServer {
+export function createServer(
+  clientP: Promise<ContractClient>,
+  taskId: bigint,
+  /** Copies files the instructions tell the agent to import from another worktree (issue #15); returns notes. */
+  shareFiles?: (text: string) => string[],
+): McpServer {
   const server = new McpServer({ name: 'contract', version: '0.1.0' });
   const reused = new Set<string>(); // log one reuse saving per existing symbol per process
 
@@ -84,7 +89,15 @@ export function createServer(clientP: Promise<ContractClient>, taskId: bigint): 
   async function takeInstructions(c: ContractClient) {
     const list = c.pendingInstructions();
     for (const i of list) await c.ack(i.id).catch(() => {});
-    return showInstructions(list);
+    const shown = showInstructions(list);
+    if (!list.length || !shareFiles) return shown;
+    let notes: string[] = [];
+    try {
+      notes = shareFiles(list.map((i) => i.text).join(' '));
+    } catch (e) {
+      console.error(`contract mcp: copying shared files failed: ${String(e)}`);
+    }
+    return notes.length ? [...shown, ...notes.map((text) => ({ id: 'contract', text }))] : shown;
   }
 
   server.registerTool(
@@ -295,7 +308,10 @@ async function main() {
   });
   clientP.catch((e: unknown) => console.error(`contract mcp: connect failed: ${String(e)}`));
 
-  const server = createServer(clientP, taskId);
+  const repo = process.env.CONTRACT_REPO;
+  const repoDir = process.env.CONTRACT_REPO_DIR ?? process.cwd();
+  const share = repo ? (text: string) => copySharedFiles(text, repo, agentId, repoDir).map(copyNote) : undefined;
+  const server = createServer(clientP, taskId, share);
   await server.connect(new StdioServerTransport());
 
   const shutdown = async () => {

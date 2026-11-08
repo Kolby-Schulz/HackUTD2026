@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { connect, noopClient, type ContractClient } from '@contract/client';
+import { connect, copyNote, copySharedFiles, noopClient, refreshCopies, type ContractClient, type CopiedFile } from '@contract/client';
 import { createLLM, LLMAbortError, type Usage } from '@contract/llm';
 import { earlyStopEstimate, readTokenLog, resumeInstructions } from './resume.ts';
 import { CONTRACT_RULES } from './rules.ts';
@@ -120,6 +120,8 @@ contract.onStatusChange((status) => {
 // 5. Run, and on pause wait for an instruction then resume the same session.
 let sessionId: string | undefined;
 let prompt = task;
+// Helpers copied in from another agent's worktree (issue #15), refreshed before commit.
+const copied: CopiedFile[] = [];
 for (;;) {
   try {
     const r = await llm.runWorker(prompt, {
@@ -152,13 +154,29 @@ for (;;) {
     const instrs = resumeInstructions(contract.pendingInstructions());
     for (const i of contract.pendingInstructions()) await contract.ack(i.id);
     const text = instrs.map((i) => i.text).join(' ') || 'No change needed.';
-    console.log(`[${agentId}] resuming: ${text}`);
-    prompt = `Coordinator decision: ${text} Continue your task.`;
+    // A file the decision says to import may exist only in the owner's worktree: copy it in.
+    let notes = '';
+    try {
+      const got = copySharedFiles(text, REPO, agentId, cwd);
+      copied.push(...got);
+      notes = got.map((c) => ' ' + copyNote(c)).join('');
+    } catch (err) {
+      console.warn(`[${agentId}] copying shared files failed: ${String(err)}`);
+    }
+    console.log(`[${agentId}] resuming: ${text}${notes}`);
+    prompt = `Coordinator decision: ${text}${notes} Continue your task.`;
     controller = new AbortController();
   }
 }
 
 // 6. Commit to the agent's branch, release claims, mark the task done.
+// A copied helper this agent left untouched takes the owner's latest bytes, so git still
+// sees identical add/add files at the merge.
+try {
+  for (const f of refreshCopies(copied, REPO, cwd)) console.log(`[${agentId}] refreshed ${f} from its owner's worktree`);
+} catch (err) {
+  console.warn(`[${agentId}] refreshing copied files failed: ${String(err)}`);
+}
 execFileSync('git', ['add', '-A'], { cwd: worktree });
 execFileSync('git', ['commit', '-m', `${agentId}: ${task.slice(0, 60)}`, '--allow-empty'], { cwd: worktree, stdio: 'inherit' });
 for (const symbolId of contract.myClaims()) {
