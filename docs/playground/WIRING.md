@@ -100,5 +100,21 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - known, not fixed: "Restart all" only shows when every agent is stopped; 60 fps not proven in the app's throttled
   pane (per-frame work under 1 ms; culling mounts ~370 of 5,000).
 
+## Waves 2-3 seams
+- todo (WP-53): `ui/Cursors.tsx` painter calls `layoutTags(...)` and `cursorScale(zoom)` from `presence/cursors.ts` and
+  toggles the `.pg-tag` full/short/dot classes and the "+n" chip (tag declutter when zoomed out / crowded).
+- todo (WP-60): `ui/gestures/resize.ts` text resize commit adds `textMode: modeAfterResize(shape.textMode, handle)`;
+  handle double-click sets `modeAfterHandleDoubleClick()` then `writeMeasuredSize`.
+- todo (WP-60): agent host calls `writeMeasuredSize(board, id, {role:'host'}, true)` after agent text create/update
+  (host peer only).
+- todo (WP-60/57): inspector font/size/mode changes call `writeMeasuredSize(..., {role:'editor', actor})` so auto-width
+  text re-measures after a typography change.
+- todo (WP-60): fold `commitText` and the fitted-size write into one undo entry (`ui/gestures/text.ts`).
+- todo (WP-54): `LayerRow.tsx` flash class on reveal; `onHover` prop for a canvas hover outline from the layers panel
+  (keep the comment tool's use of `ui.hover`).
+- todo (WP-62/44): one document title: `(N) <file name> · Playground` (WP-44 sets the file-name title, WP-62 the unread
+  count; today whichever runs last wins).
+- WP-57, WP-59: no seam.
+
 ## Later (not wiring)
 - WP-NET-0 networking prep (see `vault/Scopes/design-board.md`).
