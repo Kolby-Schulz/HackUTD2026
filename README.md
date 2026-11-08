@@ -202,6 +202,10 @@ browser: the code works once, expires after 10 minutes, and never reaches the da
 browser sends a hash of it with its own identity). Press Enter in the daemon's terminal for a new
 code. When no browser is paired yet, the daemon opens the link itself (`--no-open` to skip,
 `--open` to force). The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
+The code only ever appears in the terminal on purpose: the dashboard is a public page, so a code or
+"pair" button shown there would let anyone who opens it run commands on your laptop. Seeing the
+terminal is the proof that you're at the laptop. A private/Incognito window forgets its identity
+when closed, so it needs a new code each time; use a normal window to pair once.
 **Manual controls** under the chat start and stop each piece yourself (coordinator, session,
 workers, judge, merge, reset) and show each process's output. Only paired browsers can send it
 commands, every command goes through a fixed allowlist, and it runs things only on the laptop
