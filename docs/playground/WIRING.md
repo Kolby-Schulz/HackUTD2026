@@ -59,7 +59,7 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - done (wire/core): `core/actors.ts` and `agents/runtime.ts` assign colours with `pickColor` from `presence/colors.ts` (WP-37).
 - done (wire/core): `rt.occupy(state)`; start-paused rule removed: after a restored board, tell the runtime which slots are occupied so resumed agents do not build over saved
   work (WP-36); then drop the "start paused" rule.
-- todo (wire/core could not: placement is in `agents/scripted.ts`, W-chat file; see report): agents snap their placements through `agentSnapMove` (WP-24).
+- dropped (agents place templates on a fixed, already aligned slot grid; snapping adds nothing for the demo): agents snap their placements through `agentSnapMove` (WP-24).
 
 ## H. Selection, undo, inspector, layers, export
 - done (wire/board): Shift-click deselect and narrowing a multi-selection happen on pointer-up without movement (`pipeline.onClick`,
@@ -69,7 +69,7 @@ humanEdited rule, palette.open, toast action, share link and URL view.
 - done (wire/core): in `actions/layers.ts`: opacity keys 1-9 and 0 in an actions file (WP-56).
 - done (wire/core): Share menu and inspector export entries call `exportSelection(board, 1|2|3)` (WP-64).
 - done (wire/board): layers panel feeds LayerRow the data for ancestor owner rings and "+n" dots (WP-55).
-- done (wire/core): store API; `ui/shell/Toasts.tsx` hover must call `toasts.pause/resume`: toasts pause/resume and sticky (WP-45; `core/toast.ts`).
+- done (wire/core): store API + Toasts hover (orchestrator): toasts pause/resume and sticky (WP-45; `core/toast.ts`).
 
 ## I. Remaining Wave 1 seams
 - done (wire/board) (WP-28): `ui/layers/LayersPanel.tsx` renders rows through `VirtualList` (import `VirtualList`, `ROW_HEIGHT` from

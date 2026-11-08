@@ -50,7 +50,8 @@ export function Toasts() {
 
   return (
     <div className="pg-toasts" role="status" aria-live="polite" data-pg-ui
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      onMouseEnter={() => { setHover(true); shown.forEach((t) => toasts.pause(t.id)); }}
+      onMouseLeave={() => { setHover(false); shown.forEach((t) => toasts.resume(t.id)); }}>
       {shown.map((t) => {
         const a = (t as WithAction).action;
         return (
