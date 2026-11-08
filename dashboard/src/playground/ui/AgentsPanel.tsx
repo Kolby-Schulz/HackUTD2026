@@ -3,11 +3,48 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { setActionRuntime } from '../actions/agents';
+import { probeBridge } from '../agents/llm';
+import { formatChip, usageStore } from '../agents/usage';
+import { toast } from '../core/toast';
 import { opId } from '../core/ids';
 import { selectIds } from './board/state';
 import { viewCenter } from './kit';
 import type { SlotProps } from './slotProps';
 import '../styles/agents.css';
+
+const BRIDGE_KEY = 'pg.llmBridge';
+const readBridge = () => { try { return localStorage.getItem(BRIDGE_KEY) ?? ''; } catch { return ''; } };
+
+/** Totals, per-agent chips and the optional local-bridge URL. Off unless a URL is set. */
+function LlmSection({ rt, ids }: { rt: SlotProps['rt']; ids: string[] }) {
+  const [, tick] = useState(0);
+  const [url, setUrl] = useState(readBridge);
+  useEffect(() => usageStore.subscribe(() => tick((n) => n + 1)), []);
+  const save = (v: string) => { setUrl(v); try { localStorage.setItem(BRIDGE_KEY, v); } catch { /* storage may be blocked */ } };
+  const addLlm = async () => {
+    if (!(await probeBridge(url))) { toast('LLM bridge offline', { variant: 'warn', key: 'llm-offline', onceMs: 3000 }); return; }
+    try { rt?.spawn({ at: viewCenter(), driver: 'llm' }); } catch { toast('LLM driver is not wired in this build', { variant: 'warn' }); }
+  };
+  const t = usageStore.totals();
+  return (
+    <>
+      <div className="pg-row">
+        <label>LLM bridge</label>
+        <input value={url} placeholder="off (http://localhost:8787)" onChange={(e) => save(e.target.value.trim())} aria-label="LLM bridge URL" />
+      </div>
+      {url && <div className="pg-actions"><button onClick={addLlm}>+ LLM agent</button></div>}
+      {t.calls > 0 && (
+        <details>
+          <summary>Usage {formatChip(t)}</summary>
+          {ids.filter((id) => usageStore.get(id).calls > 0).map((id) => {
+            const u = usageStore.get(id);
+            return <div key={id} className="pg-row"><label>{id}</label><span>{formatChip(u)} · {u.calls} calls · p50 {Math.round(u.p50_ms)} ms</span></div>;
+          })}
+        </details>
+      )}
+    </>
+  );
+}
 
 export function AgentsPanel({ board, rt, cursors, children }: SlotProps & { children?: ReactNode }) {
   const [speed, setSpeed] = useState(() => {
@@ -57,6 +94,7 @@ export function AgentsPanel({ board, rt, cursors, children }: SlotProps & { chil
         </div>
       </div>
       {speed === 0 && <div className="pg-actions"><button onClick={() => rt?.step()}>Step</button></div>}
+      <LlmSection rt={rt} ids={usageStore.agents()} />
       {children}
       <div className="pg-foot">
         <button onClick={clearBoard}>Clear board</button>
