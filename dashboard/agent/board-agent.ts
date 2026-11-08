@@ -80,7 +80,11 @@ exactly as many briefs as screens asked for (default 1, never more than ${TEAM_S
 name the product, the screen, its content, and the visual style to match (colours and layout of the existing screens).`;
 
 // ---- designer: one screen ----
-interface El { kind: 'rect' | 'ellipse' | 'text'; name: string; x: number; y: number; w: number; h: number; fill?: string; radius?: number; text?: string; fontSize?: number; fontWeight?: number; color?: string }
+interface El {
+  kind: 'rect' | 'ellipse' | 'text'; name: string; x: number; y: number; w: number; h: number;
+  fill?: string; radius?: number; stroke?: string; strokeWidth?: number; shadow?: boolean; opacity?: number;
+  text?: string; fontSize?: number; fontWeight?: number; color?: string; align?: 'left' | 'center' | 'right'; valign?: 'top' | 'middle' | 'bottom'; lineHeight?: number;
+}
 interface Design { frame: { name: string; w: number; h: number; fill: string }; elements: El[] }
 const DESIGN_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['frame', 'elements'],
@@ -90,24 +94,40 @@ const DESIGN_SCHEMA = {
       properties: { name: { type: 'string' }, w: { type: 'number' }, h: { type: 'number' }, fill: { type: 'string', description: 'hex colour' } },
     },
     elements: {
-      type: 'array', maxItems: 40,
+      type: 'array', maxItems: 80,
       items: {
         type: 'object', additionalProperties: false, required: ['kind', 'name', 'x', 'y', 'w', 'h'],
         properties: {
           kind: { enum: ['rect', 'ellipse', 'text'] }, name: { type: 'string' },
           x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' },
-          fill: { type: 'string', description: 'hex colour (rect, ellipse)' }, radius: { type: 'number' },
-          text: { type: 'string' }, fontSize: { type: 'number' }, fontWeight: { type: 'number' }, color: { type: 'string', description: 'hex text colour' },
+          fill: { type: 'string', description: 'hex colour (rect, ellipse)' }, radius: { type: 'number', description: 'corner radius (rect)' },
+          stroke: { type: 'string', description: 'hex border colour' }, strokeWidth: { type: 'number' },
+          shadow: { type: 'boolean', description: 'soft drop shadow, for raised cards and buttons' }, opacity: { type: 'number', description: '0 to 1' },
+          text: { type: 'string' }, fontSize: { type: 'number' }, fontWeight: { type: 'number', description: '400, 500, 600 or 700' },
+          color: { type: 'string', description: 'hex text colour' }, lineHeight: { type: 'number', description: 'multiple of fontSize, e.g. 1.3' },
+          align: { enum: ['left', 'center', 'right'] }, valign: { enum: ['top', 'middle', 'bottom'] },
         },
       },
     },
   },
 } as const;
-const DESIGN_SYSTEM = `You are a UI designer on a shared design board. Design exactly the screen in your brief as one frame
-and the layers inside it. Coordinates are relative to the frame's top-left corner, in pixels; keep every layer inside
-the frame. Use a mobile frame (390 x 844) unless the brief says otherwise. Build a real, readable layout: header,
-content and controls, with a text layer for every label (fontSize 12-32). No emoji. Order layers back to front
-(backgrounds and cards before the text on them). At most 40 layers.`;
+const DESIGN_SYSTEM = `You are a senior product designer on a shared design board. Design exactly the screen in your brief as
+one frame and the layers inside it, polished enough to ship.
+
+Canvas: coordinates are relative to the frame's top-left corner, in pixels; keep every layer inside the frame. Use a
+mobile frame (390 x 844) unless the brief says otherwise. Order layers back to front (backgrounds and cards first,
+then the shapes and text on them). Up to 80 layers; use them for detail.
+
+Craft rules:
+- Spacing on an 8 px grid; 20-24 px side margins; consistent gaps between sections.
+- Type scale: 28-34 bold for the title, 17-20 semibold for section heads, 15-16 regular for body, 12-13 for captions.
+  lineHeight 1.2 for headings, 1.4 for body. Size each text box to fit its text (about 0.55 x fontSize per character).
+- Colour: one brand colour plus neutrals, at most one accent. Body text at least 4.5:1 contrast on its background.
+- Buttons and chips: a rect with radius, the label as a text layer of the same box with align center, valign middle.
+- Cards: white or tinted rect with radius 12-20, shadow true, or a 1 px stroke on a light background.
+- No grey placeholder boxes. Picture areas get a tinted rect with a simple illustration built from ellipses and rects
+  (for a pet, a face: head, ears, eyes, nose). Icons are small compositions of shapes, never empty circles.
+- Real, specific copy for every label, name and number. No emoji, no lorem ipsum.`;
 
 // ---- drawing, step by step, one cursor per agent ----
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -172,6 +192,8 @@ async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, inde
       put(a, 'Add text', [{ t: 'create', shape: {
         id, kind: 'text', name: el.name, x, y, w, h, fills: [], text: '', textMode: 'fixed',
         fontSize: clamp(el.fontSize ?? 16, 8, 96), fontWeight: el.fontWeight ?? 400, color: el.color ?? '#111111',
+        textAlign: el.align ?? 'left', textVAlign: el.valign ?? 'top', ...(el.lineHeight ? { lineHeight: clamp(el.lineHeight, 0.8, 3) * clamp(el.fontSize ?? 16, 8, 96) } : {}),
+        ...(el.opacity !== undefined ? { opacity: clamp(el.opacity, 0, 1) } : {}),
         parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
       } }]);
       const step = Math.max(1, Math.ceil(text.length / 6));
@@ -179,7 +201,11 @@ async function draw(a: LocalActor, d: Design, at: { x: number; y: number }, inde
     } else {
       put(a, 'Draw', [{ t: 'create', shape: {
         id, kind: el.kind, name: el.name, x, y, w: 1, h: 1, radius: el.radius ?? 0,
-        fills: [{ type: 'solid', color: el.fill ?? '#e5e7eb' }], parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
+        fills: [{ type: 'solid', color: el.fill ?? '#e5e7eb' }],
+        ...(el.stroke ? { strokes: [{ color: el.stroke, width: clamp(el.strokeWidth ?? 1, 0.5, 8), align: 'inside' as const }] } : {}),
+        ...(el.shadow ? { effects: [{ type: 'drop' as const, x: 0, y: 4, blur: 16, color: 'rgba(15, 23, 42, 0.10)' }] } : {}),
+        ...(el.opacity !== undefined ? { opacity: clamp(el.opacity, 0, 1) } : {}),
+        parent: frameId, index: keys[i], createdBy: a.id, author: a.id,
       } }]);
       await grow(a, id, at.x + x, at.y + y, w, h, 4);
     }
