@@ -4,7 +4,8 @@
 import { keysBetween } from './order';
 import { toast as defaultToast } from './toast';
 import type { ToastOpts } from './toast';
-import type { DocStore, SavedBoard } from './types';
+import { PROP_KEYS } from './tree';
+import type { Command, DocState, DocStore, Kind, SavedBoard, Shape, ShapeId } from './types';
 
 export const FORMAT = 'contract-board';
 export const CURRENT = 1;
@@ -242,4 +243,108 @@ export function createPersistence(store: DocStore, o: PersistOpts): Persistence 
       target?.removeEventListener('storage', onStorage);
     },
   };
+}
+
+// ---- file export / import (HISTORY-32, SHARE-9, SHARE-10) ----
+// A file is exactly a SavedBoard (same format and version as the autosave), minus tombstones and the op-log tail.
+export const FILE_EXT = '.contract.json';
+export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+export const MAX_IMPORT_SHAPES = 50_000;
+const KINDS: readonly Kind[] = ['frame', 'group', 'rect', 'ellipse', 'text', 'line', 'image'];
+
+/** `<name>-<YYYY-MM-DD>.contract.json`, safe for every filesystem. */
+export function exportFileName(name: string, date: Date = new Date()): string {
+  const clean = name.replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-').trim().replace(/^\.+/, '') || 'board';
+  return `${clean}-${date.toISOString().slice(0, 10)}${FILE_EXT}`;
+}
+
+/** Turn the persistence JSON into the file text: tombstones and the op-log tail are left out. */
+export function toFileText(json: string): string {
+  const b = JSON.parse(json) as SavedBoard;
+  delete b.logTail;
+  b.shapes = b.shapes.filter((s) => !s.deleted);
+  return JSON.stringify(b, null, 2);
+}
+
+export type ImportResult =
+  | { ok: true; board: SavedBoard; shapes: Shape[]; dropped: number }
+  | { ok: false; error: string };
+
+/** Validate a picked file's text. Never throws; the error is a sentence for a toast. */
+export function parseImport(text: string, byteLength: number = text.length): ImportResult {
+  if (byteLength > MAX_IMPORT_BYTES) return { ok: false, error: `File is too large (${(byteLength / 1048576).toFixed(1)} MB, limit ${MAX_IMPORT_BYTES / 1048576} MB)` };
+  let doc: unknown;
+  try { doc = JSON.parse(text); } catch { return { ok: false, error: 'Not a valid JSON file' }; }
+  if (!isRec(doc) || doc.format !== FORMAT) return { ok: false, error: 'Not a Contract board file' };
+  if (typeof doc.v !== 'number') return { ok: false, error: 'Board file has no version' };
+  if (doc.v > CURRENT) return { ok: false, error: 'This file was saved by a newer version of Contract' };
+  if (!Array.isArray(doc.shapes)) return { ok: false, error: 'Board file has no shapes list' };
+  if (doc.shapes.length > MAX_IMPORT_SHAPES) return { ok: false, error: `Too many layers (${doc.shapes.length}, limit ${MAX_IMPORT_SHAPES})` };
+  const r = parseSaved(text);
+  if (r.status !== 'ok') return { ok: false, error: r.status === 'future' ? 'This file was saved by a newer version of Contract' : 'Board file is damaged' };
+  const seen = new Set<string>();
+  let dropped = r.dropped;
+  const shapes: Shape[] = [];
+  for (const s of r.board.shapes as Shape[]) {
+    if (s.deleted) continue;                                        // tombstones are not layers
+    if (!KINDS.includes(s.kind) || seen.has(s.id)) { dropped++; continue; }
+    seen.add(s.id); shapes.push(s);
+  }
+  if (!shapes.length) return { ok: false, error: 'Board file has no layers' };
+  return { ok: true, board: r.board, shapes, dropped };
+}
+
+export interface ImportPlan { commands: Command[]; created: number; removed: number }
+
+/**
+ * Commands that apply an import as ONE batch (one undo step). Every id is remapped through `$n` refs, so a merge can
+ * never overwrite anything. 'replace' removes the current root layers first; 'merge' appends the imported roots
+ * to the right of the existing content, so they land in empty space.
+ */
+export function planImport(st: Pick<DocState, 'shapes'>, shapes: readonly Shape[], mode: 'replace' | 'merge'): ImportPlan {
+  const byId = new Map(shapes.map((s) => [s.id, s]));
+  // a missing parent, or a parent loop, makes the shape a root
+  const parentOf = (s: Shape): ShapeId | null => {
+    if (s.parent === null || !byId.has(s.parent)) return null;
+    const seen = new Set<ShapeId>([s.id]);
+    for (let p: ShapeId | null = s.parent; p !== null; p = byId.get(p)?.parent ?? null) {
+      if (seen.has(p)) return null;
+      seen.add(p);
+    }
+    return s.parent;
+  };
+  const kids = new Map<ShapeId | null, Shape[]>();
+  for (const s of shapes) {
+    const p = parentOf(s);
+    kids.set(p, [...(kids.get(p) ?? []), s]);
+  }
+  for (const l of kids.values()) l.sort((a, b) => (a.index < b.index ? -1 : a.index > b.index ? 1 : a.id < b.id ? -1 : 1));
+
+  const live = [...st.shapes.values()].filter((s) => !s.deleted);
+  const liveRoots = live.filter((s) => s.parent === null || !st.shapes.get(s.parent) || st.shapes.get(s.parent)!.deleted);
+  const commands: Command[] = [];
+  let removed = 0;
+  if (mode === 'replace' && liveRoots.length) { commands.push({ t: 'shape.delete', ids: liveRoots.map((s) => s.id) }); removed = live.length; }
+
+  let dx = 0, dy = 0;
+  const roots = kids.get(null) ?? [];
+  if (mode === 'merge' && liveRoots.length && roots.length) {
+    const maxRight = Math.max(...liveRoots.map((s) => s.x + s.w));
+    const topY = Math.min(...liveRoots.map((s) => s.y));
+    const minX = Math.min(...roots.map((s) => s.x)), minY = Math.min(...roots.map((s) => s.y));
+    dx = maxRight + 80 - minX; dy = topY - minY;
+  }
+
+  const cmdIndex = new Map<ShapeId, number>();
+  const emit = (s: Shape, parent: ShapeId | null) => {
+    const props: Record<string, unknown> = {};
+    for (const k of PROP_KEYS) if (s[k] !== undefined) props[k] = structuredClone(s[k]);
+    delete props.humanEdited; delete props.author;   // ownership belongs to whoever imports
+    if (parent === null && (dx || dy)) { props.x = s.x + dx; props.y = s.y + dy; }
+    cmdIndex.set(s.id, commands.length);
+    commands.push({ t: 'shape.create', kind: s.kind, props, parent: parent === null ? null : `$${cmdIndex.get(parent)}` } as Command);
+    for (const c of kids.get(s.id) ?? []) emit(c, s.id);
+  };
+  for (const r of roots) emit(r, null);
+  return { commands, created: cmdIndex.size, removed };
 }
