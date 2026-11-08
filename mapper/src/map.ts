@@ -29,6 +29,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Node, Project, SyntaxKind, ts, type SourceFile } from 'ts-morph';
+import { grammarFor, isPolyTestFile, TS_SOURCE } from './lang.ts';
 
 export type SymbolKind = 'function' | 'class' | 'method' | 'const';
 
@@ -373,7 +374,23 @@ function referencedIds(decl: Decl, index: DeclIndex, checker: ts.TypeChecker): S
 // Files
 // ---------------------------------------------------------------------------------
 
-export const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', 'build', 'coverage', '.git', '.contract', '.worktrees']);
+export const SKIP_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '.git',
+  '.contract',
+  '.worktrees',
+  // Other ecosystems' dependency and build-output folders.
+  'vendor',
+  'target',
+  '__pycache__',
+  'venv',
+  'bin',
+  'obj',
+  'Pods',
+]);
 
 /**
  * Folders that hold tests and tooling, not app code. Their helpers (test fixtures,
@@ -382,20 +399,38 @@ export const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', '
  */
 const NON_SOURCE_DIRS: ReadonlySet<string> = new Set(['test', 'tests', '__tests__', 'scripts']);
 
+const inSkippedDir = (parts: string[]) => parts.some((p) => SKIP_DIRS.has(p) || NON_SOURCE_DIRS.has(p));
+
 /**
- * Whether a repo-relative path is app source the mapper maps: TypeScript or JavaScript,
+ * Whether a repo-relative path is TypeScript/JavaScript app source that ts-morph maps:
  * not tests, tooling, configs, .d.ts or minified bundles. JS files go through the same
  * rules as TS (ES module exports only; CommonJS `module.exports = ...` is not mapped).
  */
-export function isMappable(relPath: string): boolean {
+export function isTsMappable(relPath: string): boolean {
   const parts = relPath.split(/[\\/]/);
-  if (parts.some((p) => SKIP_DIRS.has(p) || NON_SOURCE_DIRS.has(p))) return false;
+  if (inSkippedDir(parts)) return false;
   const base = parts[parts.length - 1];
-  if (!/\.[mc]?[jt]sx?$/.test(base) || /\.d\.[mc]?ts$/.test(base)) return false;
+  if (!TS_SOURCE.test(base) || /\.d\.[mc]?ts$/.test(base)) return false;
   if (/\.(test|spec)\.[mc]?[jt]sx?$/.test(base)) return false;
   if (/\.config\.[mc]?[jt]sx?$/.test(base)) return false; // vitest.config.ts and friends
   if (/\.min\.[mc]?js$/.test(base)) return false;
   return true;
+}
+
+/** Whether a repo-relative path is app source in a tree-sitter language (polyglot.ts). */
+export function isPolyMappable(relPath: string): boolean {
+  const parts = relPath.split(/[\\/]/);
+  if (inSkippedDir(parts)) return false;
+  return grammarFor(relPath) !== undefined && !isPolyTestFile(relPath);
+}
+
+/**
+ * Whether a repo-relative path is app source the mapper maps, in any supported language:
+ * TS/JS (ts-morph) or Python, Go, Java, Rust, Ruby, PHP, C#, C/C++ (tree-sitter). Tests,
+ * tooling folders and dependency/build folders are never mapped.
+ */
+export function isMappable(relPath: string): boolean {
+  return isTsMappable(relPath) || isPolyMappable(relPath);
 }
 
 /** A .js next to a .ts of the same name is build output (tsc without outDir), not source. */
@@ -553,7 +588,7 @@ export class RepoMapper {
     const files = listMappableFiles(this.repoDir);
     const warning = checkFileCount(files.length, this.repoDir); // before parsing: throws on huge repos
     if (warning) console.warn(`[mapper] ${warning}`);
-    for (const rel of files) this.project.addSourceFileAtPath(join(this.repoDir, rel));
+    for (const rel of files.filter(isTsMappable)) this.project.addSourceFileAtPath(join(this.repoDir, rel));
   }
 
   /** Repo-relative path ("src/billing/fees.ts") for an absolute or relative path. */
@@ -575,7 +610,7 @@ export class RepoMapper {
   mapFile(path: string): FileMap {
     const file = this.rel(path);
     const sf = this.project.getSourceFile(join(this.repoDir, file));
-    if (!sf || !isMappable(file)) return { file, symbols: [], edges: [] };
+    if (!sf || !isTsMappable(file)) return { file, symbols: [], edges: [] };
     return this.mapSource(sf, file);
   }
 
@@ -591,7 +626,7 @@ export class RepoMapper {
   refresh(path: string): boolean {
     const file = this.rel(path);
     const abs = join(this.repoDir, file);
-    if (!isMappable(file) || isCompiledOutput(abs)) return false;
+    if (!isTsMappable(file) || isCompiledOutput(abs)) return false;
     const sf = this.project.getSourceFile(abs);
     if (!existsSync(abs)) {
       if (sf) this.project.removeSourceFile(sf);
@@ -628,7 +663,7 @@ export class RepoMapper {
       const cur = queue.pop()!;
       for (const ref of cur.getReferencingSourceFiles()) {
         const rel = toRel(this.repoDir, ref.getFilePath());
-        if (!isMappable(rel) || rel === file || out.has(rel)) continue;
+        if (!isTsMappable(rel) || rel === file || out.has(rel)) continue;
         out.add(rel);
         // A barrel that re-exports `path` passes it on to its own importers.
         if (ref.getExportDeclarations().length) queue.push(ref);
@@ -638,7 +673,7 @@ export class RepoMapper {
   }
 
   private sourceFiles(): SourceFile[] {
-    return this.project.getSourceFiles().filter((sf) => isMappable(toRel(this.repoDir, sf.getFilePath())));
+    return this.project.getSourceFiles().filter((sf) => isTsMappable(toRel(this.repoDir, sf.getFilePath())));
   }
 
   private declIndex(): DeclIndex {
@@ -675,7 +710,7 @@ export function mapFile(path: string, opts: { repoDir?: string; edges?: boolean 
   const abs = isAbsolute(path) ? path : join(repoDir, path);
   const file = toRel(repoDir, abs);
   if (file.startsWith('..') || isAbsolute(file)) throw new Error(`mapper: ${path} is outside ${repoDir}`);
-  if (!isMappable(file) || !existsSync(abs)) return { file, symbols: [], edges: [] };
+  if (!isTsMappable(file) || !existsSync(abs)) return { file, symbols: [], edges: [] };
   const project = new Project({ skipFileDependencyResolution: true, skipLoadingLibFiles: true, compilerOptions: { noEmit: true } });
   const sf = project.addSourceFileAtPath(abs);
   return { file, symbols: collectDecls(sf, file).map((d) => d.symbol), edges: [] };
@@ -695,7 +730,7 @@ export interface SymbolRange {
  * it lands). Spans include leading JSDoc.
  */
 export function symbolRanges(file: string, text: string): SymbolRange[] {
-  if (!isMappable(file)) return [];
+  if (!isTsMappable(file)) return [];
   const project = new Project({ useInMemoryFileSystem: true, skipLoadingLibFiles: true, compilerOptions: { noEmit: true } });
   const sf = project.createSourceFile('/' + file, text);
   return collectDecls(sf, file).map((d) => {

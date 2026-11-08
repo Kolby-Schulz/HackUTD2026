@@ -3,7 +3,7 @@
 //
 // Puts everything back so each run starts identically, on the demo or any target repo
 // (--repo / CONTRACT_TARGET, issue #18):
-//  1. removes the run's worktrees (.worktrees/<id> on agent/* and demo/* branches) and
+//  1. removes the run's worktrees (.worktrees/<id>, or .worktrees/<repoKey>/<id> for other repos, on agent/* and demo/* branches) and
 //     deletes those branches; other worktrees in .worktrees/ are left alone
 //  2. restores the target folder (demo-repo/ by default) to its HEAD commit (refuses if it
 //     has uncommitted edits, unless --force)

@@ -20,12 +20,12 @@
 //   [{ "agent": "agent-a", "task": "Add a dark mode toggle" }, ...]   ("title" optional)
 //
 // Needs `npm run coordinator` running on one laptop while the workers run.
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { resolveTarget, subdirPrefix, type DbConnection } from '@contract/client';
+import { DEP_PATHSPEC, resolveTarget, runInstall, subdirPrefix, worktreeDir, type DbConnection } from '@contract/client';
 import { conflictMarkers, merge, mergeFix, run, runChecks, warnIfNoCoordinator } from './merge.ts';
-import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, waitFor, WORKTREES } from './lib.ts';
+import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, waitFor } from './lib.ts';
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -123,13 +123,15 @@ async function mergeSession() {
 
   // 2. Merge onto the base in a fresh worktree.
   const mergeBranch = `demo/merge-${runRow.id}`;
-  const mergeDir = join(WORKTREES, `merge-${runRow.id}`);
+  const mergeDir = worktreeDir(REPO, target, `merge-${runRow.id}`);
   if (existsSync(mergeDir)) throw new Error(`${mergeDir} already exists; \`npm run reset\` removes it`);
+  mkdirSync(dirname(mergeDir), { recursive: true });
   git(['worktree', 'add', '-B', mergeBranch, mergeDir, base], root);
   const conflicts: string[] = [];
   for (const b of branches) conflicts.push(...merge(mergeDir, b, subdirPrefix(target)));
   if (conflicts.length) log('session', `git conflicts in ${conflicts.join(', ')} (left with markers for the fix pass)`);
   const demoDir = target.subdir ? join(mergeDir, target.subdir) : mergeDir;
+  if (target.install.length) runInstall(demoDir, target, (m) => log('session', m)); // so the checks can run
 
   // 3. Checks: the target's own (contract.json / npm test); the demo can add its integration test.
   const checkList = [...target.checks, ...(target.demo && values.integration ? [{ name: 'integration test', cmd: 'npm run --silent test:integration' }] : [])];
@@ -159,7 +161,7 @@ async function mergeSession() {
       }
     }
   }
-  git(['add', '-A'], mergeDir);
+  git(['add', '-A', ...DEP_PATHSPEC], mergeDir); // never installed dependencies
   git(['commit', '-m', `merge run ${runRow.id} (session: ${agents.join(', ')})`, '--allow-empty', '--no-verify'], mergeDir);
   if (values.push) git(['push', '--force', '-u', 'origin', mergeBranch], mergeDir);
 

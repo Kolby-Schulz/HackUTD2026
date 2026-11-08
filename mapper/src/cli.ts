@@ -8,9 +8,11 @@
 // --dry-run  print the map instead of sending it; --json prints it as JSON.
 // Connects to SPACETIME_HOST / SPACETIME_DB_NAME from the monorepo's .env.
 //
-// Any TS/JS repo works: .ts/.tsx/.js/.jsx/.mjs/.cjs files are mapped (ES module exports;
-// CommonJS module.exports is not), and tsconfig `paths` aliases resolve, from the root
+// TS/JS: .ts/.tsx/.js/.jsx/.mjs/.cjs files are mapped (ES module exports; CommonJS
+// module.exports is not), and tsconfig `paths` aliases resolve, from the root
 // tsconfig.json or, in a monorepo without one, from the packages' own tsconfig.json files.
+// Python, Go, Java, Rust, Ruby, PHP, C# and C/C++ are mapped with tree-sitter
+// (src/polyglot.ts); their edges are name-based and approximate.
 // Repos over CONTRACT_MAPPER_MAX_FILES source files (default 5000) are refused: point
 // --repo at a subfolder instead.
 //
@@ -24,7 +26,8 @@ import { parseArgs } from 'node:util';
 import { hostname } from 'node:os';
 import { watch } from 'chokidar';
 import { holdService, resolveTarget } from '@contract/client';
-import { isMappable, RepoMapper, SKIP_DIRS, type FileMap } from './map.ts';
+import { isMappable, SKIP_DIRS, type FileMap } from './map.ts';
+import { createRepoMapper } from './polyglot.ts';
 import { MapSync, type Upsert } from './sync.ts';
 
 const MONOREPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -108,7 +111,7 @@ async function main(): Promise<void> {
     throw new Error(`refusing to map a worker worktree (${repoDir}); point --repo at the main demo-repo`);
   }
 
-  let mapper = new RepoMapper(repoDir);
+  let mapper = await createRepoMapper(repoDir);
   const maps = mapper.mapAll();
   const nSymbols = maps.reduce((n, m) => n + m.symbols.length, 0);
   const nEdges = maps.reduce((n, m) => n + m.edges.length, 0);
@@ -163,13 +166,13 @@ async function main(): Promise<void> {
     if (rels.length > REBUILD_THRESHOLD) {
       // A checkout or pull: per-file updates would be slow and see half-written states.
       log(`${plural(rels.length, 'file')} changed at once; re-mapping the whole repo`);
-      mapper = new RepoMapper(repoDir);
+      mapper = await createRepoMapper(repoDir);
       await pushSnapshot(sync, mapper.mapAll(), dbName);
       return;
     }
     const targets = new Set(rels);
     for (const f of rels) for (const d of mapper.dependents(f)) targets.add(d); // before: deleted files' importers
-    for (const f of rels) mapper.refresh(f);
+    for (const f of rels) await mapper.refresh(f);
     for (const f of rels) for (const d of mapper.dependents(f)) targets.add(d); // after: new importers
     await pushAll(
       sync,

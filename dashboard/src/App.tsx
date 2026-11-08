@@ -1,7 +1,8 @@
 // Dashboard (spec section 13). Owner: dashboard + demo.
 // One screen, laid out like an editor workbench (storyboard "Frame 1 as an editor workbench"):
-// Agents side bar, Code map editor, Savings / Problems panel, Chat, status bar. No tabs.
-// Everything comes from live subscriptions. ReplayTab.tsx stays in the repo but is not mounted.
+// Agents side bar, editor (Code map, plus a Control tab for this laptop's processes), Savings /
+// Problems panel, Chat, status bar. Tables come from live subscriptions; Control and the chat's
+// assistant talk to the local control server (npm run control). ReplayTab.tsx stays, unmounted.
 import { useCallback, useMemo, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useLive, SPACETIME_DB_NAME, SPACETIME_HOST } from './data.ts';
@@ -12,6 +13,7 @@ import { ICON, PaneHead, Sash, useLayout } from './Workbench.tsx';
 import { AgentsView, BottomPanel, SymbolWidget } from './Views.tsx';
 import { ChatView } from './Chat.tsx';
 import { Boundary } from './ui.tsx';
+import { ControlTab, useControlRepo } from './ControlTab.tsx';
 
 const modeName = (m: string) => (m === 'with_contract' ? `with ${APP_NAME}` : m === 'without_contract' ? `without ${APP_NAME}` : m);
 
@@ -26,6 +28,8 @@ export function App() {
   const { layout, resize, toggle } = useLayout();
   const [picked, setPicked] = useState<string>();
   const [panelTab, setPanelTab] = useState<'savings' | 'problems'>('savings');
+  const [editorTab, setEditorTab] = useState<'map' | 'control'>('map');
+  const repoLabel = useControlRepo();
 
   const view = useMemo(() => ({
     agents: agentCards(live, run, now),
@@ -60,7 +64,7 @@ export function App() {
         <div className="cmd">
           <label>
             <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-            <span>demo-repo</span>
+            <span>{repoLabel ?? 'demo-repo'}</span>
             <select aria-label="Run" value={runPick} onChange={(e) => { setRunPick(e.target.value); setPicked(undefined); }}>
               <option value="latest">{run ? `latest · run ${run.id} · ${modeName(run.mode)}` : 'no runs yet'}</option>
               {runs.map((r) => <option key={String(r.id)} value={String(r.id)}>run {String(r.id)} · {modeName(r.mode)} · seed {r.seed}{r.endedAt ? '' : ' · live'}</option>)}
@@ -91,9 +95,12 @@ export function App() {
 
         <div className="center">
           <main className="pane" style={{ flex: 1 }} aria-label="Editor">
-            <div className="tabs"><div className="etab">{ICON.map}Code map</div></div>
+            <div className="tabs" role="tablist" aria-label="Editor">
+              <button type="button" role="tab" className="etab" aria-selected={editorTab === 'map'} onClick={() => setEditorTab('map')}>{ICON.map}Code map</button>
+              <button type="button" role="tab" className="etab" aria-selected={editorTab === 'control'} onClick={() => setEditorTab('control')} title="Start and stop this laptop's processes (npm run control)">{ICON.panel}Control</button>
+            </div>
             <nav className="crumbs" aria-label="Run stage">
-              <span>demo-repo</span>
+              <span>{repoLabel ?? 'demo-repo'}</span>
               {STAGES.map((s, i) => <span key={s}>›&nbsp; <span className={i === stageAt ? 'on' : i < stageAt ? 'done' : ''}>{s}</span></span>)}
               <span className="grow" />
               <span>dashed = planned · outline = claimed · click a symbol for details</span>
@@ -104,6 +111,11 @@ export function App() {
                 {live.error ? ` ${live.error}.` : ''} Retrying. Check SPACETIME_HOST and SPACETIME_DB_NAME in the root .env, or start a local server with <span className="mono">spacetime start</span>.
               </div>
             )}
+            {editorTab === 'control' ? (
+              <div className="editor" style={{ overflow: 'auto' }}>
+                <Boundary name="Control"><div className="control-tab"><ControlTab openRun={openRun} chat={false} /></div></Boundary>
+              </div>
+            ) : (
             <div className="editor">
               <Boundary name="Code map">
                 {live.connected && !live.ready ? <div className="map-empty">Loading the code map…</div> : (
@@ -113,6 +125,7 @@ export function App() {
                 )}
               </Boundary>
             </div>
+            )}
           </main>
           {open.panel && (
             <>
@@ -132,7 +145,7 @@ export function App() {
             <aside className="pane chat" style={{ width: size.chat }} aria-label="Chat">
               <PaneHead title="Chat" onClose={() => toggle('chat', false)}><span className="muted" style={{ fontSize: 12 }}>{run ? `run #${run.id}` : ''}</span></PaneHead>
               <Boundary name="Chat">
-                <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} />
+                <ChatView events={view.events} agents={view.agents} openRun={openRun} connected={live.connected} runStart={w.start} />
               </Boundary>
             </aside>
           </>

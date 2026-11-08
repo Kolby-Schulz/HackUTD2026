@@ -149,12 +149,12 @@ export function hookAgent(): { agentId: string; token: string; host: string; dbN
 export async function reportFile(o: { agentId: string; token: string; host: string; dbName: string; repoDir: string; rel: string; sessionKey: string; log?: (m: string) => void }) {
   const { agentId, repoDir, rel } = o;
   const say = o.log ?? ((m: string) => console.error(`contract-hook: ${m}`));
-  const { mapFile, symbolRanges, symbolsTouched } = await import('@contract/mapper');
-  const { symbols } = mapFile(resolve(repoDir, rel), { repoDir, edges: false });
+  const { mapFileAsync, symbolRangesAsync, symbolsTouched } = await import('@contract/mapper');
+  const { symbols } = await mapFileAsync(resolve(repoDir, rel), { repoDir, edges: false });
   const diff = fileDiff(repoDir, rel);
   let touched: string[] = [];
   try {
-    touched = symbolsTouched(symbolRanges(rel, readFileSync(resolve(repoDir, rel), 'utf8')), changedLines(diff));
+    touched = symbolsTouched(await symbolRangesAsync(rel, readFileSync(resolve(repoDir, rel), 'utf8')), changedLines(diff));
   } catch { /* deleted or unreadable: send the diff without symbols */ }
 
   const { DbConnection } = await import('@contract/client');

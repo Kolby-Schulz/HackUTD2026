@@ -88,7 +88,7 @@ Startup (index.ts:288-331): needs `CONTRACT_AGENT_ID`, `CONTRACT_TASK_ID`, and `
 Entry: `agents/worker/src/index.ts`, run as `npm run worker -- --id agent-a --task 1 --mode with_contract|without_contract`. Other entry points: `--prompt` and `--wait` (two-laptop session flow), `watch.ts` (sidecar for non-Claude editors), `session-task.ts` (task rows).
 
 Lifecycle of one run:
-1. Target and worktree (index.ts:81-93). Target from `--repo`, `CONTRACT_TARGET`, else the demo repo. Worktree is `.worktrees/<id>` on branch `agent/<id>` (index.ts:84-88). Work happens in `cwd`, the target's subdir inside it.
+1. Target and worktree (index.ts:81-93). Target from `--repo`, `CONTRACT_TARGET`, else the demo repo. Worktree is `worktreeDir(REPO, target, id)` (`packages/client/src/target.ts`): `.worktrees/<id>` for the demo, `.worktrees/<repoKey>/<id>` for any other repo, on branch `agent/<id>`. Then `runInstall` installs the target's dependencies (`target.install`, detected from lockfiles or `contract.json` `install`), and the agent's env gets `toolPath(cwd)` (`.venv/bin`, `node_modules/.bin` first). Commits use `DEP_PATHSPEC` so installed folders are never committed. Work happens in `cwd`, the target's subdir inside it.
 2. Connect (index.ts:103-126). `with_contract` calls `connect`. `without_contract` uses a fake client (`noopClient`) and logs tokens locally to `.contract/tokens.jsonl` (index.ts:98).
 3. Task (index.ts:129-142). Canned from `TASKS` (`tasks.ts`), `--task-text`, `--prompt`, or `--wait`.
 4. Wiring (index.ts:148-172). Writes `.contract/mcp/<id>.json` (index.ts:159). Passes `appendSystemPrompt: CONTRACT_RULES` (rules.ts:3), `--settings agents/worker/hook-settings.json`, and `allowedTools` including `mcp__contract`.
