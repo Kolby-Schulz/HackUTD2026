@@ -2,6 +2,7 @@
 // The ONE startAgents call lives here, with the host flag.
 import { useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
+import { agentChatHooks } from './chat/agentChat';
 import { createChoreographer } from '../agents/choreographer';
 import type { Choreographer } from '../agents/choreographer';
 import { startAgents } from '../agents/runtime';
@@ -50,12 +51,12 @@ export function useBoot(board: BoardKit, sink: ChatSink, rtRef: MutableRefObject
     const loaded = persistence.load();
     // only a board with live layers counts as restored (an autosaved empty board must not idle the agents)
     const restored = loaded && [...board.doc.getState().shapes.values()].some((sh) => !sh.deleted);
-    const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text) });
+    const r = startAgents(board, { host: HOST_AGENTS, onSay: (a, text) => sink.say?.(a.id, text), ...agentChatHooks(sink.chat) });
     rtRef.current = r;
     setRt(r);
+    // a restored board: agents build in cells that saved work does not touch
+    if (restored) r.occupy(board.doc.getState());
     for (let i = 0; i < 3; i++) r.spawn({ at: viewCenter() });
-    // the runtime cannot yet tell which slots a restored board occupies: start idle instead of building over it
-    if (restored) r.setAllPaused(true);
     // a shared link (#/playground?x=&y=&z=&sel=) moves the camera there and selects the ids that exist
     const offUrl = applyViewFromUrl(board, camera);
 

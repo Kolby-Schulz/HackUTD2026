@@ -4,7 +4,7 @@
 import { bench } from './bench';
 import type { BoardKit } from './commands';
 import { flatten } from './tree';
-import { perf } from './perf';
+import { perf, setDebug } from './perf';
 import { stress } from './stress';
 import type { Batch, Command, Result, Shape, ShapeId } from './types';
 
@@ -71,6 +71,8 @@ export function createDevtools(board: BoardKit, legacy: LegacyHooks = {}) {
       board.presence.remove(id); board.actors.remove(id);
     },
     bench, stress, perf,
+    /** Show or hide the debug HUD (WP-33). */
+    debug: (on = true) => setDebug(on),
   };
 }
 

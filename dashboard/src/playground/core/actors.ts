@@ -1,10 +1,8 @@
 // Actor registry and ids (AGENT-3). Ids are `${kind}-${short}`. Pure TS.
+import { PALETTE, pickColor } from '../presence/colors';
 import type { Actor, ActorId, ActorKind, ActorRegistry, Cap } from './types';
 
-export const ACTOR_COLORS = [
-  '#e5484d', '#3e63dd', '#30a46c', '#f76b15', '#8e4ec6', '#12a594',
-  '#d6409f', '#ab6400', '#0090ff', '#46a758', '#e93d82', '#6e56cf',
-] as const;
+export const ACTOR_COLORS = PALETTE;
 
 export const DEFAULT_CAPS: Record<ActorKind, Cap[]> = {
   human: ['read', 'write', 'comment', 'claim', 'spawn', 'admin'],
@@ -41,10 +39,9 @@ export function createActorRegistry(): ActorRegistry & { nextColor(): string; sp
     register(a: Actor) { actors.set(a.id, a); notify(); },
     remove(id: ActorId) { if (actors.delete(id)) notify(); },
     subscribe(cb: () => void) { subs.add(cb); return () => { subs.delete(cb); }; },
-    /** First palette colour not in use; once all 12 are taken, cycles by count. */
+    /** Least-used palette colour (see presence/colors.ts); beyond 12 actors a generated hue. */
     nextColor(): string {
-      const used = new Set([...actors.values()].map((a) => a.color));
-      return ACTOR_COLORS.find((c) => !used.has(c)) ?? ACTOR_COLORS[actors.size % ACTOR_COLORS.length];
+      return pickColor([...actors.values()].map((a) => a.color));
     },
     /** Create + register with a fresh id (unique), default caps and an unused colour. */
     spawn(p: Partial<Actor> & { kind: ActorKind; name: string }): Actor {
