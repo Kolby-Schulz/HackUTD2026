@@ -12,6 +12,8 @@ import type { Combo, NodeId } from './types.ts';
 
 /** Variant agents register as `variant-<host>` (agents/variants). */
 export const VARIANT_AGENT_PREFIX = 'variant-';
+/** The job's model when the page leaves the choice to the agent (agents/variants uses its configured model). */
+export const AGENT_DEFAULT_MODEL = 'default';
 
 type Ts = { toDate(): Date };
 const iso = (t: Ts) => t.toDate().toISOString();
@@ -75,7 +77,7 @@ export function useVariantsStore(): VariantsStore {
   const deleteMix = useCallback((screen: string, id: NodeId) => deleteR({ id: dbId(screen, id) }), [deleteR]);
   const vote = useCallback((screen: string, node: NodeId | null) => voteR({ screen, nodeId: node ? dbId(screen, node) : '' }), [voteR]);
   const queueJob = useCallback(
-    (screen: string, parent: NodeId | null, brief: string) => queueR({ screen, parent: parent ? dbId(screen, parent) : undefined, brief, model: '' }),
+    (screen: string, parent: NodeId | null, brief: string) => queueR({ screen, parent: parent ? dbId(screen, parent) : undefined, brief, model: AGENT_DEFAULT_MODEL }),
     [queueR],
   );
 
