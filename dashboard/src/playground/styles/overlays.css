@@ -1,0 +1,25 @@
+/* Selection overlay (screen space): union box, per-member outlines, 8 resize handles of constant size. */
+.pg-sbox, .pg-ob { position: absolute; left: 0; top: 0; box-sizing: border-box; pointer-events: none; border: 1px solid var(--pg-sel); }
+.pg-ob { opacity: 0.7; }
+/* corner handles: 8x8 visible, hit area padded 4px on every side */
+.pg-hnd { position: absolute; width: 8px; height: 8px; box-sizing: border-box; background: var(--pg-white); border: 1px solid var(--pg-sel); pointer-events: auto; z-index: 2; }
+.pg-hnd::before { content: ''; position: absolute; inset: -4px; }
+.pg-hnd.h-nw { left: -5px; top: -5px; cursor: nwse-resize; }
+.pg-hnd.h-se { right: -5px; bottom: -5px; cursor: nwse-resize; }
+.pg-hnd.h-ne { right: -5px; top: -5px; cursor: nesw-resize; }
+.pg-hnd.h-sw { left: -5px; bottom: -5px; cursor: nesw-resize; }
+/* boxes under 16 screen px: corner handles move outward so they do not overlap */
+.pg-sbox.tiny .h-nw { left: -11px; top: -11px; }
+.pg-sbox.tiny .h-ne { right: -11px; top: -11px; }
+.pg-sbox.tiny .h-sw { left: -11px; bottom: -11px; }
+.pg-sbox.tiny .h-se { right: -11px; bottom: -11px; }
+/* edge handles: invisible 6px strips along each edge, minus the corner areas (they collapse on small boxes) */
+.pg-edge { position: absolute; pointer-events: auto; z-index: 1; }
+.pg-edge.h-n, .pg-edge.h-s { left: 8px; right: 8px; height: 6px; cursor: ns-resize; }
+.pg-edge.h-e, .pg-edge.h-w { top: 8px; bottom: 8px; width: 6px; cursor: ew-resize; }
+.pg-edge.h-n { top: -4px; }
+.pg-edge.h-s { bottom: -4px; }
+.pg-edge.h-w { left: -4px; }
+.pg-edge.h-e { right: -4px; }
+.pg-sbox.tiny .pg-edge { display: none; }
+.pg-sbox .pg-dims { position: absolute; left: 50%; bottom: -22px; transform: translateX(-50%); background: var(--pg-sel); color: var(--pg-white); white-space: nowrap; font-size: 10px; padding: 1px 5px; border-radius: 3px; font-variant-numeric: tabular-nums; pointer-events: none; }
