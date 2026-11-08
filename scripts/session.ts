@@ -14,12 +14,17 @@
 //   --integration adds demo-repo's integration test, which only passes for the two canned
 //   tasks (agents/worker/src/tasks.ts); free-form prompts get unit tests, typecheck, check-dupes.
 //
+// Any repo (issue #18): add --repo <path|git URL> (or set CONTRACT_TARGET) to start, merge,
+// the workers and reset. start maps that repo; merge runs its contract.json checks (or
+// `npm test`). `start --tasks tasks.json` queues tasks for workers started with --wait:
+//   [{ "agent": "agent-a", "task": "Add a dark mode toggle" }, ...]   ("title" optional)
+//
 // Needs `npm run coordinator` running on one laptop while the workers run.
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import type { DbConnection } from '@contract/client';
-import { checkAll, conflictMarkers, merge, mergeFix, run, warnIfNoCoordinator, type CheckScript } from './merge.ts';
+import { resolveTarget, subdirPrefix, type DbConnection } from '@contract/client';
+import { conflictMarkers, merge, mergeFix, run, runChecks, warnIfNoCoordinator } from './merge.ts';
 import { adminConnect, git, log, REPO, resetServerState, savedToken, TSX, waitFor, WORKTREES } from './lib.ts';
 
 const { values, positionals } = parseArgs({
@@ -32,8 +37,11 @@ const { values, positionals } = parseArgs({
     fixer: { type: 'string' },
     'fix-passes': { type: 'string', default: '2' },
     push: { type: 'boolean', default: false },
+    repo: { type: 'string' },
+    tasks: { type: 'string' },
   },
 });
+const target = resolveTarget(REPO, values.repo);
 
 const QUERIES = ['SELECT * FROM run', 'SELECT * FROM task', 'SELECT * FROM agent'];
 
@@ -56,25 +64,36 @@ async function start() {
   log('session', `run ${runRow.id} open (with_contract)`);
 
   if (!values['no-map']) {
-    // The code map comes from this laptop's demo-repo; workers start from origin/main.
-    try {
-      git(['fetch', 'origin', 'main']);
-      if (git(['diff', '--name-only', 'origin/main', '--', 'demo-repo', ':!demo-repo/package-lock.json'])) {
-        log('session', 'WARNING: local demo-repo/ differs from origin/main; the code map will not match what the workers start from');
+    // The code map comes from this laptop's checkout of the target; workers start from target.base.
+    const path = target.subdir || '.';
+    if (target.base.startsWith('origin/')) {
+      try {
+        git(['fetch', 'origin', target.base.slice('origin/'.length)], target.gitRoot);
+        if (git(['diff', '--name-only', target.base, '--', path, `:!${subdirPrefix(target)}package-lock.json`], target.gitRoot)) {
+          log('session', `WARNING: local ${target.label} differs from ${target.base}; the code map will not match what the workers start from`);
+        }
+      } catch {
+        log('session', `WARNING: could not fetch ${target.base} to compare ${target.label}`);
       }
-    } catch {
-      log('session', 'WARNING: could not fetch origin/main to compare demo-repo/');
     }
-    const r = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts')], REPO, 5 * 60_000);
+    const r = await run('mapper', TSX, [join(REPO, 'mapper/src/cli.ts'), '--repo', target.dir], REPO, 5 * 60_000);
     if (r.exitCode !== 0) throw new Error('mapper failed; is the server reachable?');
+  }
+
+  if (values.tasks) {
+    for (const t of readTasks(values.tasks)) {
+      await conn.reducers.createTask({ title: t.title, description: t.task, agentId: t.agent, runId: runRow.id });
+      log('session', `queued for ${t.agent}: ${t.title}`);
+    }
   }
   warnIfNoCoordinator(conn);
   conn.disconnect();
 
-  log('session', 'ready. On each laptop (a different --id each):');
-  log('session', '  npm run worker -- --id agent-a --prompt "what this agent should build"');
-  log('session', '  npm run worker -- --id agent-b --wait     (then assign it a task from the dashboard)');
-  log('session', 'When every agent is done: npm run session -- merge');
+  const repo = target.demo ? '' : ` --repo ${values.repo ?? process.env.CONTRACT_TARGET}`;
+  log('session', `ready (${target.label}). On each laptop (a different --id each):`);
+  log('session', `  npm run worker -- --id agent-a${repo} --prompt "what this agent should build"`);
+  log('session', `  npm run worker -- --id agent-b${repo} --wait     (${values.tasks ? 'takes its queued task' : 'then assign it a task from the dashboard'})`);
+  log('session', `When every agent is done: npm run session -- merge${repo}`);
 }
 
 async function mergeSession() {
@@ -87,12 +106,14 @@ async function mergeSession() {
   const unfinished = tasks.filter((t) => agents.includes(t.agentId) && t.status !== 'done' && t.status !== 'discarded');
   if (unfinished.length) log('session', `WARNING: still running: ${unfinished.map((t) => `${t.agentId} (task ${t.id}, ${t.status})`).join(', ')}`);
 
-  // 1. Fetch main and every agent's branch.
-  git(['fetch', 'origin', 'main']);
+  // 1. Fetch the base and every agent's branch (in the target repo).
+  const root = target.gitRoot;
+  const base = target.base.startsWith('origin/') ? target.base : 'HEAD';
+  if (base !== 'HEAD') git(['fetch', 'origin', base.slice('origin/'.length)], root);
   const branches: string[] = [];
   for (const a of agents) {
     try {
-      git(['fetch', 'origin', `+refs/heads/agent/${a}:refs/remotes/origin/agent/${a}`]);
+      git(['fetch', 'origin', `+refs/heads/agent/${a}:refs/remotes/origin/agent/${a}`], root);
       branches.push(`origin/agent/${a}`);
     } catch {
       log('session', `WARNING: origin has no agent/${a}; did its worker finish and push? Skipping it`);
@@ -100,19 +121,20 @@ async function mergeSession() {
   }
   if (!branches.length) throw new Error('no agent branches on origin to merge');
 
-  // 2. Merge onto origin/main in a fresh worktree.
+  // 2. Merge onto the base in a fresh worktree.
   const mergeBranch = `demo/merge-${runRow.id}`;
   const mergeDir = join(WORKTREES, `merge-${runRow.id}`);
   if (existsSync(mergeDir)) throw new Error(`${mergeDir} already exists; \`npm run reset\` removes it`);
-  git(['worktree', 'add', '-B', mergeBranch, mergeDir, 'origin/main']);
+  git(['worktree', 'add', '-B', mergeBranch, mergeDir, base], root);
   const conflicts: string[] = [];
-  for (const b of branches) conflicts.push(...merge(mergeDir, b));
+  for (const b of branches) conflicts.push(...merge(mergeDir, b, subdirPrefix(target)));
   if (conflicts.length) log('session', `git conflicts in ${conflicts.join(', ')} (left with markers for the fix pass)`);
-  const demoDir = join(mergeDir, 'demo-repo');
+  const demoDir = target.subdir ? join(mergeDir, target.subdir) : mergeDir;
 
-  // 3. Checks.
-  const scripts: CheckScript[] = ['test', 'typecheck', 'check:dupes', ...(values.integration ? (['test:integration'] as const) : [])];
-  const atMerge = await checkAll(demoDir, scripts);
+  // 3. Checks: the target's own (contract.json / npm test); the demo can add its integration test.
+  const checkList = [...target.checks, ...(target.demo && values.integration ? [{ name: 'integration test', cmd: 'npm run --silent test:integration' }] : [])];
+  if (!checkList.length) log('session', `WARNING: ${target.label} has no checks (add contract.json "checks" or an npm test script); the merge is unchecked`);
+  const atMerge = await runChecks(demoDir, checkList);
   let final = atMerge;
   const green = () => final.checks.every((c) => c.ok) && conflicts.length === 0;
   log('session', `at merge: ${green() ? 'all checks pass' : 'checks fail'}`);
@@ -132,8 +154,8 @@ async function mergeSession() {
       while (!green() && passes < Number(values['fix-passes'])) {
         passes++;
         await mergeFix(fixer, fixerTask.id, demoDir, final.checks, conflicts);
-        conflicts.splice(0, conflicts.length, ...conflictMarkers(mergeDir));
-        final = await checkAll(demoDir, scripts);
+        conflicts.splice(0, conflicts.length, ...conflictMarkers(mergeDir, target.subdir));
+        final = await runChecks(demoDir, checkList);
       }
     }
   }
@@ -152,6 +174,20 @@ async function mergeSession() {
 
 function openRun(conn: DbConnection) {
   return [...conn.db.run.iter()].find((r) => r.endedAt === undefined);
+}
+
+/** --tasks file: [{ agent, task, title? }]. */
+export function readTasks(path: string): { agent: string; task: string; title: string }[] {
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  if (!Array.isArray(raw)) throw new Error(`${path}: expected a JSON array of { "agent", "task" }`);
+  return raw.map((t: { agent?: unknown; task?: unknown; title?: unknown }, i) => {
+    if (typeof t.agent !== 'string' || typeof t.task !== 'string' || !t.agent.trim() || !t.task.trim()) {
+      throw new Error(`${path}[${i}]: needs string "agent" and "task"`);
+    }
+    const task = t.task.trim();
+    const title = typeof t.title === 'string' && t.title.trim() ? t.title.trim() : task.length > 60 ? `${task.slice(0, 57)}...` : task;
+    return { agent: t.agent.trim(), task, title };
+  });
 }
 
 function localToken(agentId: string): boolean {

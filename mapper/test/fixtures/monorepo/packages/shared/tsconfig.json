@@ -1,0 +1,6 @@
+// No baseUrl: targets are relative to this file's folder.
+{
+  "compilerOptions": {
+    "paths": { "@shared/*": ["./src/*"] }
+  }
+}

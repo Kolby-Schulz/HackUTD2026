@@ -3,8 +3,15 @@
 // --repo     repo to map (relative to the cwd, which is mapper/ under `npm run mapper`);
 //            default: the monorepo's demo-repo/.
 // --watch    keep running and re-map files as they change (plus the files importing them).
+//            A big batch of changes (a `git checkout`, a pull) re-maps the whole repo instead.
 // --dry-run  print the map instead of sending it; --json prints it as JSON.
 // Connects to SPACETIME_HOST / SPACETIME_DB_NAME from the monorepo's .env.
+//
+// Any TS/JS repo works: .ts/.tsx/.js/.jsx/.mjs/.cjs files are mapped (ES module exports;
+// CommonJS module.exports is not), and tsconfig `paths` aliases resolve, from the root
+// tsconfig.json or, in a monorepo without one, from the packages' own tsconfig.json files.
+// Repos over CONTRACT_MAPPER_MAX_FILES source files (default 5000) are refused: point
+// --repo at a subfolder instead.
 //
 // Run ONE mapper, against the main demo-repo checkout. Never point it at a worker's
 // worktree: the code map is shared, and agents' in-progress edits reach it through
@@ -21,6 +28,10 @@ const MONOREPO = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 loadEnv({ path: resolve(MONOREPO, '.env'), quiet: true });
 
 const DEBOUNCE_MS = 150;
+/** While a burst is still arriving (a checkout writes many files), wait longer for it to end. */
+const BURST_DEBOUNCE_MS = 1000;
+/** A batch this big is re-mapped as a whole repo instead of file by file. */
+const REBUILD_THRESHOLD = 50;
 
 const log = (msg: string) => console.log(`[mapper] ${msg}`);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -54,6 +65,19 @@ async function pushAll(sync: MapSync, maps: FileMap[]): Promise<{ sent: number; 
   return { sent, failed };
 }
 
+/**
+ * Pushes a full map of the repo: every local file, plus empty maps for files the server
+ * still has but the repo no longer does (deleted, or left over from an earlier repo state),
+ * so they are cleared. Used at startup and when watch mode rebuilds after a big change.
+ */
+async function pushSnapshot(sync: MapSync, maps: FileMap[], dbName: string): Promise<{ sent: number; failed: number }> {
+  const local = new Set(maps.map((m) => m.file));
+  const stale: FileMap[] = [...sync.serverFiles()].filter((f) => !local.has(f)).map((file) => ({ file, symbols: [], edges: [] }));
+  const result = await pushAll(sync, [...maps, ...stale]);
+  log(`sent ${plural(result.sent, 'file')} to ${dbName} (${maps.length + stale.length - result.sent - result.failed} unchanged)`);
+  return result;
+}
+
 function printMaps(maps: FileMap[], json: boolean): void {
   if (json) {
     console.log(JSON.stringify(maps, null, 2));
@@ -80,7 +104,7 @@ async function main(): Promise<void> {
     throw new Error(`refusing to map a worker worktree (${repoDir}); point --repo at the main demo-repo`);
   }
 
-  const mapper = new RepoMapper(repoDir);
+  let mapper = new RepoMapper(repoDir);
   const maps = mapper.mapAll();
   const nSymbols = maps.reduce((n, m) => n + m.symbols.length, 0);
   const nEdges = maps.reduce((n, m) => n + m.edges.length, 0);
@@ -104,12 +128,7 @@ async function main(): Promise<void> {
     },
   });
 
-  // Files the server still has but the repo no longer does (deleted, or left over from
-  // an earlier repo state) are cleared too.
-  const local = new Set(maps.map((m) => m.file));
-  const stale: FileMap[] = [...sync.serverFiles()].filter((f) => !local.has(f)).map((file) => ({ file, symbols: [], edges: [] }));
-  const first = await pushAll(sync, [...maps, ...stale]);
-  log(`sent ${plural(first.sent, 'file')} to ${dbName} (${maps.length + stale.length - first.sent - first.failed} unchanged)`);
+  const first = await pushSnapshot(sync, maps, dbName);
 
   if (!values.watch) {
     sync.close();
@@ -117,7 +136,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Watch mode: batch events per DEBOUNCE_MS, handle batches one at a time.
+  // Watch mode: batch events (trailing debounce), handle batches one at a time.
   let pending = new Set<string>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let queue = Promise.resolve();
@@ -125,6 +144,13 @@ async function main(): Promise<void> {
   const handleBatch = async (paths: string[]) => {
     const rels = paths.map((p) => mapper.rel(p)).filter(isMappable);
     if (!rels.length) return;
+    if (rels.length > REBUILD_THRESHOLD) {
+      // A checkout or pull: per-file updates would be slow and see half-written states.
+      log(`${plural(rels.length, 'file')} changed at once; re-mapping the whole repo`);
+      mapper = new RepoMapper(repoDir);
+      await pushSnapshot(sync, mapper.mapAll(), dbName);
+      return;
+    }
     const targets = new Set(rels);
     for (const f of rels) for (const d of mapper.dependents(f)) targets.add(d); // before: deleted files' importers
     for (const f of rels) mapper.refresh(f);
@@ -142,7 +168,7 @@ async function main(): Promise<void> {
       const batch = [...pending];
       pending = new Set();
       queue = queue.then(() => handleBatch(batch)).catch((e) => console.error(`[mapper] watch: ${String(e)}`));
-    }, DEBOUNCE_MS);
+    }, pending.size > REBUILD_THRESHOLD ? BURST_DEBOUNCE_MS : DEBOUNCE_MS);
   };
 
   const watcher = watch(repoDir, {

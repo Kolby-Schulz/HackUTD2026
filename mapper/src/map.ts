@@ -12,6 +12,8 @@
 //   - their methods (static too, and arrow-function
 //     properties; not getters/setters or #private names)   kind 'method'
 // Interfaces, type aliases, enums, let/var and re-exports are not symbols.
+// JavaScript (.js/.jsx/.mjs/.cjs) follows the same rules: ES module exports only, so
+// CommonJS `module.exports = ...` / `exports.f = ...` files map to no symbols.
 //
 // Signatures are the declaration's own text with the body removed and whitespace
 // collapsed: "calculateFee(amount: number, rate: number): number". Nothing is inferred
@@ -25,7 +27,7 @@
 // (`x: Invoice`, `implements`, `typeof`) are not edges.
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Node, Project, SyntaxKind, ts, type SourceFile } from 'ts-morph';
 
 export type SymbolKind = 'function' | 'class' | 'method' | 'const';
@@ -380,15 +382,26 @@ export const SKIP_DIRS: ReadonlySet<string> = new Set(['node_modules', 'dist', '
  */
 const NON_SOURCE_DIRS: ReadonlySet<string> = new Set(['test', 'tests', '__tests__', 'scripts']);
 
-/** Whether a repo-relative path is app source the mapper maps (not tests, tooling, configs or .d.ts). */
+/**
+ * Whether a repo-relative path is app source the mapper maps: TypeScript or JavaScript,
+ * not tests, tooling, configs, .d.ts or minified bundles. JS files go through the same
+ * rules as TS (ES module exports only; CommonJS `module.exports = ...` is not mapped).
+ */
 export function isMappable(relPath: string): boolean {
   const parts = relPath.split(/[\\/]/);
   if (parts.some((p) => SKIP_DIRS.has(p) || NON_SOURCE_DIRS.has(p))) return false;
   const base = parts[parts.length - 1];
-  if (!/\.(ts|tsx|mts|cts)$/.test(base) || /\.d\.[mc]?ts$/.test(base)) return false;
-  if (/\.(test|spec)\.[mc]?tsx?$/.test(base)) return false;
-  if (/\.config\.[mc]?tsx?$/.test(base)) return false; // vitest.config.ts and friends
+  if (!/\.[mc]?[jt]sx?$/.test(base) || /\.d\.[mc]?ts$/.test(base)) return false;
+  if (/\.(test|spec)\.[mc]?[jt]sx?$/.test(base)) return false;
+  if (/\.config\.[mc]?[jt]sx?$/.test(base)) return false; // vitest.config.ts and friends
+  if (/\.min\.[mc]?js$/.test(base)) return false;
   return true;
+}
+
+/** A .js next to a .ts of the same name is build output (tsc without outDir), not source. */
+function isCompiledOutput(abs: string): boolean {
+  const m = /^(.*)\.([mc]?)jsx?$/.exec(abs);
+  return Boolean(m && ['ts', 'tsx'].some((ext) => existsSync(`${m[1]}.${m[2]}${ext}`)));
 }
 
 function walk(dir: string, root: string, out: string[]): void {
@@ -396,27 +409,132 @@ function walk(dir: string, root: string, out: string[]): void {
     if (entry.isDirectory()) {
       if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) walk(join(dir, entry.name), root, out);
     } else if (entry.isFile()) {
-      const rel = toRel(root, join(dir, entry.name));
-      if (isMappable(rel)) out.push(rel);
+      const abs = join(dir, entry.name);
+      const rel = toRel(root, abs);
+      if (isMappable(rel) && !isCompiledOutput(abs)) out.push(rel);
     }
   }
 }
 
 const toRel = (root: string, abs: string) => relative(root, abs).split(sep).join('/');
 
+/** Repo-relative paths of every file the mapper would map in `repoDir` (no parsing). */
+export function listMappableFiles(repoDir: string): string[] {
+  const root = resolve(repoDir);
+  const out: string[] = [];
+  walk(root, root, out);
+  return out.sort();
+}
+
+// --- Size check -------------------------------------------------------------------
+
+/** Above this many files the mapper warns that the first map may be slow. */
+export const WARN_FILES = 2000;
+const DEFAULT_MAX_FILES = 5000;
+
+/** The hard limit: CONTRACT_MAPPER_MAX_FILES, default 5000. */
+export function maxFiles(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.CONTRACT_MAPPER_MAX_FILES);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_MAX_FILES;
+}
+
+/**
+ * Throws when `count` mappable files is over `max` (parsing that many would take minutes
+ * and a lot of memory); returns a warning to print when it is over WARN_FILES.
+ */
+export function checkFileCount(count: number, repoDir: string, max = maxFiles()): string | undefined {
+  if (count > max) {
+    throw new Error(
+      `mapper: ${repoDir} has ${count} source files, over the limit of ${max}. ` +
+        `Point --repo at a subfolder (e.g. one app or package), or raise CONTRACT_MAPPER_MAX_FILES.`,
+    );
+  }
+  if (count > WARN_FILES) return `${repoDir} has ${count} source files; the first map may be slow`;
+  return undefined;
+}
+
+// --- tsconfig -----------------------------------------------------------------------
+
+const DEFAULT_OPTIONS: ts.CompilerOptions = {
+  target: ts.ScriptTarget.ES2022,
+  module: ts.ModuleKind.ESNext,
+  moduleResolution: ts.ModuleResolutionKind.Bundler,
+  allowImportingTsExtensions: true,
+  strict: true,
+  noEmit: true,
+};
+
+/** Always on, overriding the repo's tsconfig: JS files are mapped too. */
+const FORCED_OPTIONS: ts.CompilerOptions = { allowJs: true };
+
+const NESTED_TSCONFIG_DEPTH = 4;
+
+/**
+ * Parses a tsconfig.json (comments allowed, `extends` followed). The file list is not
+ * expanded: the mapper picks its own files, and globbing every package would be slow.
+ */
+function readTsconfig(path: string): { raw: Record<string, unknown>; options: ts.CompilerOptions } | undefined {
+  const { config, error } = ts.readConfigFile(path, ts.sys.readFile);
+  if (error || !config || typeof config !== 'object') return undefined;
+  const parsed = ts.parseJsonConfigFileContent({ ...config, files: [], include: [] }, ts.sys, dirname(path), undefined, path);
+  return { raw: config as Record<string, unknown>, options: parsed.options };
+}
+
+/** A solution-style root: only `references` (maybe with files: []), no compiler options of its own. */
+function isSolutionConfig(raw: Record<string, unknown>): boolean {
+  if (!Array.isArray(raw.references)) return false;
+  return !raw.compilerOptions || (Array.isArray(raw.files) && raw.files.length === 0);
+}
+
+function findNestedTsconfigs(dir: string, depth: number, out: string[]): void {
+  if (depth > NESTED_TSCONFIG_DEPTH) return;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
+    const sub = join(dir, entry.name);
+    if (existsSync(join(sub, 'tsconfig.json'))) out.push(join(sub, 'tsconfig.json'));
+    findNestedTsconfigs(sub, depth + 1, out);
+  }
+}
+
+/**
+ * `paths` aliases from every nested tsconfig.json (monorepo packages), merged into one
+ * map whose targets are absolute, so they resolve the same from any file in the repo.
+ * An alias defined by several packages (`@/*`) keeps every package's targets in order;
+ * TypeScript uses the first one that exists.
+ */
+function nestedPaths(repoDir: string): Record<string, string[]> {
+  const configs: string[] = [];
+  findNestedTsconfigs(repoDir, 1, configs);
+  const merged: Record<string, string[]> = {};
+  for (const path of configs.sort()) {
+    const options = readTsconfig(path)?.options;
+    if (!options?.paths) continue;
+    const base = options.baseUrl ?? (options.pathsBasePath as string | undefined) ?? dirname(path);
+    for (const [alias, targets] of Object.entries(options.paths)) {
+      (merged[alias] ??= []).push(...targets.map((t) => resolve(base, t)));
+    }
+  }
+  return merged;
+}
+
+/**
+ * The repo's compiler setup. A root tsconfig.json with its own `paths` is used as is.
+ * Otherwise (no root tsconfig, a solution-style root with only `references`, or a root
+ * without aliases) the nested tsconfigs' `paths` are merged in, so imports like
+ * `@app/utils` in a monorepo package still resolve to mapped files. allowJs is forced on.
+ */
 function newProject(repoDir: string): Project {
-  const tsConfigFilePath = join(repoDir, 'tsconfig.json');
-  if (existsSync(tsConfigFilePath)) return new Project({ tsConfigFilePath, skipAddingFilesFromTsConfig: true });
-  return new Project({
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.ESNext,
-      moduleResolution: ts.ModuleResolutionKind.Bundler,
-      allowImportingTsExtensions: true,
-      strict: true,
-      noEmit: true,
-    },
-  });
+  const rootPath = join(repoDir, 'tsconfig.json');
+  const root = existsSync(rootPath) ? readTsconfig(rootPath) : undefined;
+  if (root?.options.paths) {
+    return new Project({ tsConfigFilePath: rootPath, skipAddingFilesFromTsConfig: true, compilerOptions: FORCED_OPTIONS });
+  }
+  const paths = nestedPaths(repoDir);
+  const extra: ts.CompilerOptions = { ...FORCED_OPTIONS, ...(Object.keys(paths).length ? { paths } : {}) };
+  if (root && !isSolutionConfig(root.raw)) {
+    return new Project({ tsConfigFilePath: rootPath, skipAddingFilesFromTsConfig: true, compilerOptions: extra });
+  }
+  return new Project({ compilerOptions: { ...DEFAULT_OPTIONS, ...extra } });
 }
 
 /**
@@ -432,8 +550,9 @@ export class RepoMapper {
     this.repoDir = resolve(repoDir);
     if (!existsSync(this.repoDir)) throw new Error(`mapper: repo not found: ${this.repoDir}`);
     this.project = newProject(this.repoDir);
-    const files: string[] = [];
-    walk(this.repoDir, this.repoDir, files);
+    const files = listMappableFiles(this.repoDir);
+    const warning = checkFileCount(files.length, this.repoDir); // before parsing: throws on huge repos
+    if (warning) console.warn(`[mapper] ${warning}`);
     for (const rel of files) this.project.addSourceFileAtPath(join(this.repoDir, rel));
   }
 
@@ -471,8 +590,8 @@ export class RepoMapper {
    */
   refresh(path: string): boolean {
     const file = this.rel(path);
-    if (!isMappable(file)) return false;
     const abs = join(this.repoDir, file);
+    if (!isMappable(file) || isCompiledOutput(abs)) return false;
     const sf = this.project.getSourceFile(abs);
     if (!existsSync(abs)) {
       if (sf) this.project.removeSourceFile(sf);
@@ -494,7 +613,7 @@ export class RepoMapper {
     const sf = this.project.getSourceFile(join(this.repoDir, file));
     if (!sf) {
       // Deleted: any file whose import specifiers mention it may now resolve differently.
-      const stem = file.replace(/\.[mc]?tsx?$/, '');
+      const stem = file.replace(/\.[mc]?[jt]sx?$/, '');
       const base = stem.slice(stem.lastIndexOf('/') + 1);
       return this.files().filter((f) =>
         this.project

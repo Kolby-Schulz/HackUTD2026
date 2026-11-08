@@ -1,0 +1,11 @@
+{
+  // Comments are allowed in tsconfig files.
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "paths": {
+      "@app/*": ["./src/lib/*"], // alias to the lib folder
+    },
+  },
+}
