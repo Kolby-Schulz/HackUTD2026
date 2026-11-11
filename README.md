@@ -1,338 +1,85 @@
-# InSync
-
-Live coordination for AI coding agents. A shared SpacetimeDB server lets a team's
-coding agents see each other's plans as they work, so conflicting changes are caught
-while code is being written, not at merge time. A coordinator agent resolves
-conflicts and a live dashboard shows everything. Every model call goes through one
-provider switch: workers run on Claude Code, and the coordinator runs on NVIDIA Nemotron
-or Claude (`COORDINATOR_PROVIDER`).
+# InSync: live coordination for AI coding agents
 
 > InSync isn't another coding agent. It's what lets your team's coding agents work like a team.
 
-Built at HackUTD 2026 (final submission build). Live dashboard:
-**[hack-utd-2026.vercel.app](https://hack-utd-2026.vercel.app)** (pair it with a laptop running
-`npm run control`, see below). Full spec: [docs/SPEC.md](docs/SPEC.md).
+Built at HackUTD 2026. **[Live dashboard](https://hack-utd-2026.vercel.app)** · [Full spec](docs/SPEC.md) · [Guide](docs/guide.md)
 
-The project's working name was Contract, so the code still uses it: packages are `@contract/*`,
-env vars are `CONTRACT_*`, the per-repo config file is `contract.json` and the SpacetimeDB
-database is `contract-hackutd26`. InSync is the product name.
+![InSync dashboard after a run: the code map, each agent's status, the coordinator's rulings and the savings panel](docs/images/dashboard.png)
 
-![InSync dashboard during a live run: code map with changed symbols, agent cards, the conflict feed and the savings panel](docs/images/dashboard.png)
+## Inspiration
 
-## 60-second quickstart
+Everyone on a team now runs their own coding agent, and every one of those agents is blind to the
+others. Git only catches conflicts in the text. It misses two agents making incompatible decisions
+that merge cleanly and break later, or both writing the same helper. We wanted the fix to be
+infrastructure, not yet another agent.
 
-One laptop, the built-in demo repo, driven from the dashboard:
+## What it does
 
-From the repo root (the folder with `package.json`), on an up-to-date `main` (`npm run control`
-only exists there). First time only, copy `.env.example` to `.env` (`cp` on macOS/Linux/PowerShell,
-`copy` in Windows cmd) and set `SPACETIME_HOST=wss://maincloud.spacetimedb.com` and
-`SPACETIME_DB_NAME=contract-hackutd26`. Then:
+InSync is a shared server that coding agents connect to while they work. Each agent publishes a plan
+and claims the code it will change. When two plans collide, InSync catches it **while the code is
+being written, not at merge time**:
+
+1. **Broken dependency.** You changed a function another agent relies on, so that agent is paused and told why.
+2. **Duplicate code.** You're about to write something that already exists, so you're told to reuse it.
+3. **Claim contention.** Two agents want the same function, so the second one waits.
+
+A coordinator agent then makes one decision (who owns the change, what the other agent should do)
+and the paused agent carries on. The dashboard shows all of it live, plus the tokens saved.
+
+## Try it
+
+You need Node 22+, the [SpacetimeDB CLI](https://spacetimedb.com/install) and a logged-in
+[Claude Code](https://claude.com/claude-code). From the repo root:
 
 ```bash
-git checkout main
-git pull
+cp .env.example .env   # then set SPACETIME_HOST and SPACETIME_DB_NAME, see docs/guide.md
 npm install
 npm run control
 ```
 
-`npm run control` opens the dashboard, already paired to this laptop.
+`npm run control` opens the dashboard. In its **Chat** tab, say what you want built
+("Add late fees to invoices, and have another agent format receipt dates") and InSync splits the
+work across agents, catches their conflicts and merges the result. Two laptops, your own repo and
+every command are in the [guide](docs/guide.md).
 
-`npm error Missing script: "control"` means you're in the wrong folder or on an old branch:
-`cd` to the repo root and run `git checkout main`, `git pull`, then `npm install`.
-These commands work the same on macOS, Linux and Windows; run them one per line (Windows
-PowerShell 5.1 doesn't accept `&&`).
+## How we built it
 
-In the dashboard's **Chat** tab, type what you want built, the way you'd prompt a coding agent:
+- **SpacetimeDB** is the whole backend. The three rules run inside its reducers, so spotting a
+  conflict is instant and costs no tokens; every agent and dashboard just subscribes to the tables.
+- **Worker agents** are Claude Code sessions in their own git worktrees, joined to InSync through an
+  MCP server and edit hooks. Any MCP-capable agent (Cursor, Codex) can join too.
+- **The coordinator** makes one model call per conflict, on NVIDIA Nemotron or Claude.
+- **The code mapper** turns a repo into functions and call edges (TypeScript and JavaScript, plus
+  Python, Go, Java, Rust, Ruby, PHP, C# and C/C++ with tree-sitter).
+- **The dashboard** is React and Vite, hosted on Vercel, with a small local daemon that starts agents.
 
-> Add late fees to invoices, and have another agent format receipt dates.
-
-InSync plans it, starts a coordinator and a session, puts one agent on each independent
-piece, catches the conflicts between them while they type, and merges and runs the checks when
-they finish. A second laptop joins the same run with `npm run control` and the same `.env`.
-
-## The dashboard
-
-An editor-style workbench (VS Code layout, InSync styling from [DESIGN.md](DESIGN.md)). Every
-panel is a live SpacetimeDB subscription, so every laptop and browser sees the same run.
-
-- **Chat**: say what to build; InSync splits it across agents and runs the whole session.
-  Messages sent while agents work reach them as follow-ups.
-- **Agents** (side bar): each agent online, its status and what it's working on.
-- **Code map**: the repo's functions and call edges, with what each agent is changing, creating
-  or removing highlighted as it happens. Focuses on agent work on large repos.
-- **Changes**: the agents' actual edits next to the code map.
-- **Control**: start and stop the coordinator, session, workers, judge, merge and reset on your
-  own laptop, with each process's output; lists the other laptops online.
-- **Savings** (bottom panel): conflicts caught, average time to resolve, tokens and dollars
-  saved; click a number to see where it came from.
-
-Light and dark themes.
-
-## Architecture
-
-Agents never talk to each other. Everything goes through one SpacetimeDB module: agents write
-plans, claims and change reports with reducers, and every other process (the other agents, the
-coordinator, the dashboard) gets the result pushed to it through a subscription.
-
-```mermaid
-flowchart LR
-    subgraph L1[Laptop 1]
-        A[Agent A<br/>Claude Code in a worktree]
-        MA[InSync MCP server<br/>+ edit hooks]
-        A <--> MA
-    end
-    subgraph L2[Laptop 2]
-        B[Agent B<br/>Claude Code in a worktree]
-        MB[InSync MCP server<br/>+ edit hooks]
-        B <--> MB
-    end
-    subgraph DB[SpacetimeDB module · server/]
-        R[Reducers<br/>publish_plan · claim_symbol<br/>report_change · resolve_conflict]
-        T[(Tables<br/>symbol · plan · claim<br/>conflict · decision · instruction<br/>token_usage · saving)]
-        R --> T
-        R -.->|Rules 1-3 run inside<br/>the reducer, in ms| R
-    end
-    MA -->|reducer calls| R
-    MB -->|reducer calls| R
-    T -.->|subscriptions| MA
-    T -.->|subscriptions| MB
-    M[Code mapper<br/>repo → symbol rows] -->|upsert_symbols| R
-    C[Coordinator<br/>one decide call per conflict] -->|resolve_conflict| R
-    T -.->|conflict WHERE status='open'| C
-    T -.->|every table, live| D[Dashboard<br/>React · hosted or local]
-    D -->|create_task · send_instruction| R
-    LLM[packages/llm<br/>Claude Code today · Nemotron] --- A
-    LLM --- B
-    LLM --- C
-```
-
-- **Reducers can't reach the network**, so anything that calls a model or reads files (agents,
-  coordinator, mapper) is a Node process that connects as a client.
-- **Detection is free and instant.** The three rules below run inside `publish_plan`,
-  `claim_symbol` and `report_change`. The coordinator model is only called after a rule fires,
-  and its tokens are logged against InSync on the scoreboard.
-- **Every panel is a subscription.** The dashboard writes nothing except new tasks and
-  operator messages; two laptops and a hosted dashboard all see the same rows.
-
-The end-to-end story, in order:
-
-1. The mapper loads the repo's symbols and call edges into `symbol` and `symbol_edge`.
-2. Agent A publishes a plan to change how `calculateFee` rounds, and claims it.
-3. Agent B is midway through checkout code that calls `calculateFee`; its plan lists it as a dependency.
-4. A's edit hook sees the signature change and calls `report_change`. Rule 1 finds B's dependency,
-   opens a `conflict` row, sets B to `paused` and inserts an `instruction` for B.
-5. B's MCP server gets the push and stops B mid-task. The coordinator gets the same push.
-6. The coordinator makes one `decide()` call: A owns `calculateFee`, B updates to the new rounding.
-   It writes a `decision` row with the reason and resolves the conflict.
-7. B resumes with the new instruction. Both branches merge cleanly and the tests pass.
-
-## How the rules work
-
-All three are deterministic, run inside the reducer that receives the write, and never open a
-second `open` conflict for the same kind, symbol and agent pair.
-
-| Rule | Fires in | Trigger | What happens |
-| --- | --- | --- | --- |
-| 1. Broken dependency | `report_change` | X changes symbol S's signature or behavior, and Y's active plan depends on S, or modifies or creates a caller of S (`symbol_edge`, up to 3 hops) | `broken_dependency` conflict, Y paused, instruction to Y to wait for the coordinator |
-| 2. Duplicate implementation | `publish_plan`, `report_change('created')` | X plans to create N and an existing symbol or another agent's planned create has the same normalized name, or the same parameter and return types plus a shared name token (`formatDate` vs `dateToString`) | `duplicate` conflict; if the match already exists, instruction to X: reuse it |
-| 3. Claim contention | `claim_symbol`, `publish_plan` | X claims or plans to modify S while Y holds an unexpired claim | claim refused, `claim_contention` conflict |
-
-Claims expire when an agent stops heartbeating (a scheduled reducer runs every 30 s), so a
-crashed laptop never holds a symbol forever. An edit hook in each worker's Claude Code session
-enforces the protocol locally: no edit to a mapped file without a declared plan, no edit to a
-mapped symbol without a claim.
-
-## Layout
+TypeScript · SpacetimeDB · Claude Code · NVIDIA Nemotron · MCP · React · Vite · ts-morph · tree-sitter · Vercel
 
 ```text
-server/              SpacetimeDB module: tables, reducers, conflict checks
-packages/client/     InSync client library + generated SpacetimeDB bindings
-packages/llm/        Shared model wrapper (Claude Code, Nemotron): calls, token + cost logging
-packages/mcp/        MCP server + edit hooks that put any coding agent on InSync
-agents/worker/       Worker agent loop and its tools
-agents/coordinator/  Coordinator agent loop and prompts
-agents/triage/       Optional Jev triage in front of the coordinator (stretch, TRIAGE=off)
-mapper/              Code mapper: repo -> symbol rows (TS/JS + tree-sitter languages)
-dashboard/           React web app (deployed to Vercel from main)
-demo-repo/           Small TypeScript codebase with planted conflicts + tests
-scripts/             control daemon, session, merge, join, judge, bench, demo, reset
-docs/                Spec, Devpost draft, rehearsal and join guides
-vault/               Shared notes for the coding agents that built this
+server/        SpacetimeDB module: tables, reducers, the three rules
+agents/        worker, coordinator and optional triage agents
+packages/      client library, MCP server, shared model wrapper
+mapper/        repo -> functions and call edges
+dashboard/     React web app
+demo-repo/     small codebase with planted conflicts
 ```
 
-## Setup
+## Challenges we ran into
 
-1. Node 22+ and the [SpacetimeDB CLI](https://spacetimedb.com/install).
-2. `npm install`
-3. `cp .env.example .env`, and log in to Claude Code on this laptop (`claude -p "hi"` should
-   answer). `NVIDIA_API_KEY` (free, from build.nvidia.com) is only needed if you set
-   `COORDINATOR_PROVIDER=nemotron`; everything runs on Claude Code without it.
-4. `spacetime start`, then publish `server/` and generate bindings into
-   `packages/client/src/bindings` (see the SpacetimeDB TypeScript quickstart).
+- A SpacetimeDB reducer that throws rolls back everything it wrote, including the conflict it had
+  just recorded. We record the conflict and return, and check the result on the client instead.
+- Claude Code re-sends about 40k tokens of prompt every turn, so raw token counts told us nothing.
+  The scoreboard leads with billed cost instead.
+- Our first live run missed the planted conflict, because the second agent depended on a caller
+  of the changed function, not the function itself. The dependency rule now follows callers up to three hops.
 
-## Shared cloud database (two laptops)
+## Accomplishments we're proud of
 
-The demo database `contract-hackutd26` runs on SpacetimeDB maincloud, so both laptops
-share it with no LAN setup. Only its owner's login can publish; anyone can connect.
-
-1. In the repo root `.env` (every part loads it, whatever folder it runs from):
-
-   ```bash
-   SPACETIME_HOST=wss://maincloud.spacetimedb.com
-   SPACETIME_DB_NAME=contract-hackutd26
-   ```
-
-2. Both laptops: `git pull && npm run reset`, so they start from the same `origin/main`.
-   Reset also takes back the edits and conflicts of a run that ended without a merge.
-3. Host laptop: `npm run coordinator` and `npm run dashboard` (each in its own terminal), then
-   `npm run session -- start`. That ends any open run, clears the last run's state, opens a
-   `with_contract` run and maps `demo-repo/`.
-4. Each laptop starts its own agent with a different `--id`, and tells it what to build:
-
-   ```bash
-   npm run worker -- --id agent-a --prompt "Add late fees to invoices..."
-   ```
-
-   Or start it with `--wait` and type the task into the dashboard's **New task** form:
-
-   ```bash
-   npm run worker -- --id agent-b --wait
-   ```
-
-   Workers branch from `origin/main`. When a worker finishes, it pushes `agent/<id>` to origin
-   (`--no-push` skips that).
-5. When every agent is done, run this on either laptop:
-
-   ```bash
-   npm run session -- merge
-   ```
-
-   It fetches every agent's branch, merges them in `.worktrees/merge-<run>` and runs unit
-   tests, typecheck and check-dupes. If those fail, a local agent gets a merge-fix pass.
-   Then it ends the run. Add `--integration` when the agents ran the two canned tasks
-   (`agents/worker/src/tasks.ts`), `--push` to push the merge branch, and `--land` to push a
-   green merge straight to the base branch (never forced; it refuses if the base moved).
-
-To check who is online (a worker heartbeats every 15 s and goes stale after 60 s):
-
-```bash
-spacetime sql --server maincloud contract-hackutd26 "SELECT id, machine, status, last_heartbeat FROM agent"
-```
-
-`npm run demo` stays the single-laptop A/B benchmark (both modes, canned tasks, scoreboard).
-
-After a change to `server/`, the owner republishes with `npm run publish:cloud -w @contract/server`.
-Keep live tests local (they wipe their database); they default to `ws://localhost:3000`.
-
-## Running it from the dashboard
-
-The easiest way: open the dashboard's **Chat** tab and say what you want, the way you'd prompt a
-coding agent ("Add late fees to invoices, and have another agent format receipt dates").
-InSync plans it (one `decide()` call through `packages/llm`), starts the coordinator and a
-session if they aren't running, puts one agent on each independent piece, and merges and runs
-the checks when they all finish. While agents work, follow-ups ("make it round half up") go to
-them as messages. It needs one daemon running on the laptop
-that does the work:
-
-In the repo root (older branches have no control script):
-
-```bash
-git checkout main
-git pull
-npm install
-npm run control
-```
-
-On the first run it opens the dashboard in your browser, already linked to this laptop.
-
-The daemon connects out to SpacetimeDB as this laptop's `machine` row; nothing listens on a port,
-so the hosted dashboard drives it the same as a local one. Set `CONTRACT_DASHBOARD_URL` to your
-hosted dashboard so the link points there (default `http://localhost:5173`). Pairing is once per
-browser: the code works once, expires after 10 minutes, and never reaches the database (the
-browser sends a hash of it with its own identity). Press Enter in the daemon's terminal for a new
-code. When no browser is paired yet, the daemon opens the link itself (`--no-open` to skip,
-`--open` to force). The daemon keeps its identity in `.contract/identities.json`, so pairings survive restarts.
-The code only ever appears in the terminal on purpose: the dashboard is a public page, so a code or
-"pair" button shown there would let anyone who opens it run commands on your laptop. Seeing the
-terminal is the proof that you're at the laptop. A private/Incognito window forgets its identity
-when closed, so it needs a new code each time; use a normal window to pair once.
-**Manual controls** under the chat start and stop each piece yourself (coordinator, session,
-workers, judge, merge, reset) and show each process's output. Only paired browsers can send it
-commands, every command goes through a fixed allowlist, and it runs things only on the laptop
-it runs on (each laptop runs its own). Workers push `agent/<id>` to origin as usual.
-
-**Several people, one dashboard.** Each browser drives only the laptop it paired with, so pair with
-the laptop whose terminal printed the code (yours), and have teammates run `npm run control` on
-their own laptops and pair their own browsers. Everyone still sees the same run, agents, chat and
-changes, because they share one database; the Control tab lists the other laptops online and the
-repo each one is on. If two laptops have the same hostname, the second daemon picks
-`<hostname>-xxxx` and remembers it in `.contract/control.json` (`--machine <name>` overrides).
-
-## Joining from a new laptop
-
-```bash
-npm run join -- --agent agent-b --name "Agent B" --owner Bob
-```
-
-Checks Node, `.env`, the `claude` login and git, registers the agent, and prints the worker
-command. Only one coordinator is active per database: a second one stands by and takes over
-if the first stops (a second watching mapper refuses to start). Rehearsal steps and network
-fallbacks: `docs/two-laptop-rehearsal.md`.
-
-To join from your own Claude Code, Cursor or Codex session instead of our worker:
-`npm run join -- --agent dana --client claude-code` (see `docs/join-contract.md`).
-
-## Your own repo
-
-InSync works on any git repository, not only `demo-repo/` (issue #18). The easiest way:
-run `npm run control`, open the dashboard's **Chat** tab and paste a GitHub link
-(`owner/name` works too) into **Repository**. From the command line, pick it with
-`--repo <path|git URL>` or `CONTRACT_TARGET` in `.env`; a folder inside a repo works too.
-
-```bash
-npm run session -- start --repo ../my-app --tasks tasks.json   # maps it, queues tasks
-npm run worker -- --id agent-a --repo ../my-app --wait          # on each laptop
-npm run session -- merge --repo ../my-app                       # merge + run its checks
-npm run reset -- --repo ../my-app
-```
-
-`tasks.json` is `[{ "agent": "agent-a", "task": "Add a dark mode toggle" }]`.
-
-- **Checks.** The merge runs the commands in the target's `contract.json`
-  (`{ "checks": { "unit tests": "pytest -q" } }`), else `CONTRACT_TEST_CMD`, else what it
-  detects: `npm test`, `python -m pytest -q`, `go test ./...`, `cargo test`, `mvn -q test` /
-  `./gradlew test`, `bundle exec rspec`, `vendor/bin/phpunit`, `dotnet test`. Workers may run
-  those without asking.
-- **Dependencies.** Each worker worktree and the merge worktree get an install step detected
-  from lockfiles (`npm ci`, `pnpm`/`yarn`/`bun install`, a `.venv` with pip, `uv sync`,
-  `poetry install`, `go mod download`, `cargo fetch`, `bundle install`, `composer install`,
-  `dotnet restore`). Tools missing on the laptop are skipped. Override with
-  `"install": "make deps"` in `contract.json`, or turn it off with `"install": false`.
-  `node_modules`, `.venv` and friends are never committed to agent branches.
-- **Worktrees.** The demo's are `.worktrees/<id>`; another repo's are
-  `.worktrees/<name>-<hash>/<id>`, so switching repos never reuses a folder.
-- **Push access.** The repo needs an `origin` you can push to for the two-laptop flow
-  (workers push `agent/<id>` there); a local-only repo works on one laptop.
-- **Code map folders.** Tests and tooling folders (`test/`, `tests/`, `__tests__/`, `scripts/`)
-  are left out of the code map. If your app's code lives in one, or a folder should never be
-  mapped, say so in `contract.json`: `"map": { "include": ["scripts"], "exclude": ["demo-repo"] }`.
-  This monorepo's own `contract.json` does exactly that, so InSync can run on itself
-  (`--repo .`); keep agents out of `server/` there, since a schema change needs
-  `npm run generate -w @contract/server` and a publish, which no agent should do.
-- **Languages.** The code map reads TypeScript and JavaScript (ES modules), plus Python, Go,
-  Java, Rust, Ruby, PHP, C# and C/C++ through tree-sitter. For those, call edges are matched by
-  name, so they're approximate.
-
-## Benchmark
-
-`npm run bench` runs every scenario in `scripts/scenarios.ts` (the planted rounding +
-duplicate case, a duplicate helper, claim contention, a signature change with several
-callers, and a no-conflict control) in both modes, then rewrites this table
-(`--scenarios a,b --runs N` to narrow it; `--report-only` to rebuild it from recorded runs).
-
-The table below is a first, small sample (1 run per mode, 2 scenarios, generated with
-`npm run bench -- --scenarios claim-contention,control --runs 1`); run the full benchmark
-(`npm run bench -- --runs 3`) before quoting a number.
+- Conflicts caught while agents are typing, on two laptops, with the second agent paused and
+  resumed on its own.
+- It works on any git repo, in any language the mapper reads: paste a GitHub link into the dashboard.
+- On the claim-contention scenario, InSync cut cost by 66% and turned a broken merge into a clean one.
+  That is a single run per mode, so treat it as a first result:
 
 <!-- bench:begin -->
 Across 2 scenario(s) and 4 runs, InSync saved **26%** of the cost (0% of tokens) and left 0/2 merges broken vs 1/2 without it.
@@ -345,49 +92,16 @@ Across 2 scenario(s) and 4 runs, InSync saved **26%** of the cost (0% of tokens)
 _Generated 2026-11-08T07:33:30.039Z by `npm run bench`. Averages per run; tokens include cache reads (cost is what was billed)._
 <!-- bench:end -->
 
-## Security
+## What's next
 
-The demo database is public to connect to, so the server checks identity. Agents can only write
-as themselves. Opening and ending runs, creating tasks and resetting need an operator: a registered
-agent, a laptop's control daemon, or a dashboard paired with one. Only the mapper holding the
-`mapper` lock can rewrite the code map, and reset refuses while agents are still working. The
-control daemon only takes commands from browsers paired with a one-time code from its own terminal,
-through a fixed allowlist. Secrets stay in `.env`, which is never committed.
+- Nemotron workers next to the Nemotron coordinator.
+- Jev triage in front of the coordinator, for sub-second rulings on the easy conflicts.
+- A hosted, always-on InSync, so a team can point their agents at it in a minute.
 
-## Tests
+## A note on the name
 
-```bash
-npm test             # 536 unit tests across every part, no server needed (~5 s)
-npm run typecheck
-npm run test:live -w @contract/server   # live tests against a local SpacetimeDB (see server/test-live/)
-```
-
-Live tests publish to a throwaway local database; never point them at Maincloud.
-
-## Limits and what's next
-
-- Workers run on Claude Code; the coordinator runs on Nemotron or Claude. Nemotron workers are next.
-- The benchmark above is a small sample; the full `--runs 3` run is the number to quote.
-- Call edges outside TypeScript/JavaScript are matched by name, so Rule 1 is approximate there.
-- Jev triage (sub-second rulings on easy conflicts) is optional and off by default (`TRIAGE=off`).
-
-## Commands
-
-```bash
-npm run control                       # dashboard daemon for this laptop (start here)
-npm run join -- --agent agent-b       # set up a new laptop or your own coding agent
-npm run mapper -- --repo ../demo-repo --watch
-npm run coordinator
-npm run worker -- --id agent-a --task 1 --mode with_contract
-npm run worker -- --id agent-b --prompt "..."   # or --wait (dashboard New task form)
-npm run session -- start | merge [--push] [--land]
-npm run judge                         # guarded agent that runs tasks typed into the Judge box
-npm run bench -- --runs 3             # A/B benchmark, rewrites the table above
-npm run dashboard
-npm run demo -- --mode without_contract --seed 7
-npm run reset
-npm run typecheck
-```
+InSync is the product name. We called it Contract while building, so the code still does: packages
+are `@contract/*`, the config file is `contract.json` and the database is `contract-hackutd26`.
 
 ## License
 
